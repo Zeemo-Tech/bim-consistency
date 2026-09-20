@@ -1,0 +1,564 @@
+.result-container {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-color: #f5f7fa;
+  overflow: hidden;
+
+  // 顶部数据选择区
+  .data-selector {
+    display: flex;
+    justify-content: space-between;
+    background: #fff;
+    border-bottom: 1px solid #e8e8e8;
+    padding: 10px 20px;
+    margin: 0 !important;
+    width: 100% !important;
+
+    .selector-form-wrap {
+      .el-form {
+        margin: 0;
+
+        .el-form-item {
+          margin-bottom: 0;
+          margin-right: 16px;
+
+          .el-form-item__label {
+            color: #666;
+            font-size: 13px;
+            padding-right: 8px;
+          }
+
+          .el-select {
+            width: 160px;
+          }
+        }
+      }
+
+      .readonly-value {
+        min-width: 160px;
+        padding: 6px 10px;
+        border-radius: 4px;
+        background: #f5f7fa;
+        border: 1px solid #e4e7ed;
+        color: #606266;
+        font-size: 13px;
+        line-height: 1.4;
+        box-sizing: border-box;
+      }
+    }
+  }
+
+  // 图纸轨迹小窗口（浮层，可拖动）
+  .mini-map-float {
+    position: absolute;
+    z-index: 50;
+    width: 360px;
+    touch-action: none;
+
+    &.is-dragging {
+      cursor: grabbing;
+    }
+
+    :deep(.small-window-header) {
+      cursor: grab;
+      user-select: none;
+    }
+  }
+  .panel-title-wrap {
+    display: flex;
+    width: 25%;
+    justify-content: space-between;
+  }
+
+  // 主内容区：二分屏布局
+  .main-content {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 1px;
+    background: #e8e8e8;
+    overflow: hidden;
+    position: relative;
+
+    // 公共面板样式
+    .gaussian-result-panel,
+    .panorama-view-panel,
+    .bim-view-panel,
+    .pointcloud-view-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #1a1a1a;
+      position: relative;
+      overflow: hidden;
+
+      // 面板头部
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        background: linear-gradient(135deg, #2c2c2c 0%, #1a1a1a 100%);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        z-index: 10;
+
+        .panel-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: #e0e0e0;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+
+          &::before {
+            content: '';
+            display: inline-block;
+            width: 3px;
+            height: 16px;
+            background: linear-gradient(135deg, #409eff 0%, #67c23a 100%);
+            border-radius: 2px;
+          }
+        }
+
+        .panel-controls {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+
+          .el-button.is-first-person-active,
+          .el-button.is-first-person-active:hover,
+          .el-button.is-first-person-active:focus,
+          .el-button.is-first-person-active:active {
+            color: #fff !important;
+            background:
+              radial-gradient(
+                circle at 30% 30%,
+                rgba(255, 255, 255, 0.34) 0%,
+                rgba(255, 255, 255, 0) 42%
+              ),
+              linear-gradient(
+                135deg,
+                #1f8cff 0%,
+                #25c59a 55%,
+                #72df63 100%
+              ) !important;
+            border-color: rgba(80, 190, 255, 0.92) !important;
+            transform: translateY(-1px) scale(1.04) !important;
+            box-shadow:
+              0 0 0 2px rgba(80, 190, 255, 0.2),
+              0 10px 24px rgba(31, 140, 255, 0.34),
+              0 0 22px rgba(37, 197, 154, 0.28) !important;
+          }
+
+          .el-button.is-first-person-active .el-icon {
+            color: #fff !important;
+            filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.35));
+          }
+
+          .el-button.is-first-person-active:hover,
+          .el-button.is-first-person-active:focus-visible {
+            border-color: rgba(119, 223, 99, 0.95) !important;
+            transform: translateY(-1px) scale(1.06) !important;
+            box-shadow:
+              0 0 0 2px rgba(114, 223, 99, 0.22),
+              0 12px 28px rgba(31, 140, 255, 0.36),
+              0 0 28px rgba(114, 223, 99, 0.3) !important;
+          }
+        }
+      }
+
+      // 空状态占位符
+      .empty-placeholder {
+        position: absolute;
+        top: 50px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #2c2c2c;
+        z-index: 1;
+
+        .placeholder-content {
+          text-align: center;
+          padding: 40px;
+
+          .placeholder-icon {
+            font-size: 64px;
+            color: #666;
+            margin-bottom: 16px;
+          }
+
+          .placeholder-text {
+            font-size: 14px;
+            color: #fbf6f6;
+            margin: 0;
+          }
+        }
+      }
+
+      // 视图信息栏
+      .view-info {
+        position: absolute;
+        top: 60px;
+        left: 16px;
+        right: 16px;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 8px 12px;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(10px);
+        border-radius: 4px;
+        font-size: 12px;
+        color: #e0e0e0;
+
+        span {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          white-space: nowrap;
+
+          &::before {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 4px;
+            background: #4caf50;
+            border-radius: 50%;
+            margin-right: 4px;
+          }
+        }
+      }
+    }
+
+    // 高斯模型面板
+    .gaussian-result-panel {
+      .gaussian-container {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        background: #1a1a2e;
+
+        canvas {
+          display: block;
+          width: 100%;
+          height: 100%;
+        }
+
+        // 方向控制器
+        .direction-controls {
+          position: absolute;
+          bottom: 20px;
+          left: 20px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          z-index: 9;
+          user-select: none;
+          padding: 12px;
+          background: rgba(10, 10, 10, 0.15);
+          backdrop-filter: blur(8px);
+          border-radius: 16px;
+          border: 1px solid rgba(255, 255, 255, 0.05);
+          transition: all 0.3s ease;
+
+          &:hover {
+            background: rgba(10, 10, 10, 0.25);
+            backdrop-filter: blur(12px);
+            border-color: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+          }
+
+          .arrow-horizontal {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+
+          .arrow-btn {
+            width: 52px;
+            height: 52px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(12px) saturate(150%);
+            border: 1.5px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+
+            // 光晕效果
+            &::before {
+              content: '';
+              position: absolute;
+              inset: 0;
+              background: radial-gradient(
+                circle at center,
+                rgba(64, 158, 255, 0.1),
+                transparent 70%
+              );
+              opacity: 0;
+              transition: opacity 0.3s ease;
+            }
+
+            .el-icon {
+              color: rgba(255, 255, 255, 0.65);
+              font-size: 24px;
+              transition: all 0.3s ease;
+              position: relative;
+              z-index: 1;
+            }
+
+            &:hover {
+              background: rgba(64, 158, 255, 0.28);
+              backdrop-filter: blur(16px) saturate(180%);
+              border-color: rgba(64, 158, 255, 0.5);
+              transform: scale(1.1);
+              box-shadow:
+                0 8px 24px rgba(64, 158, 255, 0.4),
+                0 0 20px rgba(64, 158, 255, 0.2);
+
+              &::before {
+                opacity: 1;
+              }
+
+              .el-icon {
+                color: rgba(255, 255, 255, 1);
+                transform: scale(1.15);
+                filter: drop-shadow(0 0 8px rgba(64, 158, 255, 0.6));
+              }
+            }
+
+            &:active {
+              transform: scale(0.98);
+              background: rgba(64, 158, 255, 0.4);
+              box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+            }
+
+            // 方向特定的动画效果
+            &.arrow-up:hover .el-icon {
+              animation: bounce-up 0.6s ease-in-out infinite;
+            }
+
+            &.arrow-down:hover .el-icon {
+              animation: bounce-down 0.6s ease-in-out infinite;
+            }
+
+            &.arrow-left:hover .el-icon {
+              animation: bounce-left 0.6s ease-in-out infinite;
+            }
+
+            &.arrow-right:hover .el-icon {
+              animation: bounce-right 0.6s ease-in-out infinite;
+            }
+          }
+        }
+      }
+    }
+
+    // 全景图面板
+    .panorama-view-panel {
+      // 全景图朝向调试面板
+      .panorama-debug {
+        position: absolute;
+        top: 60px;
+        right: 10px;
+        z-index: 100;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 8px;
+        padding: 0 16px;
+        color: #fff;
+        font-size: 12px;
+        min-width: 240px;
+        max-height: 0;
+        opacity: 0;
+        transform: translateY(-8px) scale(0.98);
+        overflow: hidden;
+        pointer-events: none;
+        transition:
+          max-height 0.22s ease,
+          opacity 0.22s ease,
+          transform 0.22s ease,
+          padding 0.22s ease;
+
+        &.is-open {
+          max-height: 260px;
+          opacity: 1;
+          transform: translateY(0) scale(1);
+          padding: 12px 16px;
+          pointer-events: auto;
+        }
+
+        .debug-title {
+          font-weight: bold;
+          margin-bottom: 10px;
+          color: #409eff;
+          font-size: 14px;
+        }
+
+        .debug-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 8px;
+
+          span {
+            white-space: nowrap;
+          }
+        }
+
+        .debug-actions {
+          display: flex;
+          gap: 8px;
+          margin-top: 12px;
+        }
+      }
+
+      .panorama-container {
+        position: absolute;
+        top: 50px; // 面板头部高度
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        height: calc(100% - 50px);
+        background: #1a1a1a;
+        cursor: grab;
+
+        &:active {
+          cursor: grabbing;
+        }
+
+        canvas {
+          display: block;
+          width: 100%;
+          height: 100%;
+        }
+      }
+    }
+  }
+
+  .panel-hint {
+    color: #fff;
+    font-size: 12px;
+  }
+
+  .bim-file-input {
+    display: none;
+  }
+
+  .tileset-input {
+    width: 320px;
+
+    :deep(.el-input__wrapper) {
+      background: rgba(255, 255, 255, 0.08);
+      box-shadow: none;
+    }
+
+    :deep(.el-input-group__append) {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+  }
+
+  .bim-viewport,
+  .pointcloud-viewport {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  // 箭头弹跳动画
+  @keyframes bounce-up {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-4px);
+    }
+  }
+
+  @keyframes bounce-down {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(4px);
+    }
+  }
+
+  @keyframes bounce-left {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    50% {
+      transform: translateX(-4px);
+    }
+  }
+
+  @keyframes bounce-right {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    50% {
+      transform: translateX(4px);
+    }
+  }
+
+  // 响应式布局
+  @media (max-width: 1200px) {
+    .data-selector {
+      flex-direction: column !important;
+
+      .selector-form-wrap {
+        .el-form {
+          :deep(.el-form-item) {
+            .el-select {
+              width: 140px;
+            }
+          }
+        }
+      }
+    }
+
+  }
+
+  @media (max-width: 768px) {
+    .data-selector {
+      padding: 12px;
+
+      .selector-form-wrap {
+        .el-form {
+          :deep(.el-form-item) {
+            margin-right: 8px;
+
+            .el-select {
+              width: 110px;
+            }
+
+            .el-form-item__label {
+              font-size: 12px;
+            }
+          }
+        }
+      }
+    }
+
+  }
+}

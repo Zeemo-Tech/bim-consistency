@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+
+sh "$(dirname "$0")/../scripts/check-branch-deps.sh" "${ORIG_HEAD:-}" HEAD
