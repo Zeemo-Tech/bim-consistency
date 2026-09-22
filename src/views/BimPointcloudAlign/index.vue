@@ -81,12 +81,14 @@
     <div
       class="main-content calibration-main"
       :class="{
-        'is-report-step': activeWorkflowStep === 3,
-        'is-panel-hidden': !showPanel && activeWorkflowStep !== 3,
+        'is-report-step': activeWorkflowStep === 4,
+        'is-cad-step': activeWorkflowStep === 3,
+        'is-panel-hidden':
+          !showPanel && (activeWorkflowStep === 1 || activeWorkflowStep === 2),
       }"
     >
       <AnalysisReportView
-        v-if="activeWorkflowStep === 3"
+        v-if="activeWorkflowStep === 4"
         class="report-preview-workspace"
         :project-id="projectId"
         :scan-file-id="scanFileId"
@@ -94,9 +96,16 @@
         :scan-file-name="pointCloudNameForDisplay"
       />
 
+      <CadCalibrationView
+        v-if="activeWorkflowStep === 3"
+        embedded
+        @prev-step="openWorkflowStep(2)"
+        @next-step="openWorkflowStep(4)"
+      />
+
       <!-- 左侧垂直工具栏 -->
       <aside
-        v-if="activeWorkflowStep !== 3"
+        v-if="activeWorkflowStep === 1 || activeWorkflowStep === 2"
         class="left-toolbar view-toolbar"
         aria-label="视图工具"
       >
@@ -475,7 +484,7 @@
 
       <!-- 中间3D视图区域 -->
       <div
-        v-show="activeWorkflowStep !== 3"
+        v-show="activeWorkflowStep === 1 || activeWorkflowStep === 2"
         ref="viewportEl"
         class="viewport viewport-shell three-view-pane"
       >
@@ -520,7 +529,9 @@
 
       <!-- 右侧控制面板 -->
       <div
-        v-if="showPanel && activeWorkflowStep !== 3"
+        v-if="
+          showPanel && (activeWorkflowStep === 1 || activeWorkflowStep === 2)
+        "
         id="alignment-control-panel"
         class="right-panel control-panel is-workflow-panel"
       >
@@ -546,7 +557,7 @@
               上一步
             </button>
             <button
-              v-if="activeWorkflowStep < 3"
+              v-if="activeWorkflowStep < 4"
               class="panel-step-count panel-next-step"
               type="button"
               :disabled="
@@ -1160,6 +1171,7 @@
               @load-remesh="handleLoadRemesh"
               @toggle-solid="toggleRemeshSolid"
               @toggle-wire="toggleRemeshWire"
+              @clear-remesh="handleClearRemeshResult"
               @load-c2m-ply="handleLoadC2MPly"
               @clear-c2m-scene="clearC2MScene"
               @c2m-viz-change="onC2mVizChange"
@@ -1183,6 +1195,7 @@
               @load-remesh="handleLoadRemesh"
               @toggle-solid="toggleRemeshSolid"
               @toggle-wire="toggleRemeshWire"
+              @clear-remesh="handleClearRemeshResult"
               @load-c2m-ply="handleLoadC2MPly"
               @clear-c2m-scene="clearC2MScene"
               @c2m-viz-change="onC2mVizChange"
@@ -1192,7 +1205,7 @@
         </div>
       </div>
       <button
-        v-if="activeWorkflowStep !== 3"
+        v-if="activeWorkflowStep === 1 || activeWorkflowStep === 2"
         type="button"
         class="right-panel-toggle"
         aria-controls="alignment-control-panel"
@@ -1265,6 +1278,7 @@ export default defineComponent({
 <script setup lang="ts">
 import {
   computed,
+  defineAsyncComponent,
   h,
   nextTick,
   onActivated,
@@ -1321,6 +1335,7 @@ import ScanBimComputePanel, {
   type C2MLoadPayload,
 } from './components/ScanBimComputePanel.vue'
 import AnalysisReportView from './components/AnalysisReportView.vue'
+import CadCalibrationLoading from './components/CadCalibrationLoading.vue'
 import ViewportToolGlyph from './components/ViewportToolGlyph.vue'
 import MeasurementToolbar, {
   type AnalysisMode,
@@ -1343,6 +1358,18 @@ import {
   getScanTilesAsset,
   getScanTilesetUrl,
 } from '@/api/fileManage'
+import { getScanCalibration } from '@/api/scan'
+import {
+  CAD_DEFAULT_PREVIEW_PARAMS,
+  prefetchCadCalibration,
+} from '@/views/data/drawing-calibration/utils/cadPrefetch'
+
+// CAD 校准页体积较大，按需懒加载，避免拖慢进入分析页面与步骤切换
+const CadCalibrationView = defineAsyncComponent({
+  loader: () => import('@/views/data/drawing-calibration/index.vue'),
+  loadingComponent: CadCalibrationLoading,
+  delay: 0,
+})
 
 const CALIBRATION_RETURN_KEY = 'calibration:return'
 
@@ -2275,9 +2302,15 @@ function onMeasureKeyDown(event: KeyboardEvent) {
 const tilesErrorTarget = ref(0)
 const tilesetZUpRotationX = -Math.PI / 2
 const showPanel = ref(true)
+/**
+ * 处于 CAD 校准/出报告步骤时挂起 3D 视口渲染：
+ * 视口是 v-show 隐藏的，但 TilesRenderer 仍会在每次 requestRender 时继续加载瓦片、
+ * 占用 CPU/网络，和 CAD 校准页的 DXF/预览请求抢资源，导致 CAD 很慢。
+ */
+const viewerSuspended = ref(false)
 
 // ---------- 分析工作流（配准 → 出报告）----------
-type WorkflowStepId = 1 | 2 | 3
+type WorkflowStepId = 1 | 2 | 3 | 4
 const workflowSteps = [
   {
     id: 1 as const,
@@ -2285,11 +2318,18 @@ const workflowSteps = [
     subtitle: '调整 BIM 与点云位置',
   },
   { id: 2 as const, title: '偏差对比', subtitle: '查看 Scan vs BIM 偏差' },
-  { id: 3 as const, title: '出报告', subtitle: '生成分析成果报告' },
+  {
+    id: 3 as const,
+    title: 'CAD与轨迹校准',
+    subtitle: '校准 CAD 图纸与巡检轨迹',
+  },
+  { id: 4 as const, title: '出报告', subtitle: '生成分析成果报告' },
 ]
 const requestedWorkflowStep = Number(getQueryString('step'))
 const activeWorkflowStep = ref<WorkflowStepId>(
-  requestedWorkflowStep === 2 ? 2 : requestedWorkflowStep === 3 ? 3 : 1,
+  ([1, 2, 3, 4] as const).includes(requestedWorkflowStep as WorkflowStepId)
+    ? (requestedWorkflowStep as WorkflowStepId)
+    : 1,
 )
 const activeWorkflowStepMeta = computed(
   () =>
@@ -2300,7 +2340,7 @@ const titleBlockSubtitle = computed(
   () =>
     `${activeWorkflowStepMeta.value.subtitle} · ${pointCloudNameForDisplay.value}`,
 )
-/** 偏差对比 / 出报告步骤需已完成并保存粗配准。 */
+/** 偏差对比 / CAD校准 / 出报告步骤需已完成并保存粗配准。 */
 const canOpenDeviationStep = computed(
   () =>
     Boolean(bimFileId.value && scanFileId.value) &&
@@ -2310,7 +2350,7 @@ const canOpenDeviationStep = computed(
 const canOpenReportStep = canOpenDeviationStep
 function workflowStepDisabled(step: WorkflowStepId): boolean {
   if (step === 1) return false
-  if (step === 3) {
+  if (step === 4) {
     return !canOpenDeviationStep.value || activeWorkflowStep.value < 2
   }
   return !canOpenDeviationStep.value
@@ -4691,23 +4731,36 @@ function clearScene() {
   applyClippingState()
 
   // 清理均匀化网格（实体 + 线框）
-  if (remeshWireGroup) {
-    ;[remeshWireGroup.solid, remeshWireGroup.wire].forEach((obj) => {
-      if (!obj) return
-      obj.parent?.remove(obj)
-      obj.geometry?.dispose?.()
-      ;(Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(
-        (m: THREE.Material) => m?.dispose?.(),
-      )
-    })
-    remeshWireGroup = null
-    hasRemeshMesh.value = false
-    remeshSolidHidden.value = false
-    remeshWireHidden.value = false
-    remeshWireAvailable.value = true
-  }
+  clearLoadedRemeshMesh()
 
   requestRender()
+}
+
+/** 作用：从场景移除已加载的均匀化网格结果（实体 + 线框）并复位状态。 */
+function clearLoadedRemeshMesh() {
+  if (!remeshWireGroup) {
+    hasRemeshMesh.value = false
+    return
+  }
+  ;[remeshWireGroup.solid, remeshWireGroup.wire].forEach((obj) => {
+    if (!obj) return
+    obj.parent?.remove(obj)
+    obj.geometry?.dispose?.()
+    ;(Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(
+      (m: THREE.Material) => m?.dispose?.(),
+    )
+  })
+  remeshWireGroup = null
+  hasRemeshMesh.value = false
+  remeshSolidHidden.value = false
+  remeshWireHidden.value = false
+  remeshWireAvailable.value = true
+  requestRender()
+}
+
+/** 作用：面板「清空结果」按钮：移除场景中的均匀化网格结果。 */
+function handleClearRemeshResult() {
+  clearLoadedRemeshMesh()
 }
 
 const refreshAfterPartialClear = () => {
@@ -6867,6 +6920,8 @@ function rollView(direction: -1 | 1) {
 /** 作用：执行一帧渲染（含控制器更新、tiles 更新与高亮 overlay 同步）。 */
 function renderFrame() {
   renderRequested = false
+  // CAD 校准/出报告步骤挂起渲染，避免 tileset 继续加载抢占 CAD 校准页的资源
+  if (viewerSuspended.value) return
   if (!renderer || !scene || !camera) return
   stats?.begin?.()
   controls?.update?.()
@@ -7414,6 +7469,36 @@ onMounted(() => {
     void autoLoadSceneResources(true)
   })
 })
+
+/** 作用：进入「偏差对比」步骤时后台预取 CAD 校准页数据（DXF + 点云预览）。 */
+async function prefetchCadForStep2() {
+  if (!projectId.value || !scanFileId.value) return
+  try {
+    const res = await getScanCalibration(projectId.value, scanFileId.value)
+    const cadFileId = Number(res?.data?.cadFileId)
+    if (!Number.isFinite(cadFileId) || cadFileId <= 0) return
+    await prefetchCadCalibration({
+      projectId: projectId.value,
+      scanFileId: scanFileId.value,
+      cadFileId,
+      previewParams: { ...CAD_DEFAULT_PREVIEW_PARAMS },
+    })
+  } catch {
+    // 预取失败静默，不影响正常流程
+  }
+}
+
+watch(
+  activeWorkflowStep,
+  (step) => {
+    // 进入 CAD 校准 / 出报告步骤时挂起 3D 渲染与 tileset 加载，返回配准/偏差步骤再恢复
+    viewerSuspended.value = step === 3 || step === 4
+    if (!viewerSuspended.value) requestRender()
+    // 进入偏差对比即预取 CAD 校准数据，切到第三步可直接用缓存
+    if (step === 2) void prefetchCadForStep2()
+  },
+  { immediate: true },
+)
 
 watch(showTransformHandles, () => {
   applyTransformSelection()

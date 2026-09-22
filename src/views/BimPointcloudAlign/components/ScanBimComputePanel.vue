@@ -155,27 +155,42 @@
             </div>
           </div>
 
-          <!-- 操作按钮 -->
-          <div class="compute-row compute-actions">
+          <!-- 操作按钮（重新布局：主操作 + 加载结果 + 重置） -->
+          <div class="remesh-actions">
             <el-button
               v-if="!running"
+              class="remesh-actions__primary"
               type="primary"
-              size="small"
               :disabled="!canRunRemesh"
               @click="handleRun"
             >
               {{ remeshActionText }}
             </el-button>
-            <el-button v-else type="danger" size="small" @click="handleStop">
+            <el-button
+              v-else
+              class="remesh-actions__primary"
+              type="danger"
+              @click="handleStop"
+            >
               停止计算
             </el-button>
+
+            <el-button
+              class="remesh-actions__load"
+              :loading="loadingToScene"
+              :disabled="!remeshReadyToUse || running"
+              @click="handleLoadHistory"
+            >
+              {{ meshLoaded ? '重新加载结果' : '加载结果' }}
+            </el-button>
+
             <el-button
               v-if="
                 !running &&
                 (remeshStatus?.status === 'processing' ||
                   remeshStatus?.status === 'queued')
               "
-              size="small"
+              class="remesh-actions__reset"
               type="warning"
               :loading="resettingRemesh"
               @click="handleResetRemesh"
@@ -184,10 +199,28 @@
             </el-button>
           </div>
 
-          <!-- 均匀化网格可视化开关（加载成功后才显示） -->
-          <div v-if="meshLoaded" class="remesh-control-bar">
-            <span class="remesh-label">均匀化结果可视化</span>
-            <div class="remesh-btns">
+          <!-- 结果操作与可视化（统一成一行，分组更清晰） -->
+          <div v-if="meshLoaded || result" class="remesh-result-bar">
+            <div class="remesh-result-bar__group">
+              <el-button
+                size="small"
+                :loading="downloadingPly"
+                :disabled="!remeshReadyToUse"
+                @click="handleDownloadPly"
+              >
+                下载 PLY
+              </el-button>
+              <el-button
+                size="small"
+                type="success"
+                :loading="loadingToScene"
+                :disabled="!remeshReadyToUse"
+                @click="handleLoadToScene"
+              >
+                加载到场景
+              </el-button>
+            </div>
+            <div v-if="meshLoaded" class="remesh-result-bar__group">
               <el-button
                 size="small"
                 :type="solidHidden ? 'default' : 'warning'"
@@ -211,29 +244,20 @@
                 </el-button>
                 <el-button v-else size="small" disabled>线框不可用</el-button>
               </el-tooltip>
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                @click="emit('clear-remesh')"
+              >
+                清空结果
+              </el-button>
             </div>
           </div>
 
           <div v-if="result" class="compute-result">
             <div class="result-header">
               <span class="result-title">处理结果</span>
-              <div class="result-actions">
-                <el-button
-                  size="small"
-                  :loading="downloadingPly"
-                  @click="handleDownloadPly"
-                >
-                  下载 PLY
-                </el-button>
-                <el-button
-                  size="small"
-                  type="success"
-                  :loading="loadingToScene"
-                  @click="handleLoadToScene"
-                >
-                  加载到场景
-                </el-button>
-              </div>
             </div>
             <div class="result-grid">
               <span class="result-cell head" />
@@ -720,6 +744,7 @@ const showC2mSection = computed(
 
 const emit = defineEmits<{
   (e: 'load-remesh', url: string): void
+  (e: 'clear-remesh'): void
   (e: 'toggle-solid'): void
   (e: 'toggle-wire'): void
   (e: 'load-c2m-ply', payload: C2MLoadPayload): void
@@ -2576,11 +2601,20 @@ function histBarColor(index: number): string {
   box-shadow: 0 6px 14px rgb(50 111 224 / 17%);
   font-size: 13px;
   font-weight: 650;
+
+  --el-button-text-color: #fff;
+  --el-button-hover-text-color: #fff;
+  --el-button-active-text-color: #fff;
 }
 
 .c2m-run-button .el-icon {
   margin-right: 7px;
   font-size: 16px;
+  color: #f4f8ff;
+}
+
+.c2m-run-button.el-button.is-disabled .el-icon {
+  color: #f4f8ff;
 }
 
 .c2m-preset-block {
@@ -3239,5 +3273,56 @@ function histBarColor(index: number): string {
     min-width: 0;
     margin-left: 0;
   }
+}
+
+/* ===== 网格均匀化：底部操作按钮重新布局 ===== */
+.remesh-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.remesh-actions :deep(.el-button) {
+  width: 100%;
+  height: 34px;
+  min-height: 34px;
+  margin: 0;
+  border-radius: var(--radius-sm);
+}
+
+.remesh-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.remesh-actions__reset {
+  grid-column: 1 / -1;
+}
+
+.remesh-result-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  margin-top: 12px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-sm);
+}
+
+.remesh-result-bar__group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.remesh-result-bar__group :deep(.el-button) {
+  margin: 0;
+}
+
+.remesh-result-bar__group :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 </style>

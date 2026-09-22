@@ -3065,6 +3065,11 @@
   background: var(--bg-page-deep);
 }
 
+.calibration-page .main-content.calibration-main.is-cad-step {
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--bg-page);
+}
+
 @media (max-width: 820px) {
   .calibration-page .main-content.calibration-main,
   .calibration-page .main-content.calibration-main.is-panel-hidden {

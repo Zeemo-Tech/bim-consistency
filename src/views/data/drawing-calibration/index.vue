@@ -1,8 +1,11 @@
 <template>
-  <div class="drawing-calibration-container">
+  <div
+    class="drawing-calibration-container"
+    :class="{ 'is-embedded': props.embedded }"
+  >
     <div class="page-header-shell">
-      <!-- 步骤2：CAD图纸与巡检轨迹校准（从 CalibrationDialog 跳转时显示） -->
-      <div v-if="isStep2Flow" class="topbar">
+      <!-- 步骤2：CAD图纸与巡检轨迹校准（内嵌到分析流程时整块 topbar 不显示） -->
+      <div v-if="isStep2Flow && !props.embedded" class="topbar">
         <div class="topbar-left">
           <div class="header-identity">
             <div class="header-title-row">
@@ -24,10 +27,10 @@
           </el-button>
           <el-button
             type="primary"
-            @click="loadData"
             :disabled="
               !formData.projectId || !formData.scanFileId || !formData.cadFileId
             "
+            @click="loadData"
           >
             重新加载
           </el-button>
@@ -95,10 +98,12 @@
           <div ref="selectorActionsRef" class="selector-actions">
             <el-button
               type="primary"
-              @click="loadData"
               :disabled="
-                !formData.projectId || !formData.scanFileId || !formData.cadFileId
+                !formData.projectId ||
+                !formData.scanFileId ||
+                !formData.cadFileId
               "
+              @click="loadData"
             >
               加载数据
             </el-button>
@@ -111,7 +116,9 @@
     <div class="viewer-section">
       <!-- 高度范围竖向滑块（左侧） -->
       <div class="height-sidebar">
-        <span class="height-label height-label-top">{{ heightSidebarTopLabel.toFixed(2) }}m</span>
+        <span class="height-label height-label-top">
+          {{ heightSidebarTopLabel.toFixed(2) }}m
+        </span>
         <div ref="heightRangeSelectorRef" class="height-slider-wrap">
           <el-slider
             v-model="heightRange"
@@ -125,13 +132,15 @@
             @change="onHeightRangeChange"
           />
         </div>
-        <span class="height-label height-label-bottom">{{ heightSidebarBottomLabel.toFixed(2) }}m</span>
+        <span class="height-label height-label-bottom">
+          {{ heightSidebarBottomLabel.toFixed(2) }}m
+        </span>
         <span class="height-label-title">高度范围</span>
       </div>
 
       <!-- LAS预览（DOM保留但隐藏，供内部渲染逻辑使用） -->
       <div class="viewer-panel las-panel-hidden">
-        <div class="canvas-container las-preview-container" ref="lasContainer">
+        <div ref="lasContainer" class="canvas-container las-preview-container">
           <img
             ref="previewImg"
             class="preview-img"
@@ -143,7 +152,7 @@
             class="overlay-canvas"
             :class="{ 'preview-loaded': previewData }"
             @click="onLasClick"
-          ></canvas>
+          />
         </div>
       </div>
 
@@ -152,7 +161,15 @@
         <div class="panel-title">CAD 图纸 + 轨迹叠加</div>
         <div class="canvas-container cad-preview-container">
           <div v-if="!cadViewer" class="empty-placeholder">
-            <div class="placeholder-content">
+            <div v-if="isStep2Flow" class="placeholder-content">
+              <el-icon class="placeholder-loading is-loading" :size="36">
+                <Loading />
+              </el-icon>
+              <p class="placeholder-text">
+                {{ statusText || '正在加载 CAD 图纸…' }}
+              </p>
+            </div>
+            <div v-else class="placeholder-content">
               <svg
                 class="placeholder-icon"
                 viewBox="0 0 24 24"
@@ -202,36 +219,50 @@
             ref="cadRoot"
             class="cad-root"
             :class="{ 'cad-loaded': cadViewer }"
-          ></div>
+          />
         </div>
       </div>
 
       <!-- 右侧对齐控件侧边栏 -->
-      <div ref="alignmentSidebarRef" class="alignment-sidebar" v-if="isCalibrationMode">
+      <div
+        v-if="isCalibrationMode && !sidebarCollapsed"
+        ref="alignmentSidebarRef"
+        class="alignment-sidebar"
+      >
         <div class="sidebar-controls">
-          <div class="sidebar-header">
-            <div class="header-title">
-              <div class="title-line">
-                <el-icon class="title-icon"><Operation /></el-icon>
-                <span class="title-text">轨迹对齐工具</span>
-                <el-button
-                  class="help-button"
-                  circle
-                  size="small"
-                  @click="openCalibrationTour"
-                >
-                  <el-icon><QuestionFilled /></el-icon>
-                </el-button>
-              </div>
+          <!-- 与前几个步骤一致的控制面板头部布局 -->
+          <div class="control-panel-header">
+            <div class="panel-heading">
+              <el-icon class="title-icon"><Operation /></el-icon>
+              <strong>CAD对齐</strong>
             </div>
-            <el-button
-              class="reset-button"
-              size="small"
-              @click="resetPointCloudTransform"
-            >
-              <el-icon><Refresh /></el-icon>
-              <span>重置</span>
-            </el-button>
+            <div class="panel-step-actions">
+              <el-button
+                class="help-button"
+                circle
+                size="small"
+                title="使用说明"
+                @click="openCalibrationTour"
+              >
+                <el-icon><QuestionFilled /></el-icon>
+              </el-button>
+              <button
+                class="panel-step-count panel-next-step panel-prev-step"
+                type="button"
+                @click="emit('prev-step')"
+              >
+                <el-icon aria-hidden="true"><DArrowLeft /></el-icon>
+                上一步
+              </button>
+              <button
+                class="panel-step-count panel-next-step"
+                type="button"
+                @click="emit('next-step')"
+              >
+                下一步
+                <el-icon aria-hidden="true"><DArrowRight /></el-icon>
+              </button>
+            </div>
           </div>
           <div class="sidebar-body">
             <div class="tool-card">
@@ -252,8 +283,8 @@
                   <el-button
                     class="control-button"
                     size="small"
-                    @click="decreaseScale"
                     :disabled="overlayScale <= 0.1"
+                    @click="decreaseScale"
                   >
                     -
                   </el-button>
@@ -270,15 +301,19 @@
                   <el-button
                     class="control-button"
                     size="small"
-                    @click="increaseScale"
                     :disabled="overlayScale >= 5000"
+                    @click="increaseScale"
                   >
                     +
                   </el-button>
                 </div>
                 <div class="control-meta">
                   <span class="steps-label">步长</span>
-                  <el-radio-group v-model="scaleSnapStep" size="small" class="step-segmented">
+                  <el-radio-group
+                    v-model="scaleSnapStep"
+                    size="small"
+                    class="step-segmented"
+                  >
                     <el-radio-button
                       v-for="option in scaleStepOptions"
                       :key="`scale-${option}`"
@@ -309,8 +344,8 @@
                   <el-button
                     class="control-button"
                     size="small"
-                    @click="decreaseRotation"
                     :disabled="overlayRotation <= -180"
+                    @click="decreaseRotation"
                   >
                     -
                   </el-button>
@@ -327,15 +362,19 @@
                   <el-button
                     class="control-button"
                     size="small"
-                    @click="increaseRotation"
                     :disabled="overlayRotation >= 180"
+                    @click="increaseRotation"
                   >
                     +
                   </el-button>
                 </div>
                 <div class="control-meta">
                   <span class="steps-label">步长</span>
-                  <el-radio-group v-model="rotationSnapStep" size="small" class="step-segmented">
+                  <el-radio-group
+                    v-model="rotationSnapStep"
+                    size="small"
+                    class="step-segmented"
+                  >
                     <el-radio-button
                       v-for="option in rotationStepOptions"
                       :key="`rotation-${option.value}`"
@@ -360,14 +399,24 @@
                   </div>
                 </div>
                 <div class="coordinate-summary">
-                  <span class="coordinate-summary-item">X {{ overlayPosition.x.toFixed(1) }}</span>
-                  <span class="coordinate-summary-item">Y {{ overlayPosition.y.toFixed(1) }}</span>
+                  <span class="coordinate-summary-item">
+                    X {{ overlayPosition.x.toFixed(1) }}
+                  </span>
+                  <span class="coordinate-summary-item">
+                    Y {{ overlayPosition.y.toFixed(1) }}
+                  </span>
                 </div>
               </div>
               <div class="tool-card-content">
                 <div class="control-row translate-row">
                   <span class="axis-tag">X</span>
-                  <el-button class="control-button" size="small" @click="stepMoveX(-1)">-</el-button>
+                  <el-button
+                    class="control-button"
+                    size="small"
+                    @click="stepMoveX(-1)"
+                  >
+                    -
+                  </el-button>
                   <div class="control-slider-wrap">
                     <el-slider
                       :model-value="0"
@@ -378,11 +427,23 @@
                       @input="onTranslateXSliderInput"
                     />
                   </div>
-                  <el-button class="control-button" size="small" @click="stepMoveX(1)">+</el-button>
+                  <el-button
+                    class="control-button"
+                    size="small"
+                    @click="stepMoveX(1)"
+                  >
+                    +
+                  </el-button>
                 </div>
                 <div class="control-row translate-row">
                   <span class="axis-tag">Y</span>
-                  <el-button class="control-button" size="small" @click="stepMoveY(-1)">-</el-button>
+                  <el-button
+                    class="control-button"
+                    size="small"
+                    @click="stepMoveY(-1)"
+                  >
+                    -
+                  </el-button>
                   <div class="control-slider-wrap">
                     <el-slider
                       :model-value="0"
@@ -393,11 +454,21 @@
                       @input="onTranslateYSliderInput"
                     />
                   </div>
-                  <el-button class="control-button" size="small" @click="stepMoveY(1)">+</el-button>
+                  <el-button
+                    class="control-button"
+                    size="small"
+                    @click="stepMoveY(1)"
+                  >
+                    +
+                  </el-button>
                 </div>
                 <div class="control-meta">
                   <span class="steps-label">步长</span>
-                  <el-radio-group v-model="translationSnapStep" size="small" class="step-segmented">
+                  <el-radio-group
+                    v-model="translationSnapStep"
+                    size="small"
+                    class="step-segmented"
+                  >
                     <el-radio-button
                       v-for="option in translationStepOptions"
                       :key="`translation-${option}`"
@@ -421,7 +492,9 @@
                     <span class="tool-card-desc">控制背景透明度与叠加表现</span>
                   </div>
                 </div>
-                <span class="tool-card-value">{{ backgroundAlphaDisplayText }}</span>
+                <span class="tool-card-value">
+                  {{ backgroundAlphaDisplayText }}
+                </span>
               </div>
               <div class="tool-card-content">
                 <div class="display-switch-row">
@@ -442,8 +515,8 @@
                   <el-button
                     class="control-button"
                     size="small"
-                    @click="decreaseBackgroundAlpha"
                     :disabled="pointCloudBgAlpha <= 0"
+                    @click="decreaseBackgroundAlpha"
                   >
                     -
                   </el-button>
@@ -459,8 +532,8 @@
                   <el-button
                     class="control-button"
                     size="small"
-                    @click="increaseBackgroundAlpha"
                     :disabled="pointCloudBgAlpha >= 1"
+                    @click="increaseBackgroundAlpha"
                   >
                     +
                   </el-button>
@@ -470,22 +543,40 @@
                     <span class="color-label">线条颜色</span>
                     <el-color-picker
                       v-model="pointCloudContentColor"
-                      @change="onContentColorChange"
                       size="small"
+                      @change="onContentColorChange"
                     />
                   </div>
                   <div class="color-control">
                     <span class="color-label">背景颜色</span>
                     <el-color-picker
                       v-model="pointCloudBgColor"
-                      @change="onBgColorChange"
                       size="small"
+                      @change="onBgColorChange"
                     />
                   </div>
                 </div>
               </div>
             </div>
           </div>
+        </div>
+        <div v-if="props.embedded" class="sidebar-actions">
+          <el-button
+            plain
+            :disabled="
+              !formData.projectId || !formData.scanFileId || !formData.cadFileId
+            "
+            @click="loadData"
+          >
+            重新加载
+          </el-button>
+          <el-button
+            type="primary"
+            :loading="completingCalibration"
+            @click="handleCompleteCalibration"
+          >
+            完成校准
+          </el-button>
         </div>
       </div>
     </div>
@@ -529,80 +620,128 @@
     >
       <!-- 旋转环：宽碰撞区（透明宽stroke，方便点击） -->
       <circle
-        :cx="GIZMO_C" :cy="GIZMO_C" :r="GIZMO_RING_R"
-        fill="none" stroke="transparent" stroke-width="28"
+        :cx="GIZMO_C"
+        :cy="GIZMO_C"
+        :r="GIZMO_RING_R"
+        fill="none"
+        stroke="transparent"
+        stroke-width="28"
         class="gizmo-ring-hit"
         @mousedown="startGizmoRotateDrag"
       />
       <!-- 旋转环：视觉展示 -->
       <circle
-        :cx="GIZMO_C" :cy="GIZMO_C" :r="GIZMO_RING_R"
-        fill="none" stroke="#4da3ff" stroke-width="2" stroke-dasharray="7 4"
+        :cx="GIZMO_C"
+        :cy="GIZMO_C"
+        :r="GIZMO_RING_R"
+        fill="none"
+        stroke="#4da3ff"
+        stroke-width="2"
+        stroke-dasharray="7 4"
         pointer-events="none"
       />
       <!-- 旋转方向箭头（顺时针标识，顶部） -->
       <path
         :d="`M ${GIZMO_C - 10} ${GIZMO_C - GIZMO_RING_R - 10} A ${GIZMO_RING_R + 10} ${GIZMO_RING_R + 10} 0 0 1 ${GIZMO_C + 10} ${GIZMO_C - GIZMO_RING_R - 10}`"
-        fill="none" stroke="#4da3ff" stroke-width="1.5" pointer-events="none"
+        fill="none"
+        stroke="#4da3ff"
+        stroke-width="1.5"
+        pointer-events="none"
       />
       <!-- X 轴线 (红) -->
       <line
-        :x1="GIZMO_C" :y1="GIZMO_C"
-        :x2="gizmoXEnd.x" :y2="gizmoXEnd.y"
-        stroke="#f56c6c" stroke-width="2.5" pointer-events="none"
+        :x1="GIZMO_C"
+        :y1="GIZMO_C"
+        :x2="gizmoXEnd.x"
+        :y2="gizmoXEnd.y"
+        stroke="#f56c6c"
+        stroke-width="2.5"
+        pointer-events="none"
       />
       <!-- X 轴碰撞区 -->
       <line
-        :x1="GIZMO_C + 8 * Math.cos(gizmoTheta)" :y1="GIZMO_C - 8 * Math.sin(gizmoTheta)"
-        :x2="gizmoXEnd.x" :y2="gizmoXEnd.y"
-        stroke="transparent" stroke-width="24"
+        :x1="GIZMO_C + 8 * Math.cos(gizmoTheta)"
+        :y1="GIZMO_C - 8 * Math.sin(gizmoTheta)"
+        :x2="gizmoXEnd.x"
+        :y2="gizmoXEnd.y"
+        stroke="transparent"
+        stroke-width="24"
         class="gizmo-axis-hit"
         @mousedown="startGizmoXDrag"
       />
       <!-- X 轴箭头 -->
       <polygon
         :points="gizmoXArrowPoints"
-        fill="#f56c6c" pointer-events="none"
+        fill="#f56c6c"
+        pointer-events="none"
       />
       <!-- X 标签 -->
       <text
         :x="gizmoXEnd.x + 6 * Math.cos(gizmoTheta)"
         :y="gizmoXEnd.y - 6 * Math.sin(gizmoTheta) + 4"
-        fill="#f56c6c" font-size="11" font-weight="bold" pointer-events="none"
-      >X</text>
+        fill="#f56c6c"
+        font-size="11"
+        font-weight="bold"
+        pointer-events="none"
+      >
+        X
+      </text>
       <!-- Y 轴线 (绿) -->
       <line
-        :x1="GIZMO_C" :y1="GIZMO_C"
-        :x2="gizmoYEnd.x" :y2="gizmoYEnd.y"
-        stroke="#67c23a" stroke-width="2.5" pointer-events="none"
+        :x1="GIZMO_C"
+        :y1="GIZMO_C"
+        :x2="gizmoYEnd.x"
+        :y2="gizmoYEnd.y"
+        stroke="#67c23a"
+        stroke-width="2.5"
+        pointer-events="none"
       />
       <!-- Y 轴碰撞区 -->
       <line
-        :x1="GIZMO_C - 8 * Math.sin(gizmoTheta)" :y1="GIZMO_C - 8 * Math.cos(gizmoTheta)"
-        :x2="gizmoYEnd.x" :y2="gizmoYEnd.y"
-        stroke="transparent" stroke-width="24"
+        :x1="GIZMO_C - 8 * Math.sin(gizmoTheta)"
+        :y1="GIZMO_C - 8 * Math.cos(gizmoTheta)"
+        :x2="gizmoYEnd.x"
+        :y2="gizmoYEnd.y"
+        stroke="transparent"
+        stroke-width="24"
         class="gizmo-axis-hit"
         @mousedown="startGizmoYDrag"
       />
       <!-- Y 轴箭头 -->
       <polygon
         :points="gizmoYArrowPoints"
-        fill="#67c23a" pointer-events="none"
+        fill="#67c23a"
+        pointer-events="none"
       />
       <!-- Y 标签 -->
       <text
         :x="gizmoYEnd.x - 6 * Math.sin(gizmoTheta) + 2"
         :y="gizmoYEnd.y - 6 * Math.cos(gizmoTheta) + 4"
-        fill="#67c23a" font-size="11" font-weight="bold" pointer-events="none"
-      >Y</text>
+        fill="#67c23a"
+        font-size="11"
+        font-weight="bold"
+        pointer-events="none"
+      >
+        Y
+      </text>
       <!-- 中心自由平移手柄 -->
       <circle
-        :cx="GIZMO_C" :cy="GIZMO_C" r="14"
-        fill="rgba(255,255,255,0.88)" stroke="#409eff" stroke-width="2"
+        :cx="GIZMO_C"
+        :cy="GIZMO_C"
+        r="14"
+        fill="rgba(255,255,255,0.88)"
+        stroke="#409eff"
+        stroke-width="2"
         class="gizmo-center-handle"
         @mousedown="startGizmoCenterDrag"
       />
-      <circle :cx="GIZMO_C" :cy="GIZMO_C" r="4" fill="#409eff" pointer-events="none"/>
+      <circle
+        :cx="GIZMO_C"
+        :cy="GIZMO_C"
+        r="4"
+        fill="#409eff"
+        pointer-events="none"
+      />
     </svg>
 
     <!-- 全景图弹出框 -->
@@ -628,9 +767,23 @@
           <span>航向角: {{ currentImageInfo.yaw.toFixed(2) }}°</span>
           <span>图片: {{ currentImageInfo.imageName }}</span>
         </div>
-        <div ref="panoramaContainer" class="panorama-container"></div>
+        <div ref="panoramaContainer" class="panorama-container" />
       </div>
     </el-dialog>
+    <!-- 侧边栏折叠/展开（同前两步：放在侧边栏右侧中间） -->
+    <button
+      v-if="isCalibrationMode"
+      type="button"
+      class="calibration-sidebar-toggle"
+      :class="{ 'is-collapsed': sidebarCollapsed }"
+      :title="sidebarCollapsed ? '展开对齐工具' : '收起对齐工具'"
+      :aria-label="sidebarCollapsed ? '展开对齐工具' : '收起对齐工具'"
+      @click="sidebarCollapsed = !sidebarCollapsed"
+    >
+      <el-icon :size="16">
+        <component :is="sidebarCollapsed ? DArrowLeft : DArrowRight" />
+      </el-icon>
+    </button>
   </div>
 </template>
 
@@ -650,6 +803,9 @@ import {
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  DArrowLeft,
+  DArrowRight,
+  Loading,
   Operation,
   ZoomIn,
   Refresh,
@@ -674,7 +830,10 @@ import {
 } from '@/api/calibration'
 import { getScanCalibration } from '@/api/scan'
 import { getProjectFiles, type ProjectFileInfo } from '@/api/fileManage'
-import { useCadRenderScheduler, waitForNextFrame } from './composables/useCadRenderScheduler'
+import {
+  useCadRenderScheduler,
+  waitForNextFrame,
+} from './composables/useCadRenderScheduler'
 import {
   applyAlignment,
   buildAlignmentPairsSignature,
@@ -683,6 +842,30 @@ import {
   getPointCloudBaseTransform,
   getSceneSyncSignature,
 } from './utils/calibrationHelpers'
+import {
+  getCachedDxf,
+  getCachedPreview,
+  setCachedDxf,
+  setCachedPreview,
+} from './utils/cadPrefetch'
+
+defineOptions({ name: 'DrawingCalibration' })
+
+/**
+ * 可内嵌到分析流程（第三步 CAD与轨迹校准）：
+ * embedded 时强制走「步骤2」的校准视图，并隐藏返回/步骤标签。
+ */
+const props = withDefaults(
+  defineProps<{
+    embedded?: boolean
+  }>(),
+  { embedded: false },
+)
+
+const emit = defineEmits<{
+  (e: 'prev-step'): void
+  (e: 'next-step'): void
+}>()
 
 const route = useRoute()
 const router = useRouter()
@@ -694,7 +877,9 @@ const getQueryString = (key: string): string => {
   return value ?? ''
 }
 
-const isStep2Flow = computed(() => Boolean(getQueryString('returnTo')))
+const isStep2Flow = computed(
+  () => props.embedded || Boolean(getQueryString('returnTo')),
+)
 const projectNamePreset = computed(() => getQueryString('projectName') || '')
 
 const persistStep2ReturnState = (cadCompleted: boolean) => {
@@ -873,6 +1058,8 @@ const { requestCadRender, cancelCadRender } = useCadRenderScheduler(
 
 // 辅助选点模式
 const isCalibrationMode = ref<boolean>(false)
+/** 右侧「轨迹对齐工具」侧边栏是否折叠 */
+const sidebarCollapsed = ref(false)
 const overlayPosition = ref<{ x: number; y: number }>({ x: 0, y: 0 })
 const overlayScale = ref<number>(1)
 const overlayRotation = ref<number>(0) // 旋转角度（度）
@@ -902,7 +1089,7 @@ const isGizmoDragging = ref<'none' | 'rotate' | 'x' | 'y' | 'free'>('none')
 
 // Gizmo SVG 尺寸常量（template 中直接使用）
 const GIZMO_SVG_SIZE = 220
-const GIZMO_C = GIZMO_SVG_SIZE / 2        // 110
+const GIZMO_C = GIZMO_SVG_SIZE / 2 // 110
 const GIZMO_RING_R = 88
 const GIZMO_AXIS_LEN = 72
 
@@ -911,7 +1098,7 @@ const scaleStep = ref<number>(10) // 缩放步长
 const rotationStep = ref<number>(5) // 旋转步长（度）
 const positionStep = ref<number>(500) // 位置微调步长
 const rotationSnapStep = ref<number>(1) // Gizmo 旋转吸附步长（度）
-const scaleSnapStep = ref<number>(100)  // 缩放步长
+const scaleSnapStep = ref<number>(100) // 缩放步长
 const translationSnapStep = ref<number>(500) // 平移步长（CAD 单位）
 
 const scaleStepOptions = [500, 100, 50, 10] as const
@@ -939,8 +1126,7 @@ const overallPointCloudHeightRange = computed(() => {
   if (!preview || typeof preview.z0 !== 'number') return null
 
   const rawMin = preview.z0 - preview.groundZ
-  const rawMax =
-    preview.z0 + preview.dz * preview.buckets - preview.groundZ
+  const rawMax = preview.z0 + preview.dz * preview.buckets - preview.groundZ
 
   const minHeight = Math.min(rawMin, rawMax)
   const maxHeight = Math.max(rawMin, rawMax)
@@ -1024,7 +1210,9 @@ const alignmentQualityText = computed(() => {
 })
 
 const scaleDisplayText = computed(() => `${overlayScale.value.toFixed(0)}x`)
-const rotationDisplayText = computed(() => `${overlayRotation.value.toFixed(2)}°`)
+const rotationDisplayText = computed(
+  () => `${overlayRotation.value.toFixed(2)}°`,
+)
 const backgroundAlphaDisplayText = computed(
   () => `${Math.round(pointCloudBgAlpha.value * 100)}%`,
 )
@@ -1100,22 +1288,28 @@ const onTranslateYSliderInput = (value: number | number[]) => {
   stepMoveY(nextValue > 0 ? 1 : -1)
 }
 
-const handleOverlayVisibilityChange = async (value: boolean | string | number) => {
+const handleOverlayVisibilityChange = async (
+  value: boolean | string | number,
+) => {
   const nextValue = Boolean(value)
   if (nextValue === showPointCloudOverlay.value) return
   await togglePointCloudOverlay()
 }
 
 // -------- Gizmo 计算属性 --------
-const gizmoTheta = computed(() => overlayRotation.value * Math.PI / 180)
+const gizmoTheta = computed(() => (overlayRotation.value * Math.PI) / 180)
 
 const gizmoStyle = computed(() => {
-  if (!gizmoCenterScreen.value || !isCalibrationMode.value || !cadOverlayPointCloudPlane.value) {
+  if (
+    !gizmoCenterScreen.value ||
+    !isCalibrationMode.value ||
+    !cadOverlayPointCloudPlane.value
+  ) {
     return { display: 'none' }
   }
   return {
-    left: (gizmoCenterScreen.value.x - GIZMO_C) + 'px',
-    top: (gizmoCenterScreen.value.y - GIZMO_C) + 'px',
+    left: gizmoCenterScreen.value.x - GIZMO_C + 'px',
+    top: gizmoCenterScreen.value.y - GIZMO_C + 'px',
   }
 })
 
@@ -1136,8 +1330,10 @@ const gizmoXArrowPoints = computed(() => {
   const cosT = Math.cos(t)
   const sinT = Math.sin(t)
   // 轴方向 & 垂直方向（屏幕空间）
-  const ax = cosT; const ay = -sinT  // X 轴方向（屏幕）
-  const px = sinT;  const py = cosT  // 垂直
+  const ax = cosT
+  const ay = -sinT // X 轴方向（屏幕）
+  const px = sinT
+  const py = cosT // 垂直
   return `${ex},${ey} ${ex - 10 * ax + 5 * px},${ey - 10 * ay + 5 * py} ${ex - 10 * ax - 5 * px},${ey - 10 * ay - 5 * py}`
 })
 
@@ -1146,8 +1342,10 @@ const gizmoYArrowPoints = computed(() => {
   const { x: ex, y: ey } = gizmoYEnd.value
   const t = gizmoTheta.value
   // Y 轴屏幕方向: (-sinT, -cosT)
-  const ax = -Math.sin(t); const ay = -Math.cos(t)
-  const px = Math.cos(t);  const py = -Math.sin(t)
+  const ax = -Math.sin(t)
+  const ay = -Math.cos(t)
+  const px = Math.cos(t)
+  const py = -Math.sin(t)
   return `${ex},${ey} ${ex - 10 * ax + 5 * px},${ey - 10 * ay + 5 * py} ${ex - 10 * ax - 5 * px},${ey - 10 * ay - 5 * py}`
 })
 
@@ -1212,7 +1410,10 @@ const loadProjects = async () => {
 const syncCadBindingFromCalibration = async (): Promise<boolean> => {
   if (!formData.value.projectId || !formData.value.scanFileId) return false
   try {
-    const res = await getScanCalibration(formData.value.projectId, formData.value.scanFileId)
+    const res = await getScanCalibration(
+      formData.value.projectId,
+      formData.value.scanFileId,
+    )
     if (res.code === 200 && res.data?.cadFileId) {
       formData.value.cadFileId = res.data.cadFileId
       return true
@@ -1280,7 +1481,13 @@ const applyStep2QueryPresetImpl = async () => {
   if (!isStep2Flow.value) return
 
   const step2Key = getStep2Key()
-  if (step2Key && step2Key === lastStep2Key && cadViewer.value && previewData.value) return
+  if (
+    step2Key &&
+    step2Key === lastStep2Key &&
+    cadViewer.value &&
+    previewData.value
+  )
+    return
   lastStep2Key = step2Key
 
   const projectIdFromQuery = Number(getQueryString('projectId'))
@@ -1305,11 +1512,19 @@ const applyStep2QueryPresetImpl = async () => {
       ? cadIdFromQuery
       : null
 
-  if (formData.value.projectId && formData.value.scanFileId && !formData.value.cadFileId) {
+  if (
+    formData.value.projectId &&
+    formData.value.scanFileId &&
+    !formData.value.cadFileId
+  ) {
     await syncCadBindingFromCalibration()
   }
 
-  if (formData.value.projectId && formData.value.scanFileId && formData.value.cadFileId) {
+  if (
+    formData.value.projectId &&
+    formData.value.scanFileId &&
+    formData.value.cadFileId
+  ) {
     await nextTick()
     await waitForNextFrame()
     await loadData()
@@ -1391,7 +1606,9 @@ const resetLoadedStateForNewLoad = () => {
         try {
           scene.remove(cadOverlayBackgroundPlane.value)
           cadOverlayBackgroundPlane.value.geometry.dispose()
-          ;(cadOverlayBackgroundPlane.value.material as THREE.Material).dispose()
+          ;(
+            cadOverlayBackgroundPlane.value.material as THREE.Material
+          ).dispose()
         } catch (error) {
           console.warn('清理背景层失败:', error)
         }
@@ -1482,11 +1699,22 @@ const loadPreview = async (loadId?: number) => {
   params.contentColor = colorToHex(pointCloudContentColor.value)
   params.splitLayers = true
 
-  const res = await getScanPreview(
-    formData.value.projectId!,
-    formData.value.scanFileId!,
+  const previewProjectId = formData.value.projectId!
+  const previewScanId = formData.value.scanFileId!
+  const cachedPreview = getCachedPreview(
+    previewProjectId,
+    previewScanId,
     params,
   )
+  const res = (
+    cachedPreview
+      ? { code: 200, msg: '', data: cachedPreview }
+      : await getScanPreview(previewProjectId, previewScanId, params)
+  ) as any
+
+  if (!cachedPreview && res?.code === 200 && res.data) {
+    setCachedPreview(previewProjectId, previewScanId, params, res.data)
+  }
 
   if (isLoadStale(loadId)) return
 
@@ -1497,6 +1725,10 @@ const loadPreview = async (loadId?: number) => {
 
   previewData.value = res.data.preview
   trajectoryData.value = res.data.trajectory
+
+  // 轨迹数据与点云预览由同一个接口返回：一到就先把 CAD 上的轨迹画出来，
+  // 不再等点云图像渲染 / 后续步骤（DXF 若已就绪则立即出现轨迹）。
+  renderCadOverlayTrajectory()
 
   if (isLoadStale(loadId)) return
   await renderPreview(loadId)
@@ -1728,7 +1960,6 @@ const initPanoramaViewer = () => {
     sphere,
     texture: null,
   })
-
 
   // 添加鼠标事件
   setupPanoramaControls()
@@ -2080,10 +2311,18 @@ const loadDxf = async (loadId?: number) => {
   statusText.value = '加载DXF...'
 
   try {
-    const res = await getDxfFile(
-      formData.value.projectId!,
-      formData.value.cadFileId!,
-    )
+    const dxfProjectId = formData.value.projectId!
+    const dxfFileId = formData.value.cadFileId!
+    const cachedDxf = getCachedDxf(dxfProjectId, dxfFileId)
+    const res = (
+      cachedDxf
+        ? { code: 200, msg: '', data: cachedDxf }
+        : await getDxfFile(dxfProjectId, dxfFileId)
+    ) as any
+
+    if (!cachedDxf && res?.code === 200 && res.data) {
+      setCachedDxf(dxfProjectId, dxfFileId, res.data)
+    }
 
     if (isLoadStale(loadId)) return
 
@@ -2185,12 +2424,14 @@ const ensureCadViewer = async () => {
     throw new Error('cadRoot DOM元素不存在')
   }
 
-  const existingCanvas = cadViewer.value?.canvas as HTMLCanvasElement | undefined
+  const existingCanvas = cadViewer.value?.canvas as
+    | HTMLCanvasElement
+    | undefined
   const viewerUsable = Boolean(
     cadViewer.value &&
-    existingCanvas &&
-    existingCanvas.isConnected &&
-    root.contains(existingCanvas),
+      existingCanvas &&
+      existingCanvas.isConnected &&
+      root.contains(existingCanvas),
   )
 
   if (viewerUsable) {
@@ -2236,7 +2477,7 @@ const ensureCadViewer = async () => {
     if (canvasElement) {
       const captureMouseDown = (event: MouseEvent) => {
         if (!isCalibrationMode.value || !cadOverlayPointCloudPlane.value) return
-        if (!event.shiftKey || event.button !== 0) return  // 只拦截 Shift+左键
+        if (!event.shiftKey || event.button !== 0) return // 只拦截 Shift+左键
         event.stopPropagation()
         event.stopImmediatePropagation()
       }
@@ -2245,18 +2486,29 @@ const ensureCadViewer = async () => {
       // Shift+滚轮：缩放点云；普通滚轮给 DxfViewer 缩放图纸
       // deltaY > 0 = 向前/向上滚 = 放大（与 DxfViewer 保持同向）
       const onWheel = (e: WheelEvent) => {
-        if (!e.shiftKey || !isCalibrationMode.value || !cadOverlayPointCloudPlane.value) return
+        if (
+          !e.shiftKey ||
+          !isCalibrationMode.value ||
+          !cadOverlayPointCloudPlane.value
+        )
+          return
         e.preventDefault()
         e.stopPropagation()
         e.stopImmediatePropagation()
         // Mac 上 Shift+滚轮 deltaY 会被转为 deltaX，需要同时检测
         const rawDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX
         const factor = rawDelta < 0 ? 1.12 : 0.88
-        const newScale = Math.max(0.1, Math.min(5000, overlayScale.value * factor))
+        const newScale = Math.max(
+          0.1,
+          Math.min(5000, overlayScale.value * factor),
+        )
         overlayScale.value = newScale
         updatePointCloudScale(newScale)
       }
-      canvasElement.addEventListener('wheel', onWheel, { passive: false, capture: true })
+      canvasElement.addEventListener('wheel', onWheel, {
+        passive: false,
+        capture: true,
+      })
       cleanupCadCanvasListeners = () => {
         canvasElement.removeEventListener('mousedown', captureMouseDown, true)
         canvasElement.removeEventListener('wheel', onWheel, true)
@@ -2280,7 +2532,11 @@ const ensureCadViewer = async () => {
       const isShiftPressed = domEvent?.shiftKey || false
 
       // 对齐模式下，Shift+左键拖动点云平面；无 Shift 放行给 DxfViewer（平移视图）
-      if (isCalibrationMode.value && cadOverlayPointCloudPlane.value && isShiftPressed) {
+      if (
+        isCalibrationMode.value &&
+        cadOverlayPointCloudPlane.value &&
+        isShiftPressed
+      ) {
         isDragging.value = true
         dragStartPos.value = { x: cadX, y: cadY }
 
@@ -2317,8 +2573,12 @@ const ensureCadViewer = async () => {
           scheduleAutoSave()
         }
 
-        document.addEventListener('pointermove', handleGlobalPointerMove, { capture: true })
-        document.addEventListener('pointerup', handleGlobalPointerUp, { capture: true })
+        document.addEventListener('pointermove', handleGlobalPointerMove, {
+          capture: true,
+        })
+        document.addEventListener('pointerup', handleGlobalPointerUp, {
+          capture: true,
+        })
 
         if (domEvent) {
           domEvent.preventDefault()
@@ -2341,7 +2601,6 @@ const ensureCadViewer = async () => {
         isDragging.value = false
       }
     })
-
   } catch (error) {
     console.error('DXF查看器初始化失败:', error)
     cadViewer.value = null
@@ -2413,12 +2672,16 @@ const renderCadOverlayTrajectory = () => {
   }
 
   // 校准模式：轨迹作为点云 plane 的子节点，和点云一起平移/旋转/缩放
-  if (isCalibrationMode.value && cadOverlayPointCloudPlane.value && previewData.value) {
+  if (
+    isCalibrationMode.value &&
+    cadOverlayPointCloudPlane.value &&
+    previewData.value
+  ) {
     const { minX, minY, maxX, maxY } = previewData.value.bounds
     const centerX = (minX + maxX) / 2
     const centerY = (minY + maxY) / 2
-    const pts = trajectoryData.value.points.map((p) =>
-      new THREE.Vector3(p.x - centerX, p.y - centerY, 0.02),
+    const pts = trajectoryData.value.points.map(
+      (p) => new THREE.Vector3(p.x - centerX, p.y - centerY, 0.02),
     )
     const geometry = new THREE.BufferGeometry().setFromPoints(pts)
     const material = new THREE.LineBasicMaterial({
@@ -2524,14 +2787,16 @@ const renderCadOverlayPointCloud = async () => {
 
     // 应用对齐变换到所有角点
     const transformedCorners = corners.map((corner) =>
-      applyAlignment(alignment.value!, corner.x, corner.y)
+      applyAlignment(alignment.value!, corner.x, corner.y),
     )
 
     // 计算变换后的中心点
     const centerX =
-      transformedCorners.reduce((sum, p) => sum + p.x, 0) / transformedCorners.length
+      transformedCorners.reduce((sum, p) => sum + p.x, 0) /
+      transformedCorners.length
     const centerY =
-      transformedCorners.reduce((sum, p) => sum + p.y, 0) / transformedCorners.length
+      transformedCorners.reduce((sum, p) => sum + p.y, 0) /
+      transformedCorners.length
 
     // 创建平面几何体
     const geometry = new THREE.PlaneGeometry(width, height)
@@ -2571,7 +2836,9 @@ const renderCadOverlayPointCloud = async () => {
 const togglePointCloudOverlay = async () => {
   showPointCloudOverlay.value = !showPointCloudOverlay.value
   await renderCadOverlayPointCloud()
-  ElMessage.success(showPointCloudOverlay.value ? '已显示点云叠加' : '已隐藏点云叠加')
+  ElMessage.success(
+    showPointCloudOverlay.value ? '已显示点云叠加' : '已隐藏点云叠加',
+  )
 }
 
 // 更新点云平面的缩放
@@ -2625,7 +2892,7 @@ const updateRotationHandlePosition = () => {
   // 向上偏移一定距离
   rotationHandlePosition.value = {
     x: screenX,
-    y: screenY +20
+    y: screenY + 20,
   }
 }
 
@@ -2648,17 +2915,17 @@ const startRotationDrag = (event: MouseEvent | TouchEvent) => {
   const centerWorld = plane.position.clone()
   const centerProjected = centerWorld.project(camera)
   const centerScreenX = (centerProjected.x * 0.5 + 0.5) * rect.width + rect.left
-  const centerScreenY = (-centerProjected.y * 0.5 + 0.5) * rect.height + rect.top
+  const centerScreenY =
+    (-centerProjected.y * 0.5 + 0.5) * rect.height + rect.top
 
   // 获取初始鼠标位置
   const clientX = 'touches' in event ? event.touches[0].clientX : event.clientX
   const clientY = 'touches' in event ? event.touches[0].clientY : event.clientY
 
   // 计算初始角度
-  const startAngle = Math.atan2(
-    clientY - centerScreenY,
-    clientX - centerScreenX
-  ) * (180 / Math.PI)
+  const startAngle =
+    Math.atan2(clientY - centerScreenY, clientX - centerScreenX) *
+    (180 / Math.PI)
 
   // 鼠标/触摸移动处理
   const handleMove = (e: MouseEvent | TouchEvent) => {
@@ -2666,10 +2933,9 @@ const startRotationDrag = (event: MouseEvent | TouchEvent) => {
     const currentY = 'touches' in e ? e.touches[0].clientY : e.clientY
 
     // 计算当前角度
-    const currentAngle = Math.atan2(
-      currentY - centerScreenY,
-      currentX - centerScreenX
-    ) * (180 / Math.PI)
+    const currentAngle =
+      Math.atan2(currentY - centerScreenY, currentX - centerScreenX) *
+      (180 / Math.PI)
 
     // 角度增量
     const angleDelta = currentAngle - startAngle
@@ -2730,8 +2996,12 @@ const updateGizmoPosition = () => {
   const gy = (-projected.y * 0.5 + 0.5) * rect.height + rect.top
   // 中心超出画布可见区域时隐藏 Gizmo
   const margin = GIZMO_C + 10
-  if (gx < rect.left - margin || gx > rect.right + margin ||
-      gy < rect.top - margin || gy > rect.bottom + margin) {
+  if (
+    gx < rect.left - margin ||
+    gx > rect.right + margin ||
+    gy < rect.top - margin ||
+    gy > rect.bottom + margin
+  ) {
     gizmoCenterScreen.value = null
     return
   }
@@ -2793,7 +3063,10 @@ const startGizmoLoop = () => {
       backgroundColor: pointCloudBgColor.value,
       backgroundAlpha: pointCloudBgAlpha.value,
     })
-    if (nextSceneSyncSignature && nextSceneSyncSignature !== sceneSyncSignature) {
+    if (
+      nextSceneSyncSignature &&
+      nextSceneSyncSignature !== sceneSyncSignature
+    ) {
       sceneSyncSignature = nextSceneSyncSignature
       syncPointCloudBackgroundPlane()
       updateGizmoPosition()
@@ -2831,11 +3104,13 @@ const startGizmoRotateDrag = (event: MouseEvent) => {
   isGizmoDragging.value = 'rotate'
   const cx = gizmoCenterScreen.value.x
   const cy = gizmoCenterScreen.value.y
-  const startAngle = Math.atan2(event.clientY - cy, event.clientX - cx) * 180 / Math.PI
+  const startAngle =
+    (Math.atan2(event.clientY - cy, event.clientX - cx) * 180) / Math.PI
   const startRotation = overlayRotation.value
 
   const onMove = (e: MouseEvent) => {
-    const currAngle = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI
+    const currAngle =
+      (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
     // 取反：屏幕顺时针拖拽 → 点云顺时针旋转（Three.js rotation.z 正方向为逆时针）
     let newRot = startRotation - (currAngle - startAngle)
     // 吸附到步长
@@ -2963,7 +3238,11 @@ const onBgColorChange = (_color: string) => {
 
 // 重新加载点云内容层（仅在内容颜色变更时调用，背景变更不触发）
 const reloadPointCloudWithNewStyle = async () => {
-  if (!isCalibrationMode.value || !formData.value.projectId || !formData.value.scanFileId) {
+  if (
+    !isCalibrationMode.value ||
+    !formData.value.projectId ||
+    !formData.value.scanFileId
+  ) {
     return
   }
 
@@ -3022,7 +3301,11 @@ const movePointCloud = (deltaX: number, deltaY: number) => {
     const centerY = (minY + maxY) / 2
     const origin = cadOrigin.value!
 
-    cadOverlayPointCloudPlane.value.position.set(centerX - origin.x, centerY - origin.y, 0.1)
+    cadOverlayPointCloudPlane.value.position.set(
+      centerX - origin.x,
+      centerY - origin.y,
+      0.1,
+    )
     overlayPosition.value = { x: 0, y: 0 }
   } else {
     // 移动点云
@@ -3039,7 +3322,12 @@ const movePointCloud = (deltaX: number, deltaY: number) => {
 
 // 重置点云变换
 const resetPointCloudTransform = () => {
-  if (!cadOverlayPointCloudPlane.value || !previewData.value || !cadOrigin.value) return
+  if (
+    !cadOverlayPointCloudPlane.value ||
+    !previewData.value ||
+    !cadOrigin.value
+  )
+    return
 
   // 重置位置到初始状态
   const { minX, minY, maxX, maxY } = previewData.value.bounds
@@ -3051,7 +3339,11 @@ const resetPointCloudTransform = () => {
   const camera = cadViewer.value.GetCamera()
   const initialZ = camera ? camera.position.z - 0.5 : 0.5
 
-  cadOverlayPointCloudPlane.value.position.set(centerX - origin.x, centerY - origin.y, initialZ)
+  cadOverlayPointCloudPlane.value.position.set(
+    centerX - origin.x,
+    centerY - origin.y,
+    initialZ,
+  )
   cadOverlayPointCloudPlane.value.scale.set(1, 1, 1)
   cadOverlayPointCloudPlane.value.rotation.set(0, 0, 0)
 
@@ -3118,10 +3410,8 @@ const applyStoredAlignmentToPointCloudPlane = () => {
     return false
   }
 
-  const { centerX, centerY } = getPointCloudBaseTransform(
-    previewData.value,
-    cadOrigin.value,
-  ) || {}
+  const { centerX, centerY } =
+    getPointCloudBaseTransform(previewData.value, cadOrigin.value) || {}
   if (centerX == null || centerY == null) return false
 
   const alignedCenter = applyAlignment(alignment.value, centerX, centerY)
@@ -3158,7 +3448,6 @@ const createPointCloudPlane = async () => {
     console.error('数据未准备好，无法创建点云平面')
     return
   }
-
 
   // 清理旧的点云平面
   disposeCadOverlayLine()
@@ -3203,7 +3492,6 @@ const createPointCloudPlane = async () => {
   texture.wrapS = THREE.ClampToEdgeWrapping
   texture.wrapT = THREE.ClampToEdgeWrapping
 
-
   // 获取点云的原始边界
   const { minX, minY, maxX, maxY } = previewData.value.bounds
   const width = maxX - minX
@@ -3211,17 +3499,16 @@ const createPointCloudPlane = async () => {
   const centerX = (minX + maxX) / 2
   const centerY = (minY + maxY) / 2
 
-
   // 创建与点云实际尺寸匹配的平面几何体
   const geometry = new THREE.PlaneGeometry(width, height)
 
   // 创建材质
   const material = new THREE.MeshBasicMaterial({
     map: texture,
-    transparent: true,    // 开启透明度，让后端的bgAlpha参数生效
-    opacity: 1.0,         // 基础透明度，实际由PNG图片的alpha通道决定
+    transparent: true, // 开启透明度，让后端的bgAlpha参数生效
+    opacity: 1.0, // 基础透明度，实际由PNG图片的alpha通道决定
     side: THREE.DoubleSide,
-    depthTest: false,    // 禁用深度测试，确保在最上层
+    depthTest: false, // 禁用深度测试，确保在最上层
     depthWrite: false,
   })
 
@@ -3229,7 +3516,6 @@ const createPointCloudPlane = async () => {
   const mesh = new THREE.Mesh(geometry, material)
   mesh.renderOrder = 10000 // 非常大的渲染顺序，确保在最上层
   mesh.name = 'pointCloudPlane'
-
 
   // 设置初始位置（居中显示）
   const origin = cadOrigin.value
@@ -3241,7 +3527,6 @@ const createPointCloudPlane = async () => {
 
   // 如果相机存在，将点云放在视野中心
   if (camera) {
-
     // 获取相机当前看向的位置（视野中心）
     const viewCenter = new THREE.Vector3()
     camera.getWorldDirection(viewCenter)
@@ -3254,7 +3539,6 @@ const createPointCloudPlane = async () => {
   const initialZ = camera ? camera.position.z - 0.5 : 0.5 // 在相机下方 0.5 单位
 
   mesh.position.set(initialX, initialY, initialZ)
-
 
   // 自动调整初始缩放，确保点云可见
   // 如果点云太小相对于 CAD 坐标系，自动放大
@@ -3295,9 +3579,16 @@ const createPointCloudPlane = async () => {
 }
 
 // 使用 Raycaster 检测点击点云平面，返回点云原始坐标
-const detectPointCloudPlaneClick = (screenX: number, screenY: number): { lasX: number; lasY: number; cadX: number; cadY: number } | null => {
-
-  if (!cadViewer.value || !cadOverlayPointCloudPlane.value || !previewData.value || !cadOrigin.value) {
+const detectPointCloudPlaneClick = (
+  screenX: number,
+  screenY: number,
+): { lasX: number; lasY: number; cadX: number; cadY: number } | null => {
+  if (
+    !cadViewer.value ||
+    !cadOverlayPointCloudPlane.value ||
+    !previewData.value ||
+    !cadOrigin.value
+  ) {
     return null
   }
 
@@ -3320,7 +3611,6 @@ const detectPointCloudPlaneClick = (screenX: number, screenY: number): { lasX: n
   const mouse = new THREE.Vector2()
   mouse.x = ((screenX - rect.left) / rect.width) * 2 - 1
   mouse.y = -((screenY - rect.top) / rect.height) * 2 + 1
-
 
   // 创建 Raycaster
   const raycaster = new THREE.Raycaster()
@@ -3362,15 +3652,12 @@ const detectPointCloudPlaneClick = (screenX: number, screenY: number): { lasX: n
   const cadX = worldPos.x + origin.x
   const cadY = worldPos.y + origin.y
 
-
   // 返回两个坐标系的坐标
   return { lasX, lasY, cadX, cadY }
 }
 
-
 // 开始辅助选点模式
 const startCalibrationMode = async () => {
-
   if (!previewData.value) {
     ElMessage.error('请先加载数据')
     return
@@ -3420,7 +3707,7 @@ const startCalibrationMode = async () => {
     // 创建 Three.js 点云平面
     await createPointCloudPlane()
 
-    startGizmoLoop()  // rAF 持续更新 Gizmo，跟随 DxfViewer 缩放/平移
+    startGizmoLoop() // rAF 持续更新 Gizmo，跟随 DxfViewer 缩放/平移
     addKeyboardListeners()
   } catch (error: any) {
     console.error('创建点云平面失败:', error)
@@ -3509,7 +3796,12 @@ const autoEnterAlignmentMode = async () => {
 
 // 从当前点云平面变换构建配准点对（供保存和本地状态判断使用）
 const buildAlignmentPairsFromPlane = (): AlignmentPair[] | null => {
-  if (!cadOverlayPointCloudPlane.value || !previewData.value || !cadOrigin.value) return null
+  if (
+    !cadOverlayPointCloudPlane.value ||
+    !previewData.value ||
+    !cadOrigin.value
+  )
+    return null
 
   const { minX, minY, maxX, maxY } = previewData.value.bounds
   const centerX = (minX + maxX) / 2
@@ -3530,7 +3822,9 @@ const buildAlignmentPairsFromPlane = (): AlignmentPair[] | null => {
     const localX = lasX - centerX
     const localY = lasY - centerY
     const localPoint = new THREE.Vector3(localX, localY, 0)
-    const worldPoint = cadOverlayPointCloudPlane.value!.localToWorld(localPoint.clone())
+    const worldPoint = cadOverlayPointCloudPlane.value!.localToWorld(
+      localPoint.clone(),
+    )
     const cadX = worldPoint.x + origin.x
     const cadY = worldPoint.y + origin.y
     return { lasX, lasY, cadX, cadY }
@@ -3539,13 +3833,18 @@ const buildAlignmentPairsFromPlane = (): AlignmentPair[] | null => {
 
 // 防抖定时器
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
-let gizmoRafId: number | null = null  // Gizmo 位置持续更新 rAF
+let gizmoRafId: number | null = null // Gizmo 位置持续更新 rAF
 let lastAutoSavedSignature = ''
 
 // 防抖触发本地未保存状态刷新（拖拽/缩放/旋转结束后调用）
 const scheduleAutoSave = () => {
   if (destroyed || !isCalibrationMode.value) return
-  if (!formData.value.projectId || !formData.value.scanFileId || !formData.value.cadFileId) return
+  if (
+    !formData.value.projectId ||
+    !formData.value.scanFileId ||
+    !formData.value.cadFileId
+  )
+    return
   if (!cadOverlayPointCloudPlane.value) return
 
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
@@ -3572,7 +3871,11 @@ const syncPendingAlignmentState = () => {
 
 // 自动生成随机点对（保留供内部调试，不再对外暴露）
 const generateRandomPairs = async () => {
-  if (!cadOverlayPointCloudPlane.value || !previewData.value || !cadOrigin.value) {
+  if (
+    !cadOverlayPointCloudPlane.value ||
+    !previewData.value ||
+    !cadOrigin.value
+  ) {
     ElMessage.error('请先启动辅助选点模式并叠加点云')
     return
   }
@@ -3585,8 +3888,8 @@ const generateRandomPairs = async () => {
       {
         confirmButtonText: '确认',
         cancelButtonText: '取消',
-        type: 'warning'
-      }
+        type: 'warning',
+      },
     )
   } catch {
     // 用户取消
@@ -3629,7 +3932,9 @@ const generateRandomPairs = async () => {
 
       // 2. 使用 Three.js 的 localToWorld 方法，自动应用旋转、缩放、平移
       const localPoint = new THREE.Vector3(localX, localY, 0)
-      const worldPoint = cadOverlayPointCloudPlane.value.localToWorld(localPoint.clone())
+      const worldPoint = cadOverlayPointCloudPlane.value.localToWorld(
+        localPoint.clone(),
+      )
 
       // 3. 世界坐标转换为 CAD 坐标
       const cadX = worldPoint.x + origin.x
@@ -3655,12 +3960,13 @@ const generateRandomPairs = async () => {
     // 更新显示
     renderCadOverlayTrajectory()
 
-    ElMessage.success(`已生成 ${newPairs.length} 个随机点对，开始本地计算对齐...`)
+    ElMessage.success(
+      `已生成 ${newPairs.length} 个随机点对，开始本地计算对齐...`,
+    )
 
     // 自动计算本地对齐
     statusText.value = '本地计算对齐中...'
     await computeAlignmentHandler()
-
   } catch (error: any) {
     if (destroyed) return
     console.error('生成随机点对失败:', error)
@@ -3704,7 +4010,7 @@ const setupRangeDrag = () => {
   if (!heightRangeSelectorRef.value) return
 
   const sliderBar = heightRangeSelectorRef.value.querySelector(
-    '.el-slider__bar'
+    '.el-slider__bar',
   ) as HTMLElement
   if (!sliderBar) return
 
@@ -3732,7 +4038,7 @@ const setupRangeDrag = () => {
     if (!isDragging) return
 
     const sliderElement = heightRangeSelectorRef.value?.querySelector(
-      '.el-slider'
+      '.el-slider',
     ) as HTMLElement
     if (!sliderElement) return
 
@@ -3784,7 +4090,9 @@ const setupRangeDrag = () => {
 }
 
 // 计算仿射变换参数（基于点对）
-const computeTransformFromPairs = (pairs: AlignmentPair[]): {
+const computeTransformFromPairs = (
+  pairs: AlignmentPair[],
+): {
   translation: { x: number; y: number }
   rotation: number // 弧度
   scale: number
@@ -3795,8 +4103,8 @@ const computeTransformFromPairs = (pairs: AlignmentPair[]): {
   }
 
   // 提取源点（点云坐标）和目标点（CAD 坐标）
-  const srcPoints = pairs.map(p => ({ x: p.lasX, y: p.lasY }))
-  const dstPoints = pairs.map(p => ({ x: p.cadX, y: p.cadY }))
+  const srcPoints = pairs.map((p) => ({ x: p.lasX, y: p.lasY }))
+  const dstPoints = pairs.map((p) => ({ x: p.cadX, y: p.cadY }))
 
   // 计算质心
   const srcCentroid = {
@@ -3808,15 +4116,24 @@ const computeTransformFromPairs = (pairs: AlignmentPair[]): {
     y: dstPoints.reduce((sum, p) => sum + p.y, 0) / dstPoints.length,
   }
 
-
   // 去中心化
-  const srcCentered = srcPoints.map(p => ({ x: p.x - srcCentroid.x, y: p.y - srcCentroid.y }))
-  const dstCentered = dstPoints.map(p => ({ x: p.x - dstCentroid.x, y: p.y - dstCentroid.y }))
+  const srcCentered = srcPoints.map((p) => ({
+    x: p.x - srcCentroid.x,
+    y: p.y - srcCentroid.y,
+  }))
+  const dstCentered = dstPoints.map((p) => ({
+    x: p.x - dstCentroid.x,
+    y: p.y - dstCentroid.y,
+  }))
 
   // 使用 Kabsch 算法计算旋转和缩放
   // 计算协方差矩阵 H = src^T * dst
-  let h11 = 0, h12 = 0, h21 = 0, h22 = 0
-  let srcNormSq = 0, dstNormSq = 0
+  let h11 = 0,
+    h12 = 0,
+    h21 = 0,
+    h22 = 0
+  let srcNormSq = 0,
+    dstNormSq = 0
 
   for (let i = 0; i < srcCentered.length; i++) {
     const src = srcCentered[i]
@@ -3844,8 +4161,8 @@ const computeTransformFromPairs = (pairs: AlignmentPair[]): {
   const sin = Math.sin(angle)
 
   const translation = {
-    x: dstCentroid.x - (scale * (cos * srcCentroid.x - sin * srcCentroid.y)),
-    y: dstCentroid.y - (scale * (sin * srcCentroid.x + cos * srcCentroid.y)),
+    x: dstCentroid.x - scale * (cos * srcCentroid.x - sin * srcCentroid.y),
+    y: dstCentroid.y - scale * (sin * srcCentroid.x + cos * srcCentroid.y),
   }
 
   return { translation, rotation: angle, scale }
@@ -3990,8 +4307,12 @@ const scheduleRefresh = () => {
 
           // 恢复之前的变换状态
           if (currentTransform && cadOverlayPointCloudPlane.value) {
-            cadOverlayPointCloudPlane.value.position.copy(currentTransform.position)
-            cadOverlayPointCloudPlane.value.rotation.copy(currentTransform.rotation)
+            cadOverlayPointCloudPlane.value.position.copy(
+              currentTransform.position,
+            )
+            cadOverlayPointCloudPlane.value.rotation.copy(
+              currentTransform.rotation,
+            )
             cadOverlayPointCloudPlane.value.scale.copy(currentTransform.scale)
             requestCadRender()
           }
@@ -4078,7 +4399,6 @@ const cleanup = () => {
 
   // 清理图片缓存
   imageCache.clear()
-
 }
 
 // 面板拖拽相关方法
@@ -4097,7 +4417,7 @@ const startPanelDrag = (e: MouseEvent | TouchEvent) => {
   isPanelDragging.value = true
   panelDragStart.value = {
     x: clientX - floatingPanelPosition.value.x,
-    y: clientY - floatingPanelPosition.value.y
+    y: clientY - floatingPanelPosition.value.y,
   }
 
   // 添加全局监听
@@ -4127,9 +4447,11 @@ const handlePanelDrag = (e: MouseEvent | TouchEvent) => {
 
   // 吸附到边缘
   if (newX < snapThreshold) newX = 0
-  if (newX > viewportWidth - panelWidth - snapThreshold) newX = viewportWidth - panelWidth
+  if (newX > viewportWidth - panelWidth - snapThreshold)
+    newX = viewportWidth - panelWidth
   if (newY < snapThreshold) newY = 0
-  if (newY > viewportHeight - panelHeight - snapThreshold) newY = viewportHeight - panelHeight
+  if (newY > viewportHeight - panelHeight - snapThreshold)
+    newY = viewportHeight - panelHeight
 
   // 限制面板在视窗内
   newX = Math.max(0, Math.min(newX, viewportWidth - panelWidth))
@@ -4152,7 +4474,10 @@ const stopPanelDrag = () => {
 watch(isCalibrationMode, (newValue) => {
   if (newValue) {
     // 首次启动时设置初始位置为右上角
-    if (floatingPanelPosition.value.x === 0 && floatingPanelPosition.value.y === 0) {
+    if (
+      floatingPanelPosition.value.x === 0 &&
+      floatingPanelPosition.value.y === 0
+    ) {
       const viewportWidth = window.innerWidth
       const viewportHeight = window.innerHeight
       const panelWidth = 320
@@ -4160,7 +4485,7 @@ watch(isCalibrationMode, (newValue) => {
 
       floatingPanelPosition.value = {
         x: viewportWidth - panelWidth - 32,
-        y: 32
+        y: 32,
       }
     }
   }
