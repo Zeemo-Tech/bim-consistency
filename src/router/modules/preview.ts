@@ -12,7 +12,7 @@ export default {
     title: '文件预览',
     icon: 'ep/view',
     showLink: false, // 不在菜单中显示
-    hideMenu: true,  // 隐藏菜单
-    layout: false   // 不使用Layout包装
+    hideMenu: true, // 隐藏菜单
+    fullPage: true // 全屏页面，隐藏侧边栏/顶部栏/标签页
   }
 }

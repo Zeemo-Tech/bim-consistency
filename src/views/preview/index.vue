@@ -1,67 +1,66 @@
 <template>
-  <div class="preview-container">
-    <!-- Three.js GLB模型渲染容器 -->
-    <div ref="viewerContainerRef" class="three-viewer-container"></div>
-
-    <!-- 构件树面板 -->
-    <div v-if="showComponentTree" class="component-tree-panel">
-      <div class="panel-header">
-        <span class="panel-title">构件树</span>
-        <div class="panel-count">{{ treeNodeCount }} 个节点</div>
-        <el-button text circle size="small" @click="showComponentTree = false">
-          <el-icon><Close /></el-icon>
-        </el-button>
+  <section class="asset-preview-page" :class="`theme-${backgroundTheme}`">
+    <header class="bim-preview-header">
+      <button class="preview-button" type="button" @click="handleClose">
+        <el-icon><ArrowLeft /></el-icon>
+        <span>返回</span>
+      </button>
+      <div class="bim-file-context">
+        <strong :title="fileName">{{ fileName || 'BIM 模型预览' }}</strong>
+        <span :title="projectName">
+          {{ projectName || (projectId ? `项目 ${projectId}` : '模型预览') }}
+        </span>
       </div>
-      <div class="tree-container" ref="treeContainerRef">
-        <el-tree
-          v-if="treeData.length > 0"
-          ref="treeRef"
-          :data="treeData"
-          :props="treeProps"
-          node-key="id"
-          :current-node-key="selectedTreeNodeKey"
-          :default-expanded-keys="defaultExpandedKeys"
-          :highlight-current="true"
-          :expand-on-click-node="false"
-          show-checkbox
-          @node-click="handleNodeClick"
-          @check="handleCheckChange"
-          @current-change="handleCurrentChange"
+      <div class="bim-header-tools">
+        <span class="toolbar-label">测量</span>
+        <MeasurementToolbar
+          v-model:collapsed="analysisToolbarCollapsed"
+          :mode="analysisMode"
+          :disabled="!hasModel"
+          @update:mode="selectAnalysisMode"
+          @clear="clearAnalysis"
+        />
+        <button
+          class="preview-button"
+          type="button"
+          :disabled="!hasModel"
+          @click="resetView"
         >
-          <template #default="{ node, data }">
-            <div class="tree-node-content" :class="{ 'is-selected': selectedTreeNodeKey === data.id }">
-              <span class="node-label">{{ node.label }}</span>
-              <el-tag v-if="data.stepId" size="small" type="info" class="node-step-id">#{{ data.stepId }}</el-tag>
-            </div>
-          </template>
-        </el-tree>
-        <div v-else class="tree-empty">
-          <el-empty description="暂无构件数据" :image-size="60" />
-        </div>
+          <el-icon><RefreshLeft /></el-icon>
+          <span>重置视角</span>
+        </button>
+        <button
+          class="preview-button icon-btn"
+          :class="{ 'is-active': showComponentTree }"
+          type="button"
+          title="构件树"
+          aria-label="构件树"
+          @click="toggleComponentTree"
+        >
+          <el-icon><Grid /></el-icon>
+        </button>
+        <button
+          class="preview-button icon-btn"
+          type="button"
+          title="全屏"
+          aria-label="全屏"
+          @click="toggleFullscreen"
+        >
+          <el-icon><FullScreen /></el-icon>
+        </button>
       </div>
-      <!-- 选中构件信息 -->
-      <div v-if="selectedElementMeta" class="meta-box">
-        <div class="meta-title">
-          {{ selectedElementMeta.name || selectedElementMeta.id }}
-        </div>
-        <div class="meta-sub">
-          <span class="pill">{{ selectedElementMeta.type }}</span>
-          <span v-if="selectedElementMeta.stepId" class="pill">#{{ selectedElementMeta.stepId }}</span>
-          <el-tag size="small" type="primary">{{ selectedElementMeta.id }}</el-tag>
-        </div>
-      </div>
-    </div>
+    </header>
 
     <!-- 加载遮罩 -->
     <div v-if="isLoading" class="loading-mask">
       <div class="loading-content">
-        <div class="loading-spinner"></div>
+        <div class="loading-spinner" />
         <p>{{ loadingMessage }}</p>
       </div>
     </div>
 
     <!-- 错误提示 -->
-    <div v-else-if="errorMessage" class="error-container">
+    <div v-if="errorMessage" class="error-container">
       <div class="error-content">
         <div class="error-icon">
           <el-icon :size="48"><Warning /></el-icon>
@@ -73,141 +72,312 @@
       </div>
     </div>
 
-    <!-- 顶部工具栏 -->
-    <div v-if="!isLoading && !errorMessage" class="top-toolbar">
-      <div class="toolbar-left">
-        <el-button
-          class="back-btn"
-          size="small"
-          @click="handleClose"
-          :icon="ArrowLeft"
-        >
-          返回
-        </el-button>
-        <span class="file-title">{{ fileName || '文件预览' }}</span>
-        <!-- 已选构件信息 -->
-        <div v-if="selectedElementMeta" class="selected-element-info">
-          <el-icon><Location /></el-icon>
-          <span class="selected-label">已选构件:</span>
-          <el-tag type="primary" size="small" effect="light">
-            {{ selectedElementMeta.name || selectedElementMeta.id }}
-          </el-tag>
+    <div
+      class="layout-shell"
+      :class="{ 'is-sidebar-collapsed': sidebarCollapsed }"
+    >
+      <div class="viewer-region" :class="`theme-${backgroundTheme}`">
+        <div ref="viewerContainerRef" class="three-viewer-container" />
+
+        <!-- 测量工具条 -->
+        <div v-if="analysisMode !== 'none'" class="measure-analysis-toolbar">
+          <strong>{{ analysisTitle }}</strong>
+          <span v-if="analysisSummary" class="measure-analysis-value">
+            {{ analysisSummary }}
+          </span>
+          <span v-else class="measure-analysis-hint">{{ analysisHint }}</span>
+          <span class="measure-analysis-exit">Esc 退出测量</span>
+          <button type="button" @click="clearAnalysis">清除</button>
         </div>
-      </div>
-      <div class="toolbar-right">
-        <div class="material-switch">
-          <div class="material-switch__label">BIM材质</div>
-          <div class="material-switch__group">
-            <button
-              type="button"
-              class="material-switch__btn"
-              :class="{ 'is-active': materialMode === 'original' }"
-              :disabled="!hasModel"
-              @click="setMaterialMode('original')"
-            >
-              原始
-            </button>
-            <button
-              type="button"
-              class="material-switch__btn"
-              :class="{ 'is-active': materialMode === 'unlit' }"
-              :disabled="!hasModel"
-              @click="setMaterialMode('unlit')"
-            >
-              无光照
-            </button>
-            <button
-              type="button"
-              class="material-switch__btn"
-              :class="{ 'is-active': materialMode === 'lambert' }"
-              :disabled="!hasModel"
-              @click="setMaterialMode('lambert')"
-            >
-              Lambert
-            </button>
+
+        <!-- 测量结果徽章 -->
+        <div class="measure-badges">
+          <div
+            v-for="badge in measureBadges"
+            v-show="badge.visible"
+            :key="badge.id"
+            class="measure-badge"
+            :style="{ transform: `translate(${badge.x}px, ${badge.y}px)` }"
+          >
+            <header @pointerdown="startBadgeDrag(badge, $event)">
+              <span class="measure-badge__dots" aria-hidden="true" />
+              <span class="measure-badge__title">{{ badge.title }}</span>
+            </header>
+            <div v-if="badge.mainValue" class="measure-badge__main">
+              <span>{{ badge.mainLabel }}</span>
+              <strong>{{ badge.mainValue }}</strong>
+            </div>
+            <div v-if="badge.rows.length" class="measure-badge__rows">
+              <div v-for="row in badge.rows" :key="row.label">
+                <span>{{ row.label }}</span>
+                <span>{{ row.value }}</span>
+              </div>
+            </div>
           </div>
         </div>
-        <el-button-group>
-          <el-button
-            size="small"
-            @click="resetView"
-            :icon="RefreshLeft"
-          >
-            重置视角
-          </el-button>
-          <el-tooltip :content="clipBoundsTooltip" placement="bottom">
+
+        <!-- 构件树面板 -->
+        <div v-if="showComponentTree" class="component-tree-panel">
+          <div class="panel-header">
+            <span class="panel-title">构件树</span>
+            <div class="panel-count">{{ treeNodeCount }} 个节点</div>
             <el-button
+              text
+              circle
               size="small"
-              class="toolbar-tool-btn toolbar-tool-btn--svg"
-              :class="{
-                'is-on': showBounds,
-                'is-disabled': !showBounds && !!clipBoundsDisabledReason,
-              }"
-              @click="onBoundsButtonClick"
+              @click="showComponentTree = false"
             >
-              <svg
-                class="toolbar-tool-btn__svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path d="M3 7 L12 3 L21 7 L21 17 L12 21 L3 17 Z" />
-                <line x1="3" y1="7" x2="21" y2="7" />
-                <line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 2" />
-                <line x1="12" y1="3" x2="12" y2="7" />
-              </svg>
-              裁切框
+              <el-icon><Close /></el-icon>
             </el-button>
-          </el-tooltip>
-          <el-tooltip content="构件树" placement="bottom">
-            <el-button
-              size="small"
-              class="toolbar-tool-btn"
-              :class="{ 'is-on': showComponentTree }"
-              :icon="Grid"
-              @click="toggleComponentTree"
+          </div>
+          <div ref="treeContainerRef" class="tree-container">
+            <el-tree
+              v-if="treeData.length > 0"
+              ref="treeRef"
+              :data="treeData"
+              :props="treeProps"
+              node-key="id"
+              :current-node-key="selectedTreeNodeKey"
+              :default-expanded-keys="defaultExpandedKeys"
+              :highlight-current="true"
+              :expand-on-click-node="false"
+              show-checkbox
+              @node-click="handleNodeClick"
+              @check="handleCheckChange"
+              @current-change="handleCurrentChange"
             >
-              构件树
-            </el-button>
-          </el-tooltip>
-          <el-button
-            size="small"
-            @click="toggleFullscreen"
-            :icon="FullScreen"
-          >
-            全屏
-          </el-button>
-          <el-button
-            size="small"
-            @click="handleDownload"
-            :icon="Download"
-          >
-            下载
-          </el-button>
-        </el-button-group>
+              <template #default="{ node, data }">
+                <div
+                  class="tree-node-content"
+                  :class="{ 'is-selected': selectedTreeNodeKey === data.id }"
+                >
+                  <span class="node-label">{{ node.label }}</span>
+                  <el-tag
+                    v-if="data.stepId"
+                    size="small"
+                    type="info"
+                    class="node-step-id"
+                  >
+                    #{{ data.stepId }}
+                  </el-tag>
+                </div>
+              </template>
+            </el-tree>
+            <div v-else class="tree-empty">
+              <el-empty description="暂无构件数据" :image-size="60" />
+            </div>
+          </div>
+          <!-- 选中构件信息 -->
+          <div v-if="selectedElementMeta" class="meta-box">
+            <div class="meta-title">
+              {{ selectedElementMeta.name || selectedElementMeta.id }}
+            </div>
+            <div class="meta-sub">
+              <span class="pill">{{ selectedElementMeta.type }}</span>
+              <span v-if="selectedElementMeta.stepId" class="pill">
+                #{{ selectedElementMeta.stepId }}
+              </span>
+              <el-tag size="small" type="primary">
+                {{ selectedElementMeta.id }}
+              </el-tag>
+            </div>
+          </div>
+        </div>
       </div>
+
+      <aside
+        class="sidebar"
+        :class="{ 'is-collapsed': sidebarCollapsed }"
+        aria-label="模型工具"
+      >
+        <div class="sidebar-heading">
+          <h2 v-if="!sidebarCollapsed">模型工具</h2>
+          <button
+            class="preview-button icon-btn"
+            type="button"
+            :title="sidebarCollapsed ? '展开模型工具' : '收起模型工具'"
+            :aria-label="sidebarCollapsed ? '展开模型工具' : '收起模型工具'"
+            @click="sidebarCollapsed = !sidebarCollapsed"
+          >
+            <el-icon>
+              <ArrowLeft v-if="sidebarCollapsed" />
+              <DArrowRight v-else />
+            </el-icon>
+          </button>
+        </div>
+
+        <div v-show="!sidebarCollapsed" class="sidebar-sections">
+          <!-- 模型与网格 -->
+          <section class="tool-section">
+            <h3>模型与网格</h3>
+            <div
+              class="model-view-options"
+              role="group"
+              aria-label="模型显示内容"
+            >
+              <button
+                class="preview-button"
+                :class="{ 'is-active': !remeshVisible }"
+                type="button"
+                :disabled="!hasModel || remeshBusy"
+                @click="toggleRemesh(false)"
+              >
+                原始 IFC
+              </button>
+              <button
+                class="preview-button"
+                :class="{ 'is-active': remeshVisible }"
+                type="button"
+                :disabled="!hasModel || !remeshReady || remeshBusy"
+                @click="toggleRemesh(true)"
+              >
+                网格结果
+              </button>
+            </div>
+            <p
+              class="mesh-status"
+              role="status"
+              :class="{
+                'is-ready': remeshReady,
+                'is-error': remeshStatus?.status === 'failed',
+              }"
+            >
+              {{ remeshStatusText }}
+            </p>
+            <table
+              v-if="remeshReady && remeshStats"
+              class="mesh-stats"
+              aria-label="网格均匀化前后统计"
+            >
+              <thead>
+                <tr>
+                  <th scope="col">几何统计</th>
+                  <th scope="col">原始 IFC</th>
+                  <th scope="col">网格结果</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">顶点</th>
+                  <td>{{ remeshStats.vertexBefore.toLocaleString() }}</td>
+                  <td>{{ remeshStats.vertexAfter.toLocaleString() }}</td>
+                </tr>
+                <tr>
+                  <th scope="row">三角面</th>
+                  <td>{{ remeshStats.faceBefore.toLocaleString() }}</td>
+                  <td>{{ remeshStats.faceAfter.toLocaleString() }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="mesh-actions">
+              <button
+                class="preview-button primary-button"
+                type="button"
+                :disabled="!remeshCanRun || remeshBusy"
+                @click="retryRemesh"
+              >
+                {{ remeshActionText }}
+              </button>
+              <button
+                class="preview-button"
+                type="button"
+                :disabled="remeshBusy || remeshRunning"
+                @click="refreshRemeshStatus"
+              >
+                刷新状态
+              </button>
+            </div>
+            <p v-if="remeshError" role="alert" class="error-message">
+              {{ remeshError }}
+            </p>
+            <p class="section-note">
+              {{
+                remeshVisible
+                  ? '橙色模型为均匀化结果；开启线框可检查三角网格。'
+                  : '切换网格结果后，可用线框检查网格化效果。'
+              }}
+            </p>
+            <label class="toggle-row">
+              <span>线框模式</span>
+              <el-switch
+                v-model="bimControls.wireframe"
+                aria-label="线框模式"
+              />
+            </label>
+          </section>
+
+          <!-- 剖切 -->
+          <section class="tool-section">
+            <h3>剖切</h3>
+            <label class="toggle-row">
+              <span>启用剖切</span>
+              <el-switch
+                v-model="bimControls.sectionEnabled"
+                aria-label="启用剖切"
+              />
+            </label>
+            <p class="section-note">
+              开启后拖拽模型外侧的 6 个方向箭头，调整剖切范围。
+            </p>
+          </section>
+
+          <!-- 辅助显示 -->
+          <section class="tool-section">
+            <h3>辅助显示</h3>
+            <label class="toggle-row">
+              <span>坐标轴</span>
+              <el-switch v-model="bimControls.showAxes" aria-label="坐标轴" />
+            </label>
+            <label class="toggle-row">
+              <span>参考网格</span>
+              <el-switch v-model="bimControls.showGrid" aria-label="参考网格" />
+            </label>
+          </section>
+
+          <!-- 画布背景 -->
+          <section class="tool-section">
+            <h3>画布背景</h3>
+            <div class="background-options" role="group" aria-label="画布背景">
+              <button
+                v-for="option in backgroundOptions"
+                :key="option.value"
+                class="preview-button theme-chip"
+                :class="{ 'is-active': backgroundTheme === option.value }"
+                type="button"
+                @click="backgroundTheme = option.value"
+              >
+                <span
+                  class="theme-swatch"
+                  :class="`theme-swatch-${option.value}`"
+                />
+                {{ option.label }}
+              </button>
+            </div>
+          </section>
+        </div>
+      </aside>
     </div>
-  </div>
+  </section>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, onDeactivated, onBeforeUnmount, nextTick, watch, defineComponent, h } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, onDeactivated, onBeforeUnmount, nextTick, watch, defineComponent, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   Close,
   RefreshLeft,
   FullScreen,
-  Download,
   ArrowLeft,
   Grid,
   Warning,
-  Location
+  DArrowRight
 } from '@element-plus/icons-vue'
+import { PLYLoader } from 'three/addons/loaders/PLYLoader.js'
+import { Line2 } from 'three/examples/jsm/lines/webgpu/Line2.js'
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
+import { InfiniteGroundGrid } from '@/utils/three/infiniteGroundGrid'
+import MeasurementToolbar from './MeasurementToolbar.vue'
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
@@ -216,12 +386,21 @@ import {
   MeshBasicNodeMaterial,
   MeshLambertNodeMaterial,
   ClippingGroup,
+  Line2NodeMaterial,
   WebGPURenderer,
 } from 'three/webgpu'
 import { color as tslColor, vertexColor as tslVertexColor } from 'three/tsl'
 
 // 导入API
 import { getIfcGlbFile, getIfcMetadata } from '@/api/fileManage'
+import {
+  getRemeshStatus,
+  remeshBimFile,
+  getRemeshResultUrl,
+  type RemeshStats,
+  type RemeshStatusResponse
+} from '@/api/mesh'
+import { getToken, formatToken, getOrganizationId } from '@/utils/auth'
 
 // 获取路由参数
 const route = useRoute()
@@ -259,6 +438,47 @@ const errorMessage = ref('')
 // 文件信息
 const fileType = ref<'bim' | 'cad' | 'scan' | null>(null)
 const fileName = ref('')
+
+// 项目名称（来自路由 query）
+const projectName = computed(() => {
+  const name = route.query.projectName
+  return typeof name === 'string' ? name : ''
+})
+
+// 画布背景主题
+type PreviewBackgroundTheme = 'deep' | 'light' | 'black' | 'gradient'
+const backgroundTheme = ref<PreviewBackgroundTheme>('deep')
+const backgroundOptions: Array<{
+  label: string
+  value: PreviewBackgroundTheme
+}> = [
+  { label: '蓝色', value: 'gradient' },
+  { label: '深色', value: 'deep' },
+  { label: '浅色', value: 'light' },
+  { label: '纯黑', value: 'black' }
+]
+const sidebarCollapsed = ref(false)
+
+// 模型工具开关
+const bimControls = reactive({
+  showAxes: false,
+  showGrid: false,
+  wireframe: false,
+  sectionEnabled: false
+})
+
+// 网格均匀化（保形网格）状态
+const remeshStatus = ref<RemeshStatusResponse | null>(null)
+const remeshStats = ref<RemeshStats | null>(null)
+const remeshSubmitting = ref(false)
+const remeshLoading = ref(false)
+const remeshVisible = ref(false)
+const remeshError = ref('')
+let remeshTimer: ReturnType<typeof setTimeout> | undefined
+let remeshGroup: THREE.Group | null = null
+let axesHelper: THREE.AxesHelper | null = null
+let gridHelper: InfiniteGroundGrid | null = null
+let originalModelCenter: THREE.Vector3 | null = null
 
 // Three.js渲染相关实例
 const viewerContainerRef = ref<HTMLDivElement | null>(null)
@@ -1093,6 +1313,11 @@ function onViewerPointerDown(event: PointerEvent) {
     consumePointerEvent(event)
     return
   }
+  // 测量模式：记录按下位置，抬起时（未拖动）才提交，避免旋转视角时误加点
+  if (analysisMode.value !== 'none') {
+    measurePointerDown = { x: event.clientX, y: event.clientY }
+    return
+  }
   onModelClick(event)
 }
 
@@ -1103,9 +1328,16 @@ function onViewerPointerMove(event: PointerEvent) {
 }
 
 function onViewerPointerUp(event: PointerEvent) {
-  if (!clipDragState) return
-  consumePointerEvent(event)
-  endClipDrag(event)
+  if (clipDragState) {
+    consumePointerEvent(event)
+    endClipDrag(event)
+    return
+  }
+  const down = measurePointerDown
+  measurePointerDown = null
+  if (!down || analysisMode.value === 'none') return
+  if (Math.hypot(event.clientX - down.x, event.clientY - down.y) > 6) return
+  handleMeasureClick(event)
 }
 /** 作用：创建高亮 overlay 材质（TSL 模式下确保可见） */
 function createHighlightOverlayMaterial(color: THREE.Color): THREE.Material {
@@ -1491,6 +1723,865 @@ function onModelClick(event: PointerEvent) {
   }
 }
 
+// ==================== 模型工具（网格结果 / 背景 / 辅助显示 / 剖切） ====================
+
+const remeshRunning = computed(() =>
+  ['queued', 'processing'].includes(remeshStatus.value?.status || '')
+)
+const remeshReady = computed(
+  () =>
+    remeshStatus.value?.status === 'succeeded' &&
+    Boolean(remeshStatus.value?.resultFileId)
+)
+const remeshBusy = computed(() => remeshSubmitting.value || remeshLoading.value)
+const remeshCanRun = computed(() =>
+  Boolean(
+    remeshStatus.value?.supported &&
+      !remeshRunning.value &&
+      (remeshStatus.value.status === 'succeeded' ||
+        remeshStatus.value.canManualRetry)
+  )
+)
+const remeshActionText = computed(() => {
+  if (remeshBusy.value) return '请稍候…'
+  if (remeshRunning.value) return '正在生成网格…'
+  if (remeshStatus.value?.status === 'succeeded') return '重新生成网格'
+  if (remeshStatus.value?.status === 'failed') return '重试生成网格'
+  return '生成网格'
+})
+const remeshStatusText = computed(() => {
+  if (!remeshStatus.value) return '正在查询均匀化状态…'
+  if (!remeshStatus.value.supported) return '当前模型不支持网格均匀化'
+  switch (remeshStatus.value.status) {
+    case 'queued':
+      return '任务已排队，完成后自动显示保形网格'
+    case 'processing':
+      return '正在生成保形网格，完成后自动显示'
+    case 'succeeded':
+      return remeshReady.value
+        ? remeshVisible.value
+          ? '当前显示：保形网格'
+          : '当前显示：原始模型；可开启保形网格'
+        : '已有结果不可用，请重新生成网格'
+    case 'failed':
+      return '均匀化失败，可重试'
+    default:
+      return '尚未生成均匀化网格'
+  }
+})
+
+/** 作用：为二进制资源请求构造鉴权头（PLY 结果等无法走 axios 拦截器） */
+function buildAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const token = getToken()
+  if (token?.accessToken) headers.Authorization = formatToken(token.accessToken)
+  const orgId = getOrganizationId()
+  if (orgId) headers['X-Organization-Id'] = String(orgId)
+  return headers
+}
+
+/** 作用：应用画布背景主题 */
+function applyBackgroundTheme() {
+  const colorMap: Record<PreviewBackgroundTheme, string> = {
+    deep: '#0b1020',
+    light: '#e8eef6',
+    black: '#000000',
+    gradient: '#10213b'
+  }
+  const color = new THREE.Color(colorMap[backgroundTheme.value])
+  if (scene) scene.background = color
+  renderer?.setClearColor?.(color, 1)
+  requestRender()
+}
+
+/** 作用：坐标轴 / 参考网格辅助显示（与 cloudBIM-viewer 保持一致） */
+function applyHelpers() {
+  if (!scene) return
+
+  const box = contentGroup
+    ? new THREE.Box3().setFromObject(contentGroup)
+    : null
+  const validBox = box && !box.isEmpty() ? box : null
+  const size = validBox
+    ? validBox.getSize(new THREE.Vector3())
+    : new THREE.Vector3(10, 10, 10)
+
+  // 坐标轴：固定在模型底部中心，尺寸与参考页一致（15）
+  if (!axesHelper) {
+    axesHelper = new THREE.AxesHelper(15)
+    scene.add(axesHelper)
+  }
+  axesHelper.visible = bimControls.showAxes
+  if (validBox) {
+    axesHelper.position.set(0, validBox.min.y, 0)
+  } else {
+    axesHelper.position.set(0, -Math.max(size.y, 1) / 2, 0)
+  }
+
+  // 参考网格：无限地面网格
+  if (!gridHelper) {
+    gridHelper = new InfiniteGroundGrid()
+    scene.add(gridHelper)
+  }
+  if (validBox) {
+    gridHelper.setBounds(validBox)
+  }
+  gridHelper.visible = bimControls.showGrid
+  if (gridHelper.visible && camera) {
+    gridHelper.updateForCamera(camera)
+  }
+  requestRender()
+}
+
+/** 作用：切换线框模式（同时作用于原始模型与网格结果） */
+function applyWireframe() {
+  const apply = (root: THREE.Object3D | null) => {
+    root?.traverse((obj: any) => {
+      if (!obj?.isMesh) return
+      const mat = obj.material
+      if (Array.isArray(mat)) {
+        mat.forEach((m: any) => {
+          if (m) m.wireframe = bimControls.wireframe
+        })
+      } else if (mat) {
+        mat.wireframe = bimControls.wireframe
+      }
+    })
+  }
+  apply(contentGroup)
+  apply(remeshGroup)
+  requestRender()
+}
+
+/** 作用：查询 BIM 网格均匀化状态（排队/处理中自动轮询） */
+async function refreshRemeshStatus() {
+  clearTimeout(remeshTimer)
+  if (!projectId.value || !fileId.value) return
+  try {
+    const res = await getRemeshStatus(projectId.value, fileId.value)
+    remeshStatus.value = res.data
+    remeshError.value =
+      res.data?.status === 'failed'
+        ? res.data.lastError || '网格均匀化失败'
+        : ''
+    if (
+      res.data?.supported &&
+      ['queued', 'processing'].includes(res.data.status || '')
+    ) {
+      remeshTimer = setTimeout(() => void refreshRemeshStatus(), 4000)
+    }
+  } catch (error: any) {
+    remeshError.value =
+      error?.response?.data?.msg || error?.message || '查询均匀化状态失败'
+  }
+}
+
+/** 作用：清理网格结果模型 */
+function clearRemeshGroup() {
+  if (!remeshGroup) return
+  remeshGroup.parent?.remove(remeshGroup)
+  remeshGroup.traverse((obj: any) => {
+    obj.geometry?.dispose?.()
+    const mat = obj.material
+    if (Array.isArray(mat)) mat.forEach((m: any) => m?.dispose?.())
+    else mat?.dispose?.()
+  })
+  remeshGroup = null
+}
+
+/** 作用：下载并加载网格均匀化结果（PLY）到场景 */
+async function loadRemeshResult() {
+  if (!projectId.value || !fileId.value || !scene) return
+  remeshLoading.value = true
+  remeshError.value = ''
+  let blobUrl: string | null = null
+  try {
+    const url = getRemeshResultUrl(projectId.value, fileId.value)
+    const resp = await fetch(url, {
+      headers: buildAuthHeaders(),
+      cache: 'no-store'
+    })
+    if (!resp.ok) throw new Error(`网格结果下载失败 HTTP ${resp.status}`)
+    const blob = await resp.blob()
+    blobUrl = URL.createObjectURL(blob)
+    const geometry = await new PLYLoader().loadAsync(blobUrl)
+    if (!geometry.attributes.normal) geometry.computeVertexNormals()
+    geometry.computeBoundingBox()
+
+    // 与原始 GLB 使用同一套坐标（原始模型加载时已按 center 平移）
+    const center = originalModelCenter
+      ? originalModelCenter.clone()
+      : (geometry.boundingBox as THREE.Box3).getCenter(new THREE.Vector3())
+    geometry.translate(-center.x, -center.y, -center.z)
+
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xff8a3d,
+      metalness: 0.1,
+      roughness: 0.75,
+      side: THREE.DoubleSide,
+      wireframe: bimControls.wireframe
+    })
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.name = '__remesh_result__'
+    remeshGroup = new THREE.Group()
+    remeshGroup.name = '__remesh_group__'
+    remeshGroup.add(mesh)
+    scene.add(remeshGroup)
+    requestRender()
+  } catch (error: any) {
+    remeshError.value = error?.message || '加载网格结果失败'
+  } finally {
+    if (blobUrl) URL.revokeObjectURL(blobUrl)
+    remeshLoading.value = false
+  }
+}
+
+/** 作用：在原始 IFC 与网格结果之间切换 */
+async function toggleRemesh(visible = !remeshVisible.value) {
+  if (remeshBusy.value || !hasModel.value || !remeshReady.value) return
+  if (visible === remeshVisible.value) return
+
+  if (visible) {
+    await loadRemeshResult()
+    if (remeshError.value) return
+    remeshVisible.value = true
+    if (contentGroup) contentGroup.visible = false
+  } else {
+    remeshVisible.value = false
+    clearRemeshGroup()
+    if (contentGroup) contentGroup.visible = true
+  }
+  requestRender()
+}
+
+/** 作用：提交（或重新提交）网格均匀化任务 */
+async function retryRemesh() {
+  if (!projectId.value || !fileId.value || !remeshCanRun.value || remeshBusy.value) {
+    return
+  }
+  const force = remeshStatus.value?.status === 'succeeded'
+  remeshSubmitting.value = true
+  remeshError.value = ''
+  try {
+    const res = await remeshBimFile(projectId.value, fileId.value, {
+      algorithm: 'bim_preprocessor',
+      params: {},
+      ...(force ? { force: true } : {})
+    })
+    if (res?.data?.stats) remeshStats.value = res.data.stats
+    if (remeshVisible.value) await toggleRemesh(false)
+    remeshStatus.value = {
+      ...(remeshStatus.value || { supported: true, canManualRetry: false }),
+      status: 'queued',
+      canManualRetry: false
+    }
+    await refreshRemeshStatus()
+    ElMessage.success('网格均匀化任务已提交，完成后可切换查看')
+  } catch (error: any) {
+    remeshError.value =
+      error?.response?.data?.msg || error?.message || '提交均匀化任务失败'
+    if (error?.response?.status === 409) await refreshRemeshStatus()
+  } finally {
+    remeshSubmitting.value = false
+  }
+}
+
+// ==================== 测量工具（测距 / 定位 / 面积） ====================
+type AnalysisMode = 'none' | 'distance' | 'locate' | 'area'
+type MeasureBadge = {
+  id: string
+  title: string
+  mainLabel: string
+  mainValue: string
+  rows: Array<{ label: string; value: string }>
+  anchor: THREE.Vector3
+  offset: { x: number; y: number }
+  x: number
+  y: number
+  visible: boolean
+}
+const analysisMode = ref<AnalysisMode>('none')
+const analysisToolbarCollapsed = ref(true)
+const measureBadges = ref<MeasureBadge[]>([])
+let measureGroup: THREE.Group | null = null
+let areaPreviewGroup: THREE.Group | null = null
+let measureIdSeq = 0
+const measureCounts = { point: 0, distance: 0, area: 0 }
+let distanceStart: THREE.Vector3 | null = null
+let areaPoints: THREE.Vector3[] = []
+let measurePointerDown: { x: number; y: number } | null = null
+let badgeDrag: {
+  id: string
+  startX: number
+  startY: number
+  originX: number
+  originY: number
+  moved: boolean
+} | null = null
+let modelMaxDim = 10
+
+function ensureMeasureGroup(): THREE.Group | null {
+  if (!scene) return null
+  if (!measureGroup) {
+    measureGroup = new THREE.Group()
+    measureGroup.name = '__measure_group__'
+    measureGroup.renderOrder = 10000
+    scene.add(measureGroup)
+  }
+  return measureGroup
+}
+
+/** 作用：创建测量标记（水滴形图钉），与参考页一致 */
+function createMeasurementPinSprite(color = '#ff4040', opacity = 1) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 128
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('无法创建测量标记画布')
+  context.shadowColor = 'rgba(255, 86, 86, .38)'
+  context.shadowBlur = 18
+  context.fillStyle = color
+  context.beginPath()
+  context.moveTo(64, 10)
+  context.bezierCurveTo(33, 10, 18, 32, 18, 55)
+  context.bezierCurveTo(18, 82, 39, 96, 64, 118)
+  context.bezierCurveTo(89, 96, 110, 82, 110, 55)
+  context.bezierCurveTo(110, 32, 95, 10, 64, 10)
+  context.closePath()
+  context.fill()
+  context.shadowBlur = 0
+  context.fillStyle = '#fff1f1'
+  context.beginPath()
+  context.arc(64, 52, 18, 0, Math.PI * 2)
+  context.fill()
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  const marker = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      opacity,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false
+    })
+  )
+  marker.center.set(0.5, 0.1)
+  marker.renderOrder = 10002
+  return marker
+}
+
+/** 作用：把图钉保持为屏幕空间固定像素大小 */
+function scaleMeasurementPin(marker: THREE.Sprite, targetPixels = 16) {
+  if (!camera || !renderer?.domElement || !marker.visible) return
+  const rect = renderer.domElement.getBoundingClientRect()
+  const viewportHeight = Math.max(rect.height, 1)
+  const distance = camera.position.distanceTo(marker.position)
+  const fov = THREE.MathUtils.degToRad(camera.fov || 50)
+  const worldUnitsPerPixel =
+    (2 * distance * Math.tan(fov * 0.5)) / viewportHeight
+  const size = Math.max(worldUnitsPerPixel * targetPixels, 1e-6)
+  marker.scale.set(size, size, 1)
+}
+
+function addMeasurementPin(
+  point: THREE.Vector3,
+  color = '#ff4040',
+  opacity = 1,
+  group?: THREE.Group | null
+) {
+  const target = group ?? ensureMeasureGroup()
+  if (!target) return
+  const pin = createMeasurementPinSprite(color, opacity)
+  pin.position.copy(point)
+  target.add(pin)
+  scaleMeasurementPin(pin)
+}
+
+/** 作用：创建测距/轮廓线（粗虚线，与参考页一致） */
+function createMeasureLine(
+  points: THREE.Vector3[],
+  color = '#d63d3d',
+  dashed = true
+) {
+  const geometry = new LineGeometry()
+  geometry.setPositions(points.flatMap((p) => [p.x, p.y, p.z]))
+  const material = new Line2NodeMaterial({
+    color,
+    linewidth: 2.8,
+    dashed,
+    dashSize: 0.9,
+    gapSize: 0.48,
+    worldUnits: false,
+    transparent: true,
+    opacity: 0.96,
+    depthTest: false,
+    depthWrite: false
+  })
+  const line = new Line2(geometry, material)
+  line.computeLineDistances()
+  line.renderOrder = 10001
+  return line
+}
+
+function removeAreaPreview() {
+  if (!areaPreviewGroup) return
+  areaPreviewGroup.parent?.remove(areaPreviewGroup)
+  areaPreviewGroup.traverse((obj: any) => {
+    obj.geometry?.dispose?.()
+    const mat = obj.material
+    if (Array.isArray(mat)) mat.forEach((m: any) => m?.dispose?.())
+    else mat?.dispose?.()
+  })
+  areaPreviewGroup = null
+}
+
+function addMeasureBadge(
+  badge: Omit<MeasureBadge, 'x' | 'y' | 'visible' | 'offset'>
+) {
+  measureBadges.value = [
+    ...measureBadges.value,
+    { ...badge, offset: { x: 0, y: 0 }, x: 0, y: 0, visible: false }
+  ]
+}
+
+function updateMeasureBadges() {
+  if (!camera || !renderer?.domElement || !measureBadges.value.length) return
+  const rect = renderer.domElement.getBoundingClientRect()
+  const projected = new THREE.Vector3()
+  measureBadges.value = measureBadges.value.map((badge) => {
+    projected.copy(badge.anchor).project(camera as THREE.PerspectiveCamera)
+    return {
+      ...badge,
+      x: (projected.x * 0.5 + 0.5) * rect.width + 14 + badge.offset.x,
+      y: (-projected.y * 0.5 + 0.5) * rect.height - 18 + badge.offset.y,
+      visible: projected.z < 1
+    }
+  })
+}
+
+/** 作用：拖动测量徽章（与参考页一致）；未拖动的点击仍按测量处理 */
+function startBadgeDrag(badge: MeasureBadge, event: PointerEvent) {
+  event.stopPropagation()
+  event.preventDefault()
+  badgeDrag = {
+    id: badge.id,
+    startX: event.clientX,
+    startY: event.clientY,
+    originX: badge.offset.x,
+    originY: badge.offset.y,
+    moved: false
+  }
+  window.addEventListener('pointermove', onBadgeDragMove)
+  window.addEventListener('pointerup', endBadgeDrag)
+}
+
+function onBadgeDragMove(event: PointerEvent) {
+  if (!badgeDrag) return
+  const drag = badgeDrag
+  const dx = event.clientX - drag.startX
+  const dy = event.clientY - drag.startY
+  if (!drag.moved && Math.hypot(dx, dy) <= 4) return
+  drag.moved = true
+  measureBadges.value = measureBadges.value.map((badge) =>
+    badge.id === drag.id
+      ? { ...badge, offset: { x: drag.originX + dx, y: drag.originY + dy } }
+      : badge
+  )
+}
+
+function endBadgeDrag(event: PointerEvent) {
+  const drag = badgeDrag
+  badgeDrag = null
+  window.removeEventListener('pointermove', onBadgeDragMove)
+  window.removeEventListener('pointerup', endBadgeDrag)
+  // 点在徽章手柄上但没有拖动：仍视为一次测量点击
+  if (drag && !drag.moved && analysisMode.value !== 'none') {
+    handleMeasureClick(event)
+  }
+}
+
+/** 作用：同步图钉大小（跟随相机/视口） */
+function syncMeasureVisuals() {
+  measureGroup?.traverse((child: any) => {
+    if (child instanceof THREE.Sprite) scaleMeasurementPin(child)
+  })
+}
+
+function formatLength(value: number) {
+  return `${value.toFixed(3)} m`
+}
+
+/** 作用：计算多边形在最佳拟合平面上的面积/周长/质心/投影点 */
+function createPolygonMetrics(points: THREE.Vector3[]) {
+  if (points.length < 3) return null
+  const normal = new THREE.Vector3()
+  points.forEach((point, index) => {
+    const next = points[(index + 1) % points.length]
+    normal.x += (point.y - next.y) * (point.z + next.z)
+    normal.y += (point.z - next.z) * (point.x + next.x)
+    normal.z += (point.x - next.x) * (point.y + next.y)
+  })
+  if (normal.lengthSq() < 1e-10) return null
+  normal.normalize()
+  const origin = points[0].clone()
+  const axisU = points[1].clone().sub(origin)
+  if (axisU.lengthSq() < 1e-10) return null
+  axisU.normalize()
+  const axisV = normal.clone().cross(axisU).normalize()
+  const projected = points.map((point) => {
+    const relative = point.clone().sub(origin)
+    return new THREE.Vector2(relative.dot(axisU), relative.dot(axisV))
+  })
+  let twiceArea = 0
+  let centroidX = 0
+  let centroidY = 0
+  projected.forEach((point, index) => {
+    const next = projected[(index + 1) % projected.length]
+    const cross = point.x * next.y - next.x * point.y
+    twiceArea += cross
+    centroidX += (point.x + next.x) * cross
+    centroidY += (point.y + next.y) * cross
+  })
+  const area = Math.abs(twiceArea) * 0.5
+  if (area <= 1e-8) return null
+  let perimeter = 0
+  points.forEach((point, index) => {
+    perimeter += point.distanceTo(points[(index + 1) % points.length])
+  })
+  const centroid = origin
+    .clone()
+    .addScaledVector(axisU, centroidX / (3 * twiceArea))
+    .addScaledVector(axisV, centroidY / (3 * twiceArea))
+  return { projected, area, perimeter, centroid }
+}
+
+function polygonArea(points: THREE.Vector3[]) {
+  return createPolygonMetrics(points)?.area ?? 0
+}
+
+function selectAnalysisMode(mode: AnalysisMode) {
+  analysisMode.value = analysisMode.value === mode ? 'none' : mode
+  distanceStart = null
+  areaPoints = []
+  removeAreaPreview()
+}
+
+function pickMeasurePoint(event: PointerEvent): THREE.Vector3 | null {
+  if (!renderer || !camera || !raycaster) return null
+  const ndc = getPointerNdc(event)
+  if (!ndc) return null
+  raycaster.setFromCamera(ndc, camera)
+  const targets: THREE.Object3D[] = []
+  if (contentGroup) targets.push(contentGroup)
+  if (remeshGroup) targets.push(remeshGroup)
+  const hits = raycaster.intersectObjects(targets, true)
+  if (!hits.length) return null
+  return snapMeasurePoint(hits[0].point.clone(), event)
+}
+
+/** 作用：吸附到已有测量点（18px 内），用于闭合区域/接续测量 */
+function snapMeasurePoint(
+  point: THREE.Vector3,
+  event: PointerEvent
+): THREE.Vector3 {
+  if (!camera || !renderer?.domElement) return point
+  const candidates: THREE.Vector3[] = [...areaPoints]
+  if (distanceStart) candidates.push(distanceStart)
+  measureBadges.value.forEach((badge) => candidates.push(badge.anchor))
+  if (!candidates.length) return point
+
+  const rect = renderer.domElement.getBoundingClientRect()
+  const screenX = event.clientX - rect.left
+  const screenY = event.clientY - rect.top
+  const projected = new THREE.Vector3()
+  let best: THREE.Vector3 | null = null
+  let bestDistance = 18
+  for (const candidate of candidates) {
+    projected.copy(candidate).project(camera as THREE.PerspectiveCamera)
+    if (projected.z < -1 || projected.z > 1) continue
+    const x = (projected.x * 0.5 + 0.5) * rect.width
+    const y = (-projected.y * 0.5 + 0.5) * rect.height
+    const distance = Math.hypot(x - screenX, y - screenY)
+    if (distance <= bestDistance) {
+      bestDistance = distance
+      best = candidate
+    }
+  }
+  return best ? best.clone() : point
+}
+
+function handleMeasureClick(event: PointerEvent) {
+  const point = pickMeasurePoint(event)
+  if (!point) return
+
+  if (analysisMode.value === 'locate') {
+    addMeasurementPin(point, '#22d3ee')
+    addMeasureBadge({
+      id: `measure-${++measureIdSeq}`,
+      title: `定位 #${++measureCounts.point}`,
+      mainLabel: '坐标',
+      mainValue: '',
+      rows: [
+        { label: 'X', value: formatLength(point.x) },
+        { label: 'Y', value: formatLength(point.z) },
+        { label: 'Z', value: formatLength(point.y) }
+      ],
+      anchor: point
+    })
+  } else if (analysisMode.value === 'distance') {
+    if (!distanceStart) {
+      distanceStart = point
+      addMeasurementPin(point, '#ff4040')
+    } else {
+      const start = distanceStart
+      const group = ensureMeasureGroup()
+      group?.add(createMeasureLine([start, point]))
+      addMeasurementPin(point, '#ff5a5a', 0.96)
+      const dx = point.x - start.x
+      const dy = point.y - start.y
+      const dz = point.z - start.z
+      const horizontal = Math.hypot(dx, dz)
+      const vertical = Math.abs(dy)
+      const slope =
+        horizontal <= 1e-8
+          ? vertical <= 1e-8
+            ? 0
+            : 90
+          : (Math.atan2(vertical, horizontal) * 180) / Math.PI
+      addMeasureBadge({
+        id: `measure-${++measureIdSeq}`,
+        title: `测距 #${++measureCounts.distance}`,
+        mainLabel: '直线距离',
+        mainValue: formatLength(start.distanceTo(point)),
+        rows: [
+          { label: '水平距离', value: formatLength(horizontal) },
+          { label: '垂直距离', value: formatLength(vertical) },
+          { label: '坡度', value: `${slope.toFixed(2)}°` }
+        ],
+        anchor: start.clone().add(point).multiplyScalar(0.5)
+      })
+      distanceStart = null
+    }
+  } else if (analysisMode.value === 'area') {
+    const cameraRef = camera as THREE.PerspectiveCamera | null
+    const closeThreshold = Math.max(
+      0.15,
+      (cameraRef?.position.distanceTo(point) ?? 1) * 0.025
+    )
+    // 与参考页一致：点击首个点附近即闭合区域
+    if (
+      areaPoints.length >= 3 &&
+      point.distanceTo(areaPoints[0]) < closeThreshold
+    ) {
+      closeAreaMeasurement()
+      requestRender()
+      return
+    }
+    areaPoints.push(point)
+    if (!areaPreviewGroup) {
+      areaPreviewGroup = new THREE.Group()
+      areaPreviewGroup.renderOrder = 10000
+      ensureMeasureGroup()?.add(areaPreviewGroup)
+    }
+    addMeasurementPin(point, '#ff4040', 1, areaPreviewGroup)
+    updateAreaPreview()
+  }
+  requestRender()
+}
+
+function removeAreaPreviewLines() {
+  if (!areaPreviewGroup) return
+  for (const child of [...areaPreviewGroup.children]) {
+    if ((child as any).isSprite) continue
+    areaPreviewGroup.remove(child)
+    ;(child as any).geometry?.dispose?.()
+    ;(child as any).material?.dispose?.()
+  }
+}
+
+/** 作用：刷新面积预览（≥3 点时自动闭合并填充，与参考页一致） */
+function updateAreaPreview() {
+  removeAreaPreviewLines()
+  if (!areaPreviewGroup || areaPoints.length < 2) return
+  const closed = areaPoints.length >= 3
+  const outline = closed ? [...areaPoints, areaPoints[0]] : [...areaPoints]
+  areaPreviewGroup.add(createMeasureLine(outline, '#ff5a5a'))
+  if (!closed) return
+  const metrics = createPolygonMetrics(areaPoints)
+  if (!metrics) return
+  const triangles = THREE.ShapeUtils.triangulateShape(metrics.projected, [])
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(
+      areaPoints.flatMap((p) => [p.x, p.y, p.z]),
+      3
+    )
+  )
+  geometry.setIndex(triangles.flat())
+  geometry.computeVertexNormals()
+  const fill = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({
+      color: 0xff5a5a,
+      transparent: true,
+      opacity: 0.16,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    })
+  )
+  fill.renderOrder = 10000
+  areaPreviewGroup.add(fill)
+}
+
+function closeAreaMeasurement() {
+  if (analysisMode.value !== 'area' || areaPoints.length < 3) return
+  const points = [...areaPoints]
+  const metrics = createPolygonMetrics(points)
+  removeAreaPreviewLines()
+  const group = ensureMeasureGroup()
+  if (group) {
+    group.add(createMeasureLine([...points, points[0]], '#ff5a5a'))
+    if (metrics) {
+      const triangles = THREE.ShapeUtils.triangulateShape(metrics.projected, [])
+      const geometry = new THREE.BufferGeometry()
+      geometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(
+          points.flatMap((point) => [point.x, point.y, point.z]),
+          3
+        )
+      )
+      geometry.setIndex(triangles.flat())
+      geometry.computeVertexNormals()
+      const fill = new THREE.Mesh(
+        geometry,
+        new THREE.MeshBasicMaterial({
+          color: 0xff5a5a,
+          transparent: true,
+          opacity: 0.16,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide
+        })
+      )
+      fill.renderOrder = 10000
+      group.add(fill)
+    }
+  }
+  const centroid =
+    metrics?.centroid ??
+    points
+      .reduce((sum, p) => sum.add(p), new THREE.Vector3())
+      .multiplyScalar(1 / points.length)
+  addMeasureBadge({
+    id: `measure-${++measureIdSeq}`,
+    title: `面积 #${++measureCounts.area}`,
+    mainLabel: '面积',
+    mainValue: `${polygonArea(points).toFixed(2)} m²`,
+    rows: metrics
+      ? [{ label: '周长', value: `${metrics.perimeter.toFixed(2)} m` }]
+      : [],
+    anchor: centroid
+  })
+  areaPoints = []
+  areaPreviewGroup = null
+  requestRender()
+}
+
+function clearAnalysis() {
+  analysisMode.value = 'none'
+  distanceStart = null
+  areaPoints = []
+  areaPreviewGroup = null
+  measureBadges.value = []
+  measureCounts.point = 0
+  measureCounts.distance = 0
+  measureCounts.area = 0
+  if (measureGroup) {
+    measureGroup.parent?.remove(measureGroup)
+    measureGroup.traverse((obj: any) => {
+      obj.geometry?.dispose?.()
+      const mat = obj.material
+      if (Array.isArray(mat)) mat.forEach((m: any) => m?.dispose?.())
+      else {
+        mat?.map?.dispose?.()
+        mat?.dispose?.()
+      }
+    })
+    measureGroup = null
+  }
+  requestRender()
+}
+
+function onViewerDblClick() {
+  closeAreaMeasurement()
+}
+
+function onMeasureKeyDown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && analysisMode.value !== 'none') {
+    clearAnalysis()
+    return
+  }
+  if (event.key === 'Enter' && analysisMode.value === 'area') {
+    closeAreaMeasurement()
+  }
+}
+
+const analysisTitle = computed(() =>
+  analysisMode.value === 'distance'
+    ? '全局测距'
+    : analysisMode.value === 'area'
+      ? '面积测量'
+      : '全局定位'
+)
+const analysisHint = computed(() => {
+  if (analysisMode.value === 'distance') return '依次点击两点完成一段测距'
+  if (analysisMode.value === 'area') return '连续点击至少三个点，双击闭合区域'
+  return '点击模型任意位置拾取坐标'
+})
+const analysisSummary = computed(() => {
+  const latest = measureBadges.value.at(-1)
+  return latest ? `${latest.mainLabel} ${latest.mainValue}` : ''
+})
+
+watch(analysisMode, (mode) => {
+  if (renderer?.domElement) {
+    renderer.domElement.style.cursor = mode === 'none' ? '' : 'crosshair'
+  }
+})
+
+watch(backgroundTheme, () => applyBackgroundTheme())
+watch(
+  () => [bimControls.showAxes, bimControls.showGrid],
+  () => applyHelpers()
+)
+watch(
+  () => bimControls.wireframe,
+  () => applyWireframe()
+)
+watch(
+  () => bimControls.sectionEnabled,
+  (enabled) => {
+    if (enabled) {
+      if (!hasModel.value) {
+        bimControls.sectionEnabled = false
+        ElMessage.warning('请先加载 BIM 模型')
+        return
+      }
+      if (!showBounds.value) {
+        showBounds.value = true
+        onShowBoundsChange()
+      }
+    } else if (showBounds.value) {
+      showBounds.value = false
+      onShowBoundsChange()
+    }
+  }
+)
+
 /** 作用：重置相机视角 */
 /** 重置视角（根据模型尺寸自适应） */
 const resetView = () => {
@@ -1584,7 +2675,10 @@ function renderFrame() {
   if (!renderer || !scene || !camera) return
   controls?.update?.()
   camera.updateMatrixWorld?.()
+  if (gridHelper?.visible) gridHelper.updateForCamera(camera)
   renderer.render(scene, camera)
+  updateMeasureBadges()
+  syncMeasureVisuals()
 }
 
 function requestRender() {
@@ -1682,11 +2776,13 @@ async function initThree() {
   renderer.domElement.addEventListener('pointermove', onViewerPointerMove)
   renderer.domElement.addEventListener('pointerup', onViewerPointerUp)
   renderer.domElement.addEventListener('pointercancel', onViewerPointerUp)
+  renderer.domElement.addEventListener('dblclick', onViewerDblClick)
 
   // 初始化渲染器
   loadingMessage.value = '正在初始化渲染引擎...'
   await renderer.init()
   loadingMessage.value = '渲染引擎初始化完成'
+  applyBackgroundTheme()
   applyClippingState()
   requestRender()
 }
@@ -1754,6 +2850,10 @@ function loadGlbModel(blob: Blob, token: number): Promise<void> {
           const fov = THREE.MathUtils.degToRad(camera!.fov)
           const distance = maxDim / 2 / Math.tan(fov / 2)
 
+          // 记录原始中心与尺寸，供网格结果对齐、测量点尺寸使用
+          originalModelCenter = center.clone()
+          modelMaxDim = maxDim
+
           controls!.target.set(0, 0, 0)
           camera!.position.set(0, maxDim * 0.15, distance * 2.2)
           camera!.near = distance / 100
@@ -1769,6 +2869,10 @@ function loadGlbModel(blob: Blob, token: number): Promise<void> {
           applyClippingState()
 
           isLoading.value = false
+
+          // 应用辅助显示与网格均匀化状态
+          applyHelpers()
+          void refreshRemeshStatus()
 
           // 加载构件树元数据
           if (!isStale(token)) loadMetadata()
@@ -2064,6 +3168,30 @@ function disposeResources() {
   // 清理包围盒辅助线
   clearBoundsHelpers()
 
+  // 清理测量结果
+  clearAnalysis()
+
+  // 清理网格结果、辅助显示与定时器
+  clearTimeout(remeshTimer)
+  clearRemeshGroup()
+  if (axesHelper) {
+    scene?.remove(axesHelper)
+    axesHelper.dispose?.()
+    axesHelper = null
+  }
+  if (gridHelper) {
+    scene?.remove(gridHelper)
+    gridHelper.dispose()
+    gridHelper = null
+  }
+  remeshStatus.value = null
+  remeshStats.value = null
+  remeshVisible.value = false
+  remeshError.value = ''
+  remeshSubmitting.value = false
+  remeshLoading.value = false
+  originalModelCenter = null
+
   // 清理Three.js资源
   resizeObserver?.disconnect()
   controls?.dispose()
@@ -2072,6 +3200,7 @@ function disposeResources() {
     renderer.domElement.removeEventListener('pointermove', onViewerPointerMove)
     renderer.domElement.removeEventListener('pointerup', onViewerPointerUp)
     renderer.domElement.removeEventListener('pointercancel', onViewerPointerUp)
+    renderer.domElement.removeEventListener('dblclick', onViewerDblClick)
   }
   renderer?.dispose()
   renderer?.domElement?.remove()
@@ -2159,6 +3288,7 @@ onMounted(() => {
 
   // 监听全屏状态变化
   document.addEventListener('fullscreenchange', handleFullscreenChange)
+  document.addEventListener('keydown', onMeasureKeyDown)
 })
 
 onActivated(() => {
@@ -2199,6 +3329,7 @@ watch(
 // 组件卸载
 onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  document.removeEventListener('keydown', onMeasureKeyDown)
   isDeactivatedFlag = true
   loadToken++
   // 清理Three.js资源
@@ -3107,4 +4238,513 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
+</style>
+
+<style lang="scss" scoped>
+/* ==================== CloudBIM 风格预览布局 ==================== */
+.asset-preview-page {
+  --viewer-panel-width: 320px;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background: var(--bg-page);
+}
+
+.asset-preview-page .error-container {
+  position: absolute;
+  inset: 0;
+  z-index: 1001;
+  height: auto;
+}
+
+.bim-preview-header {
+  display: flex;
+  flex: 0 0 64px;
+  gap: var(--spacing-md);
+  align-items: center;
+  min-width: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color-light);
+}
+
+.bim-file-context {
+  display: flex;
+  flex: 1;
+  gap: var(--spacing-compact);
+  align-items: center;
+  min-width: 0;
+  padding-left: var(--spacing-md);
+  border-left: 1px solid var(--border-color-light);
+}
+
+.bim-file-context strong,
+.bim-file-context span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bim-file-context strong {
+  font-weight: 600;
+}
+
+.bim-file-context span {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.bim-header-tools {
+  display: flex;
+  gap: var(--spacing-compact);
+  align-items: center;
+}
+
+.preview-button {
+  display: inline-flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height, 32px);
+  padding: 0 var(--spacing-compact);
+  font: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-xs);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.preview-button:hover:not(:disabled) {
+  background: var(--bg-control-hover);
+  border-color: var(--border-color-hover);
+}
+
+.preview-button.is-active {
+  font-weight: 600;
+  color: var(--color-primary-active);
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+
+.preview-button:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+  background: var(--bg-muted);
+  border-color: var(--border-color-light);
+}
+
+.primary-button {
+  color: var(--bg-card);
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--color-primary-active);
+  border-color: var(--color-primary-active);
+}
+
+.icon-btn {
+  flex: 0 0 var(--control-height, 32px);
+  width: var(--control-height, 32px);
+  padding: 0;
+}
+
+.layout-shell {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) var(--viewer-panel-width);
+  min-height: 0;
+}
+
+.layout-shell.is-sidebar-collapsed {
+  grid-template-columns: minmax(0, 1fr) 56px;
+}
+
+.viewer-region {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #0b1020;
+}
+
+.viewer-region .component-tree-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: auto;
+  z-index: 50;
+  width: 320px;
+  border-right: 1px solid var(--border-color-light);
+  border-left: 0;
+  box-shadow: 4px 0 20px rgb(0 0 0 / 10%);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border-color-light);
+}
+
+.sidebar-heading {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--border-color-light);
+}
+
+.sidebar-heading h2 {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.sidebar.is-collapsed .sidebar-heading {
+  justify-content: center;
+  padding-inline: var(--spacing-sm);
+}
+
+.sidebar-sections {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.tool-section {
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--border-color-light);
+}
+
+.tool-section h3 {
+  margin: 0 0 var(--spacing-compact);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.model-view-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-sm);
+}
+
+.mesh-status {
+  margin: var(--spacing-compact) 0;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-base, 1.5);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.mesh-status.is-ready {
+  color: var(--color-success);
+}
+
+.mesh-status.is-error,
+.error-message {
+  color: var(--text-danger);
+}
+
+.mesh-stats {
+  width: 100%;
+  margin-bottom: var(--spacing-md);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  border-collapse: collapse;
+}
+
+.mesh-stats th,
+.mesh-stats td {
+  padding: var(--spacing-xs) 0;
+  font-weight: 400;
+  text-align: right;
+}
+
+.mesh-stats th:first-child {
+  text-align: left;
+  color: var(--text-secondary);
+}
+
+.mesh-stats thead {
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color-light);
+}
+
+.mesh-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.mesh-actions .primary-button {
+  flex: 1;
+}
+
+.error-message {
+  margin: var(--spacing-sm) 0 0;
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.section-note {
+  margin: var(--spacing-sm) 0 0;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-base, 1.5);
+  color: var(--text-secondary);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--control-height, 32px);
+  gap: var(--spacing-compact);
+}
+
+.background-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-sm);
+}
+
+.theme-chip {
+  justify-content: flex-start;
+}
+
+.theme-swatch {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--spacing-xs);
+}
+
+.theme-swatch-gradient {
+  background: #10213b;
+}
+
+.theme-swatch-deep {
+  background: #0c1224;
+}
+
+.theme-swatch-light {
+  background: #e8eef6;
+}
+
+.theme-swatch-black {
+  background: #000;
+}
+
+@media (width <= 1600px) {
+  .asset-preview-page {
+    --viewer-panel-width: 300px;
+  }
+
+  .bim-file-context {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+}
+
+@media (width <= 720px) {
+  .bim-preview-header {
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+  }
+
+  .bim-file-context {
+    flex-basis: 40%;
+  }
+
+  .bim-header-tools {
+    margin-left: auto;
+  }
+
+  .layout-shell {
+    grid-template-columns: minmax(0, 1fr) min(280px, 48vw);
+  }
+
+  .mesh-actions {
+    flex-direction: column;
+  }
+}
+</style>
+
+<style lang="scss" scoped>
+/* ==================== 测量工具与结果标签 ==================== */
+.toolbar-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.measure-analysis-toolbar {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  z-index: 82;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 42px;
+  max-width: calc(100% - 32px);
+  padding: 8px 10px 8px 14px;
+  color: #f8fafc;
+  white-space: nowrap;
+  background: rgb(8 17 29 / 86%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 24%);
+  backdrop-filter: blur(14px);
+  transform: translateX(-50%);
+}
+
+.measure-analysis-toolbar strong {
+  font-size: var(--font-size-sm);
+}
+
+.measure-analysis-hint,
+.measure-analysis-exit {
+  font-size: var(--font-size-xs);
+  color: rgb(226 232 240 / 78%);
+}
+
+.measure-analysis-value {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: #fca5a5;
+}
+
+.measure-analysis-toolbar button {
+  padding: 4px 9px;
+  font-size: var(--font-size-xs);
+  color: #fecaca;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgb(248 113 113 / 40%);
+  border-radius: var(--radius-xs);
+}
+
+.measure-analysis-toolbar button:hover {
+  background: rgb(248 113 113 / 16%);
+}
+
+.measure-badges {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.measure-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 168px;
+  max-width: 220px;
+  padding: 10px 12px 8px;
+  color: rgb(255 255 255 / 90%);
+  pointer-events: none;
+  user-select: none;
+  background: rgb(8 18 42 / 78%);
+  border: 1px solid rgb(115 162 243 / 22%);
+  border-radius: var(--radius-sm);
+  box-shadow:
+    0 12px 28px rgb(4 10 34 / 30%),
+    inset 0 1px 0 rgb(255 255 255 / 6%);
+  backdrop-filter: blur(14px) saturate(120%);
+}
+
+.measure-badge header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 18px;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.measure-badge header:active {
+  cursor: grabbing;
+}
+
+.measure-badge__dots {
+  width: 16px;
+  height: 10px;
+  background-image: radial-gradient(
+    circle,
+    rgb(151 186 255 / 78%) 1px,
+    transparent 1.5px
+  );
+  background-size: 5px 5px;
+  opacity: 0.62;
+}
+
+.measure-badge__title {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: rgb(255 255 255 / 68%);
+}
+
+.measure-badge__main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.measure-badge__main span {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgb(145 181 255 / 94%);
+}
+
+.measure-badge__main strong {
+  font-size: 18px;
+  line-height: 1.15;
+  color: #fff;
+  text-shadow: 0 0 14px rgb(78 102 204 / 28%);
+}
+
+.measure-badge__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.measure-badge__rows > div {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.measure-badge__rows span:first-child {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: rgb(161 191 250 / 88%);
+}
+
+.measure-badge__rows span:last-child {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: rgb(255 255 255 / 94%);
+  text-align: right;
+}
 </style>

@@ -216,6 +216,28 @@ class PureHttp {
       (error: PureHttpError) => {
         const $error = error;
         $error.isCancelRequest = Axios.isCancel($error);
+
+        // 后端在并发压力下会偶发返回 403/5xx（数据库瞬时错误），
+        // 对幂等的 GET 请求做有限次退避重试，避免页面直接报错
+        const retryConfig = $error.config as any;
+        const status = $error.response?.status;
+        const method = (retryConfig?.method || "get").toLowerCase();
+        const retryableStatus = [403, 500, 502, 503, 504];
+        const maxRetries = 2;
+
+        if (
+          retryConfig &&
+          method === "get" &&
+          retryableStatus.includes(status) &&
+          (retryConfig.__retryCount || 0) < maxRetries
+        ) {
+          retryConfig.__retryCount = (retryConfig.__retryCount || 0) + 1;
+          const delay = 200 * retryConfig.__retryCount;
+          return new Promise(resolve => setTimeout(resolve, delay)).then(() =>
+            instance.request(retryConfig)
+          );
+        }
+
         // 所有的响应异常 区分来源为取消请求/非取消请求
         return Promise.reject($error);
       }

@@ -1,8 +1,13 @@
 <template>
-  <div class="report-preview-page">
+  <div class="report-preview-page" :class="{ 'is-embedded': props.embedded }">
     <div class="preview-toolbar">
       <div class="toolbar-left">
-        <button class="toolbar-back-btn" type="button" @click="goCenter">
+        <button
+          v-if="!props.embedded"
+          class="toolbar-back-btn"
+          type="button"
+          @click="goCenter"
+        >
           <el-icon><ArrowLeftBold /></el-icon>
           <span>返回报告中心</span>
         </button>
@@ -229,10 +234,7 @@
                       </tr>
                     </thead>
                     <tbody>
-                      <tr
-                        v-for="row in reportContextTableRows"
-                        :key="row.key"
-                      >
+                      <tr v-for="row in reportContextTableRows" :key="row.key">
                         <td class="is-type">{{ row.label }}</td>
                         <td>{{ row.fileName }}</td>
                         <td>{{ row.location }}</td>
@@ -285,7 +287,8 @@
                         扫描点云与 BIM 模型偏差统计
                       </div>
                       <div class="c2m-report-subtitle">
-                        数据直接来自后端最新一次 C2M 计算结果，用于质量评估与整改优先级判断
+                        数据直接来自后端最新一次 C2M
+                        计算结果，用于质量评估与整改优先级判断
                       </div>
                     </div>
                     <div class="c2m-report-hero-side">
@@ -296,7 +299,12 @@
                         {{ c2mTrustBadgeLabel }}
                       </span>
                       <span class="c2m-report-hero-caption">
-                        重叠度 {{ formatPercent(c2mReportData.diagnostics.bboxOverlapIoU) }}
+                        重叠度
+                        {{
+                          formatPercent(
+                            c2mReportData.diagnostics.bboxOverlapIoU,
+                          )
+                        }}
                       </span>
                     </div>
                   </section>
@@ -314,11 +322,15 @@
                       </div>
                       <div class="c2m-report-overview-item">
                         <span>降采样参数</span>
-                        <strong>{{ formatDistance(c2mReportData.voxelSize || 0) }}</strong>
+                        <strong>
+                          {{ formatDistance(c2mReportData.voxelSize || 0) }}
+                        </strong>
                       </div>
                       <div class="c2m-report-overview-item">
                         <span>参与网格顶点</span>
-                        <strong>{{ formatInteger(c2mReportData.meshVertexCount) }}</strong>
+                        <strong>
+                          {{ formatInteger(c2mReportData.meshVertexCount) }}
+                        </strong>
                       </div>
                       <div class="c2m-report-overview-item">
                         <span>点云样本</span>
@@ -342,9 +354,15 @@
                         :key="card.label"
                         class="c2m-report-card"
                       >
-                        <span class="c2m-report-card-label">{{ card.label }}</span>
-                        <strong class="c2m-report-card-value">{{ card.value }}</strong>
-                        <span class="c2m-report-card-help">{{ card.help }}</span>
+                        <span class="c2m-report-card-label">
+                          {{ card.label }}
+                        </span>
+                        <strong class="c2m-report-card-value">
+                          {{ card.value }}
+                        </strong>
+                        <span class="c2m-report-card-help">
+                          {{ card.help }}
+                        </span>
                       </div>
                     </div>
                   </section>
@@ -392,7 +410,9 @@
                       </div>
                     </div>
 
-                    <div class="c2m-report-section c2m-report-section--insights">
+                    <div
+                      class="c2m-report-section c2m-report-section--insights"
+                    >
                       <div class="c2m-report-section-title">结果解读</div>
                       <div class="c2m-report-insight-list">
                         <div
@@ -723,6 +743,18 @@ defineOptions({
   name: 'ReportDetail',
 })
 
+/**
+ * 可复用：既可作路由页（读 route.params.reportId），
+ * 也可作内嵌组件（由父级传 reportId，embedded 隐藏「返回报告中心」）。
+ */
+const props = withDefaults(
+  defineProps<{
+    reportId?: number | string
+    embedded?: boolean
+  }>(),
+  { reportId: undefined, embedded: false },
+)
+
 const route = useRoute()
 const router = useRouter()
 
@@ -777,7 +809,8 @@ const reviewForm = reactive<{
 })
 
 const reportId = computed(() => {
-  const value = Number(route.params.reportId)
+  const raw = props.reportId ?? route.params.reportId
+  const value = Number(raw)
   if (!Number.isFinite(value) || value <= 0) return null
   return value
 })
@@ -820,9 +853,10 @@ const previewCanvasStyle = computed(() => ({
   '--page-scale': String(previewScale.value / 100),
 }))
 const formatContextLocation = (buildingName?: string, floorName?: string) => {
-  const parts = [String(buildingName || '').trim(), String(floorName || '').trim()].filter(
-    Boolean,
-  )
+  const parts = [
+    String(buildingName || '').trim(),
+    String(floorName || '').trim(),
+  ].filter(Boolean)
   return parts.length ? parts.join(' / ') : '-'
 }
 const resolvedScanFileName = computed(() => {
@@ -971,8 +1005,7 @@ const c2mMetricCards = computed(() => {
 const c2mRetentionText = computed(() => {
   const data = c2mReportData.value
   if (!data) return '-'
-  const ratio =
-    data.pointsBefore > 0 ? data.pointsAfter / data.pointsBefore : 0
+  const ratio = data.pointsBefore > 0 ? data.pointsAfter / data.pointsBefore : 0
   return formatPercent(ratio)
 })
 const c2mTrustBadgeLabel = computed(() => {
@@ -1104,7 +1137,9 @@ const formatSignedDistance = (value?: number | null) => {
 const histogramBarColor = (t: number) => {
   const distanceFromCenter = Math.abs(t - 0.5) * 2
   const qualityT =
-    distanceFromCenter <= 0.5 ? 0 : Math.min(1, (distanceFromCenter - 0.5) / 0.5)
+    distanceFromCenter <= 0.5
+      ? 0
+      : Math.min(1, (distanceFromCenter - 0.5) / 0.5)
   const stops = [0, 0.55, 1]
   const rgbs = [
     [63, 211, 107],
@@ -1420,7 +1455,10 @@ const loadReportOverviewScreenshot = async (value: ReportRecord | null) => {
     const blob = await getReportOverviewScreenshotBlob(url)
     reportOverviewScreenshotObjectUrl.value = URL.createObjectURL(blob)
   } catch (error) {
-    console.warn('[ReportPreview] 报告总览图 blob 加载失败，回退直连地址:', error)
+    console.warn(
+      '[ReportPreview] 报告总览图 blob 加载失败，回退直连地址:',
+      error,
+    )
   }
 }
 
@@ -1513,13 +1551,18 @@ const loadC2MReportData = async (value: ReportRecord | null) => {
   c2mLoading.value = true
   c2mStatusText.value = '正在读取后端偏差分析结果'
   try {
-    const calibrationRes = await getScanCalibration(value.projectId, value.scanFileId)
+    const calibrationRes = await getScanCalibration(
+      value.projectId,
+      value.scanFileId,
+    )
     if (calibrationRes.code !== 200 || !calibrationRes.data) {
       throw new Error(calibrationRes.msg || '获取扫描校准信息失败')
     }
 
     const bimFileId = calibrationRes.data.bimFileId
-    c2mBimFileId.value = Number.isFinite(Number(bimFileId)) ? Number(bimFileId) : null
+    c2mBimFileId.value = Number.isFinite(Number(bimFileId))
+      ? Number(bimFileId)
+      : null
     if (!c2mBimFileId.value) {
       c2mStatusText.value = '当前扫描未绑定 BIM，暂无偏差分析结果'
       return
@@ -1538,8 +1581,7 @@ const loadC2MReportData = async (value: ReportRecord | null) => {
     c2mStatusText.value = '偏差分析结果已同步至报告'
   } catch (error: any) {
     c2mReportData.value = null
-    c2mStatusText.value =
-      error?.message || '后端暂未生成可用的偏差分析结果'
+    c2mStatusText.value = error?.message || '后端暂未生成可用的偏差分析结果'
   } finally {
     c2mLoading.value = false
   }
@@ -1861,7 +1903,7 @@ const goCenter = () => {
 }
 
 watch(
-  () => route.params.reportId,
+  reportId,
   () => {
     void loadDetail()
   },
@@ -1899,6 +1941,12 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: calc(100vh - 84px);
   background: #eceff3;
+}
+
+/* 内嵌到分析流程第三步时：填满容器，不按视口高度撑开 */
+.report-preview-page.is-embedded {
+  height: 100%;
+  min-height: 0;
 }
 
 .preview-toolbar {
@@ -2375,8 +2423,11 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border: 1px solid #dbe3ee;
   border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 1));
+  background: linear-gradient(
+    180deg,
+    rgba(248, 250, 252, 0.96),
+    rgba(255, 255, 255, 1)
+  );
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
 }
 
@@ -2777,7 +2828,11 @@ onBeforeUnmount(() => {
   border: 1px solid #d9e1eb;
   border-radius: 16px;
   background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 34%),
+    radial-gradient(
+      circle at top right,
+      rgba(15, 118, 110, 0.12),
+      transparent 34%
+    ),
     linear-gradient(135deg, #f8fafc, #ffffff);
 }
 

@@ -1,19 +1,59 @@
 <template>
-  <div ref="containerEl" class="BimPointcloudAlign-container">
+  <div
+    ref="containerEl"
+    class="BimPointcloudAlign-container calibration-page cb-shell"
+  >
     <!-- 顶部工具栏 -->
-    <div class="topbar">
-      <div class="topbar-left">
-        <h1 class="brand-title">
-          BIM 与点云校准 - {{ projectNameForDisplay }}
-        </h1>
-        <div class="topbar-center">
-          <el-tag round effect="light">步骤 1/2</el-tag>
+    <div class="topbar calibration-header">
+      <div class="topbar-left title-block">
+        <el-button
+          text
+          :icon="ArrowLeft"
+          aria-label="返回扫描点云"
+          title="返回扫描点云"
+          @click="handleBackToCalibration"
+        />
+        <div class="alignment-title-context">
+          <h1 class="brand-title">
+            {{ activeWorkflowStepMeta.title }}
+          </h1>
+          <span class="alignment-file-context" :title="titleBlockSubtitle">
+            {{ titleBlockSubtitle }}
+          </span>
         </div>
       </div>
 
-      <div class="topbar-right">
-        <el-button @click="handleBackToCalibration">返回</el-button>
+      <nav class="alignment-workflow-nav" aria-label="BIM 与点云分析流程">
+        <div class="alignment-workflow-track">
+          <button
+            v-for="step in workflowSteps"
+            :key="step.id"
+            type="button"
+            class="alignment-workflow-step"
+            :class="{
+              'is-active': activeWorkflowStep === step.id,
+              'is-completed': activeWorkflowStep > step.id,
+              'is-disabled': workflowStepDisabled(step.id),
+            }"
+            :disabled="workflowStepDisabled(step.id)"
+            :aria-current="activeWorkflowStep === step.id ? 'step' : undefined"
+            :title="workflowStepDisabledReason(step.id) || undefined"
+            @click="openWorkflowStep(step.id)"
+          >
+            <span class="alignment-workflow-step__number">
+              {{ String(step.id).padStart(2, '0') }}
+            </span>
+            <span class="alignment-workflow-step__copy">
+              <strong>{{ step.title }}</strong>
+              <small>{{ step.subtitle }}</small>
+            </span>
+          </button>
+        </div>
+      </nav>
+
+      <div class="topbar-right header-actions">
         <el-button
+          v-if="activeWorkflowStep === 1"
           :disabled="!projectId || !scanFileId || !bimFileId"
           :loading="loadingAlignmentMatrixDialog"
           @click="handleShowAlignmentMatrix"
@@ -21,6 +61,7 @@
           校准矩阵
         </el-button>
         <el-tooltip
+          v-if="activeWorkflowStep === 1"
           :content="saveCalibrationTooltip"
           :disabled="!saveCalibrationTooltip"
           placement="bottom"
@@ -34,41 +75,68 @@
             校准完成
           </el-button>
         </el-tooltip>
-        <el-button @click="showPanel = !showPanel">
-          {{ showPanel ? '收起' : '展开' }}
-        </el-button>
       </div>
     </div>
 
-    <div class="main-content">
+    <div
+      class="main-content calibration-main"
+      :class="{
+        'is-report-step': activeWorkflowStep === 3,
+        'is-panel-hidden': !showPanel && activeWorkflowStep !== 3,
+      }"
+    >
+      <AnalysisReportView
+        v-if="activeWorkflowStep === 3"
+        class="report-preview-workspace"
+        :project-id="projectId"
+        :scan-file-id="scanFileId"
+        :project-name="projectNameForDisplay"
+        :scan-file-name="pointCloudNameForDisplay"
+      />
+
       <!-- 左侧垂直工具栏 -->
-      <div class="left-toolbar">
+      <aside
+        v-if="activeWorkflowStep !== 3"
+        class="left-toolbar view-toolbar"
+        aria-label="视图工具"
+      >
         <el-tooltip content="重置视角" placement="right">
           <div class="tool-item">
             <el-button
               class="tool-btn"
               circle
-              type="text"
+              text
               :icon="RefreshLeft"
+              aria-label="重置视角"
               :disabled="!hasModel"
               @click="resetView"
             />
           </div>
         </el-tooltip>
+
         <el-tooltip
           :content="
             projectionMode === 'perspective'
-              ? '透视（点击切换正交）'
-              : '正交（点击切换透视）'
+              ? '当前透视 · 切换正交'
+              : '当前正交 · 切换透视'
           "
           placement="right"
         >
           <div class="tool-item">
             <el-button
               class="tool-btn tool-btn--img"
-              :class="{ 'is-on': projectionMode === 'orthographic' }"
+              :class="{
+                'is-on': projectionMode === 'orthographic',
+                'tool-btn--orthographic': projectionMode === 'orthographic',
+              }"
+              :aria-label="
+                projectionMode === 'perspective'
+                  ? '当前透视，切换正交'
+                  : '当前正交，切换透视'
+              "
+              :aria-pressed="projectionMode === 'orthographic'"
               circle
-              type="text"
+              text
               @click="
                 setProjectionMode(
                   projectionMode === 'perspective'
@@ -82,459 +150,903 @@
                 :src="
                   projectionMode === 'perspective' ? toushiIcon : zhengjiaoIcon
                 "
-                alt="投影模式"
+                alt=""
               />
             </el-button>
           </div>
         </el-tooltip>
+
         <el-tooltip content="网格" placement="right">
           <div class="tool-item">
             <el-button
               class="tool-btn tool-btn--img"
               :class="{ 'is-on': showGrid }"
+              :aria-pressed="showGrid"
+              aria-label="参考网格"
               circle
-              type="text"
+              text
               @click="toggleGrid"
             >
-              <img class="tool-btn__img" :src="wanggeIcon" alt="网格" />
+              <ViewportToolGlyph name="grid" />
             </el-button>
           </div>
         </el-tooltip>
+
         <el-tooltip
-          :content="showMeshWireframe ? '关闭线框' : '显示线框'"
-          placement="right"
-        >
-          <div class="tool-item">
-            <el-button
-              class="tool-btn tool-btn--svg"
-              :class="{ 'is-on': showMeshWireframe }"
-              circle
-              type="text"
-              :disabled="!hasGltf"
-              @click="toggleMeshWireframe"
-            >
-              <!-- 线框：2.5D 错位立方体，全边可见 -->
-              <svg
-                class="tool-btn__svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <rect x="3" y="9" width="12" height="12" />
-                <rect x="9" y="3" width="12" height="12" />
-                <line x1="3" y1="9" x2="9" y2="3" />
-                <line x1="15" y1="9" x2="21" y2="3" />
-                <line x1="15" y1="21" x2="21" y2="15" />
-                <line x1="3" y1="21" x2="9" y2="15" />
-              </svg>
-            </el-button>
-          </div>
-        </el-tooltip>
-        <el-tooltip :content="clipBoundsTooltip" placement="right">
-          <div class="tool-item">
-            <el-button
-              class="tool-btn tool-btn--svg"
-              :class="{
-                'is-on': showBounds,
-                'is-disabled': !showBounds && !!clipBoundsDisabledReason,
-              }"
-              circle
-              type="text"
-              @click="onBoundsButtonClick"
-            >
-              <svg
-                class="tool-btn__svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path d="M3 7 L12 3 L21 7 L21 17 L12 21 L3 17 Z" />
-                <line x1="3" y1="7" x2="21" y2="7" />
-                <line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 2" />
-                <line x1="12" y1="3" x2="12" y2="7" />
-              </svg>
-            </el-button>
-          </div>
-        </el-tooltip>
-        <el-divider />
-        <el-tooltip content="前视图" placement="right">
-          <div class="tool-item">
-            <el-button
-              class="tool-btn tool-btn--text"
-              :class="{ 'is-on': hasModel && activeView === 'front' }"
-              circle
-              type="text"
-              :disabled="!hasModel"
-              @click="setFrontView"
-            >
-              前
-            </el-button>
-          </div>
-        </el-tooltip>
-        <el-tooltip content="俯视图" placement="right">
-          <div class="tool-item">
-            <el-button
-              class="tool-btn tool-btn--text"
-              :class="{ 'is-on': hasModel && activeView === 'top' }"
-              circle
-              type="text"
-              :disabled="!hasModel"
-              @click="setTopView"
-            >
-              俯
-            </el-button>
-          </div>
-        </el-tooltip>
-        <el-tooltip content="侧视图" placement="right">
-          <div class="tool-item">
-            <el-button
-              class="tool-btn tool-btn--text"
-              :class="{ 'is-on': hasModel && activeView === 'side' }"
-              circle
-              type="text"
-              :disabled="!hasModel"
-              @click="setSideView"
-            >
-              侧
-            </el-button>
-          </div>
-        </el-tooltip>
-        <el-divider />
-        <el-tooltip
-          :content="modelHidden ? '显示模型' : '隐藏模型'"
+          :content="isLightBackground ? '切换夜间背景' : '切换白昼背景'"
           placement="right"
         >
           <div class="tool-item">
             <el-button
               class="tool-btn"
-              :class="{ 'is-on': modelHidden }"
+              :class="{ 'is-on': isLightBackground }"
               circle
-              type="text"
-              :icon="modelHidden ? View : Hide"
-              :disabled="!hasGltf"
-              @click="toggleModelVisibility"
+              text
+              :icon="isLightBackground ? Moon : Sunny"
+              :aria-label="isLightBackground ? '切换夜间背景' : '切换白昼背景'"
+              @click="toggleBackground"
             />
           </div>
         </el-tooltip>
-        <el-tooltip
-          :content="pointCloudHidden ? '显示点云' : '隐藏点云'"
-          placement="right"
-        >
+
+        <el-tooltip :content="meshWireframeTooltip" placement="right">
           <div class="tool-item">
             <el-button
               class="tool-btn tool-btn--svg"
-              :class="{ 'is-on': pointCloudHidden }"
+              :class="{ 'is-on': showMeshWireframe }"
+              :aria-label="meshWireframeTooltip"
+              :aria-pressed="showMeshWireframe"
               circle
-              type="text"
-              :disabled="!hasTileset"
-              @click="togglePointCloudVisibility"
+              text
+              :disabled="!hasModel"
+              @click="toggleMeshWireframe"
             >
-              <!-- 点云：随机散点，直观表达三维点云数据 -->
+              <ViewportToolGlyph name="wireframe" />
+            </el-button>
+          </div>
+        </el-tooltip>
+
+        <el-tooltip content="BIM 材质" placement="right">
+          <div class="tool-item">
+            <el-button
+              class="tool-btn tool-btn--material"
+              :class="{ 'is-on': showMaterialMenu }"
+              circle
+              text
+              :disabled="!hasModel"
+              aria-label="BIM 材质"
+              :aria-expanded="showMaterialMenu"
+              @click="showMaterialMenu = !showMaterialMenu"
+            >
               <svg
                 class="tool-btn__svg"
                 viewBox="0 0 24 24"
-                fill="currentColor"
-                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
               >
-                <circle cx="5" cy="17" r="1.3" />
-                <circle cx="9" cy="8" r="1.5" />
-                <circle cx="14" cy="14" r="1.1" />
-                <circle cx="18" cy="6" r="1.4" />
-                <circle cx="7" cy="13" r="0.9" />
-                <circle cx="16" cy="10" r="1.1" />
-                <circle cx="12" cy="19" r="1.2" />
-                <circle cx="20" cy="15" r="1.0" />
-                <circle cx="4" cy="10" r="0.8" />
-                <circle cx="11" cy="5" r="0.9" />
-                <circle cx="19" cy="19" r="0.8" />
-                <circle cx="3" cy="5" r="1.0" />
+                <path d="M12 3 21 8 12 13 3 8 12 3Z" />
+                <path d="m3 12 9 5 9-5" />
+                <path d="m3 16 9 5 9-5" />
               </svg>
             </el-button>
           </div>
         </el-tooltip>
+
+        <el-tooltip :content="clipBoundsTooltip" placement="right">
+          <div class="tool-item">
+            <el-button
+              class="tool-btn tool-btn--svg"
+              :class="{
+                'is-on': enableClipping && showBounds,
+                'is-disabled': !enableClipping && !!clipBoundsDisabledReason,
+              }"
+              circle
+              text
+              :aria-label="clipBoundsTooltip"
+              :aria-pressed="enableClipping && showBounds"
+              @click="onBoundsButtonClick"
+            >
+              <ViewportToolGlyph name="clipping" />
+            </el-button>
+          </div>
+        </el-tooltip>
+
+        <div class="tool-item measurement-tool-item">
+          <MeasurementToolbar
+            v-model:collapsed="analysisToolbarCollapsed"
+            class="alignment-measurement-toolbar"
+            :mode="analysisMode"
+            :disabled="!hasModel"
+            clear-on-toggle-off
+            default-mode-on-open="distance"
+            toggle-icon="fixed"
+            placement="left"
+            position="static"
+            @update:mode="selectAnalysisMode"
+            @clear="clearAllMeasurements"
+          />
+        </div>
+
+        <el-divider />
+
+        <el-tooltip :content="bimVisibilityLabel" placement="right">
+          <div class="tool-item">
+            <el-button
+              class="tool-btn"
+              :class="{ 'is-on': hasModel && bimVisible }"
+              circle
+              text
+              :aria-label="bimVisibilityLabel"
+              :aria-pressed="bimVisible"
+              :disabled="!hasModel"
+              @click="toggleBimVisibility"
+            >
+              <ViewportToolGlyph name="solidModel" :hidden="!bimVisible" />
+            </el-button>
+            <span class="tool-label">{{ bimVisibilityLabel }}</span>
+          </div>
+        </el-tooltip>
+
+        <el-tooltip :content="pointcloudVisibilityLabel" placement="right">
+          <div class="tool-item">
+            <el-button
+              class="tool-btn tool-btn--svg"
+              :class="{ 'is-on': hasTileset && pointcloudVisible }"
+              circle
+              text
+              :disabled="!hasTileset"
+              :aria-label="pointcloudVisibilityLabel"
+              :aria-pressed="pointcloudVisible"
+              @click="togglePointCloudVisibility"
+            >
+              <ViewportToolGlyph
+                name="pointCloud"
+                :hidden="!pointcloudVisible"
+              />
+            </el-button>
+          </div>
+        </el-tooltip>
+
+        <el-popover
+          v-model:visible="showPointcloudSettings"
+          placement="right-end"
+          :width="304"
+          trigger="click"
+          :teleported="true"
+        >
+          <template #reference>
+            <div class="tool-item">
+              <el-button
+                class="tool-btn tool-btn--svg"
+                circle
+                text
+                :disabled="!hasTileset"
+                :class="{ 'is-on': showPointcloudSettings }"
+                aria-label="点云显示（点大小、配色、EDL）"
+                title="点云显示（点大小、配色、EDL）"
+                :aria-expanded="showPointcloudSettings"
+              >
+                <svg
+                  class="tool-btn__svg"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <circle cx="5" cy="12" r="1.5" />
+                  <circle cx="11" cy="12" r="2.5" />
+                  <circle cx="19" cy="12" r="4" />
+                </svg>
+              </el-button>
+            </div>
+          </template>
+          <div
+            class="pointcloud-tools-popover"
+            @keydown.esc.stop="showPointcloudSettings = false"
+          >
+            <strong>点云显示</strong>
+            <div class="pointcloud-edl-control">
+              <span id="alignment-edl-label">EDL 深度增强</span>
+              <el-switch
+                :model-value="edlEnabled"
+                :disabled="!hasTileset || projectionMode === 'orthographic'"
+                aria-label="EDL 深度增强"
+                @change="toggleEdl"
+              />
+            </div>
+            <p
+              v-if="projectionMode === 'orthographic'"
+              class="pointcloud-display-hint"
+            >
+              正交视图下暂停 EDL，切回透视后恢复。
+            </p>
+            <label class="pointcloud-size-control">
+              <span>点大小</span>
+              <input
+                v-model.number="pointcloudPointSize"
+                aria-label="点大小"
+                type="range"
+                min="1"
+                max="5"
+                step="0.1"
+              />
+              <output>{{ pointcloudPointSize.toFixed(1) }} px</output>
+            </label>
+            <div v-if="activeWorkflowStep === 1" class="pointcloud-display-row">
+              <div
+                class="pointcloud-segmented pointcloud-color-modes"
+                role="group"
+                aria-label="点云着色"
+              >
+                <button
+                  type="button"
+                  :class="{ on: pointcloudColorMode === 'rgb' }"
+                  :aria-pressed="pointcloudColorMode === 'rgb'"
+                  @click="setPointcloudColorMode('rgb')"
+                >
+                  真彩
+                </button>
+                <button
+                  type="button"
+                  :class="{ on: pointcloudColorMode === 'intensity' }"
+                  :aria-pressed="pointcloudColorMode === 'intensity'"
+                  @click="setPointcloudColorMode('intensity')"
+                >
+                  强度
+                </button>
+              </div>
+              <div
+                v-if="pointcloudColorMode === 'intensity'"
+                class="pointcloud-segmented pointcloud-ramp-modes"
+                role="group"
+                aria-label="强度色带"
+              >
+                <button
+                  type="button"
+                  :disabled="pointcloudColorMode !== 'intensity'"
+                  :class="{ on: pointcloudColorRamp === 'grayscale' }"
+                  :aria-pressed="pointcloudColorRamp === 'grayscale'"
+                  @click="setPointcloudColorRamp('grayscale')"
+                >
+                  灰度
+                </button>
+                <button
+                  type="button"
+                  :disabled="pointcloudColorMode !== 'intensity'"
+                  :class="{ on: pointcloudColorRamp === 'spectrum' }"
+                  :aria-pressed="pointcloudColorRamp === 'spectrum'"
+                  @click="setPointcloudColorRamp('spectrum')"
+                >
+                  彩虹
+                </button>
+                <button
+                  type="button"
+                  :disabled="pointcloudColorMode !== 'intensity'"
+                  :class="{ on: pointcloudColorRamp === 'viridis' }"
+                  :aria-pressed="pointcloudColorRamp === 'viridis'"
+                  @click="setPointcloudColorRamp('viridis')"
+                >
+                  紫黄
+                </button>
+              </div>
+            </div>
+          </div>
+        </el-popover>
+      </aside>
+
+      <!-- BIM 材质浮层 -->
+      <div
+        v-if="showMaterialMenu"
+        class="left-material-popover"
+        role="menu"
+        aria-label="BIM 材质模式"
+      >
+        <button
+          type="button"
+          :class="{ 'is-active': materialMode === 'original' }"
+          role="menuitemradio"
+          :aria-checked="materialMode === 'original'"
+          @click="selectMaterialMode('original')"
+        >
+          原始材质
+        </button>
+        <button
+          type="button"
+          :class="{ 'is-active': materialMode === 'unlit' }"
+          role="menuitemradio"
+          :aria-checked="materialMode === 'unlit'"
+          @click="selectMaterialMode('unlit')"
+        >
+          无光照
+        </button>
+        <button
+          type="button"
+          :class="{ 'is-active': materialMode === 'lambert' }"
+          role="menuitemradio"
+          :aria-checked="materialMode === 'lambert'"
+          @click="selectMaterialMode('lambert')"
+        >
+          漫反射
+        </button>
       </div>
 
       <!-- 中间3D视图区域 -->
-      <div ref="viewportEl" class="viewport" />
+      <div
+        v-show="activeWorkflowStep !== 3"
+        ref="viewportEl"
+        class="viewport viewport-shell three-view-pane"
+      >
+        <PointcloudViewCube
+          class="alignment-view-cube"
+          :camera="viewerCamera"
+          @home="resetView"
+          @select-direction="setPointcloudViewDirection"
+          @orbit="orbitView"
+          @roll="rollView"
+        />
+        <PointcloudAxesTriad
+          class="alignment-axes-triad"
+          :camera="viewerCamera"
+        />
+        <ViewerAnalysisOverlay
+          :mode="analysisMode"
+          :point="analysisPoint"
+          :distance="analysisDistance"
+          :points="analysisPoints"
+          :distances="analysisDistances"
+          :areas="analysisAreas"
+          @clear="clearAllMeasurements"
+        />
+        <ViewerMeasurementBadge
+          v-for="badge in measureBadges"
+          :key="badge.id"
+          :overlay="badge.overlay"
+          :title="badge.title"
+          :main-label="badge.mainLabel"
+          :main-value="badge.mainValue"
+          :rows="badge.rows"
+          closable
+          deletable
+          :resettable="Boolean(measurementBadgeOffsets.get(badge.id))"
+          @close="hideMeasurementBadge(badge.id)"
+          @delete="deleteMeasurementBadge(badge)"
+          @drag-by="moveMeasurementBadge(badge.id, $event)"
+          @reset-position="resetMeasurementBadge(badge.id)"
+        />
+      </div>
 
       <!-- 右侧控制面板 -->
-      <div v-if="showPanel" class="right-panel">
-        <div class="panel-section">
-          <div class="section-title">配准</div>
-          <div class="control-row">
-            <el-switch v-model="editMode" @change="onEditModeChange" />
-            <span class="label">粗配准（手动）</span>
+      <div
+        v-if="showPanel && activeWorkflowStep !== 3"
+        id="alignment-control-panel"
+        class="right-panel control-panel is-workflow-panel"
+      >
+        <div class="control-panel-header">
+          <div class="panel-heading">
+            <strong>
+              {{ activeWorkflowStep === 2 ? '偏差对比' : '配准控制' }}
+            </strong>
           </div>
-          <div class="edit-target-row">
+          <div class="panel-step-actions">
             <button
-              class="edit-target-btn"
-              :class="{ 'is-active': registrationStage === 'coarse' }"
-              :disabled="!hasGltf && !hasTileset"
-              @click="activateCoarseRegistration"
+              v-if="activeWorkflowStep > 1"
+              class="panel-step-count panel-next-step panel-prev-step"
+              type="button"
+              :disabled="
+                workflowStepDisabled((activeWorkflowStep - 1) as WorkflowStepId)
+              "
+              @click="
+                openWorkflowStep((activeWorkflowStep - 1) as WorkflowStepId)
+              "
             >
-              粗配准
+              <el-icon aria-hidden="true"><DArrowLeft /></el-icon>
+              上一步
             </button>
             <button
-              class="edit-target-btn"
-              :class="{ 'is-active': registrationStage === 'fine' }"
-              :disabled="!hasGltf || !hasTileset || fineAlignLoading"
-              @click="activateFineRegistration"
+              v-if="activeWorkflowStep < 3"
+              class="panel-step-count panel-next-step"
+              type="button"
+              :disabled="
+                workflowStepDisabled((activeWorkflowStep + 1) as WorkflowStepId)
+              "
+              @click="
+                openWorkflowStep((activeWorkflowStep + 1) as WorkflowStepId)
+              "
             >
-              {{ fineAlignLoading ? '精调中...' : '精细化配准' }}
+              下一步
+              <el-icon aria-hidden="true"><DArrowRight /></el-icon>
             </button>
           </div>
-          <template v-if="registrationStage === 'coarse'">
-            <div class="coarse-actions">
-              <el-button
-                type="primary"
-                size="small"
-                :loading="savingCalibration"
-                :disabled="!canSaveCoarseAlignment"
-                @click="saveCoarseAlignmentMatrix"
-              >
-                保存粗配准矩阵
-              </el-button>
-              <div class="coarse-actions__hint">{{ coarseSaveHint }}</div>
-            </div>
-          </template>
-          <template v-else>
-            <div class="fine-params">
-              <div class="fine-param-row">
-                <span class="fine-param-label">负优化策略</span>
-                <el-switch
-                  v-model="fineApplyWhenRegressed"
-                  :disabled="fineAlignLoading"
-                  active-text="告警但应用精调"
-                  inactive-text="仅告警不应用"
-                  inline-prompt
-                  @change="markFineAlignmentDirty"
-                />
-              </div>
-              <div class="fine-threshold-grid">
-                <div class="fine-threshold-item">
-                  <span class="fine-threshold-label">RMSE 阈值</span>
-                  <el-input-number
-                    v-model="fineRmseRegressRatio"
-                    :disabled="fineAlignLoading"
-                    :min="1"
-                    :max="2"
-                    :step="0.01"
-                    :precision="2"
-                    controls-position="right"
-                    @change="onFineRmseRegressRatioChange"
-                  />
-                </div>
-                <div class="fine-threshold-item">
-                  <span class="fine-threshold-label">Fitness 阈值</span>
-                  <el-input-number
-                    v-model="fineFitnessRegressRatio"
-                    :disabled="fineAlignLoading"
-                    :min="0.5"
-                    :max="1"
-                    :step="0.01"
-                    :precision="2"
-                    controls-position="right"
-                    @change="onFineFitnessRegressRatioChange"
-                  />
-                </div>
-              </div>
+        </div>
+        <div class="panel-body">
+          <p v-if="activeWorkflowStep === 1" class="workflow-guidance">
+            调整模型位置并保存粗配准，再进行精细配准。完成校准后可进入偏差对比。
+          </p>
+          <div
+            v-if="activeWorkflowStep === 1"
+            class="panel-section registration-edit-panel"
+          >
+            <div
+              class="registration-stage-row"
+              role="group"
+              aria-label="配准阶段"
+            >
               <button
-                class="fine-reset-link"
-                :disabled="fineAlignLoading"
-                @click="resetFineThresholdDefaults"
+                class="registration-stage-btn"
+                :class="{ 'is-active': registrationStage === 'coarse' }"
+                :aria-pressed="registrationStage === 'coarse'"
+                :disabled="!hasModel"
+                @click="activateCoarseRegistration"
               >
-                恢复默认阈值
+                粗配准
+              </button>
+              <button
+                class="registration-stage-btn"
+                :class="{ 'is-active': registrationStage === 'fine' }"
+                :aria-pressed="registrationStage === 'fine'"
+                :disabled="!hasSavedAlignmentMatrix"
+                :title="!hasSavedAlignmentMatrix ? '请先保存粗配准' : undefined"
+                @click="activateFineRegistration"
+              >
+                精细配准
               </button>
             </div>
-            <div class="fine-actions">
-              <el-button
-                type="primary"
-                :loading="fineAlignLoading"
-                :disabled="!canRunFineAlignment"
-                style="width: 100%"
-                @click="runFineAlignment"
-              >
-                开始计算
-              </el-button>
-              <el-button
-                :loading="savingCalibration"
-                :disabled="!canSaveFineAlignment"
-                style="width: 100%; margin-left: 0"
-                @click="saveFineAlignmentMatrix"
-              >
-                保存配准结果
-              </el-button>
-            </div>
-            <div v-if="fineRunBlockedReason" class="fine-actions__hint">
-              {{ fineRunBlockedReason }}
-            </div>
-          </template>
-          <!-- 调整对象：模型 / 点云 并列切换按钮 -->
-          <div class="edit-target-row" :class="{ disabled: !editMode }">
-            <button
-              class="edit-target-btn"
-              :class="{ 'is-active': selectedItemIsGltf }"
-              :disabled="!editMode || !hasGltf"
-              @click="selectGltfTarget"
-            >
-              模型调整
-            </button>
-            <button
-              class="edit-target-btn"
-              :class="{ 'is-active': selectedItemIsTileset }"
-              :disabled="!editMode || !hasTileset"
-              @click="selectTilesetTarget"
-            >
-              点云调整
-            </button>
-            <el-button
-              size="small"
-              :disabled="!editMode || !selectedItemId"
-              @click="focusSelected"
-            >
-              定位
-            </el-button>
-          </div>
-          <div class="control-row" :class="{ disabled: !editMode }">
-            <span class="label">变换</span>
-            <el-radio-group
-              v-model="transformMode"
-              :disabled="!editMode"
-              @change="setTransformMode"
-            >
-              <el-radio-button
-                label="translate"
-                :disabled="!editMode || selectedItemIsTileset"
-              >
-                移动
-              </el-radio-button>
-              <el-radio-button
-                label="rotate"
-                :disabled="!editMode || selectedItemIsTileset"
-              >
-                旋转
-              </el-radio-button>
-            </el-radio-group>
-          </div>
-          <div
-            class="control-row control-row--orientation"
-            :class="{ disabled: !editMode || !selectedItemId }"
-          >
-            <span class="label">
-              {{ transformMode === 'rotate' ? '方向修正 (deg)' : '位置修正' }}
-            </span>
-            <div v-if="transformMode === 'rotate'" class="orientation-sliders">
-              <div
-                class="control-row control-row--compact"
-                :class="{ disabled: !editMode || !selectedItemId }"
-              >
-                <div class="step-control-group">
-                  <el-select
-                    v-model="rotationStepPreset"
-                    class="step-select"
-                    popper-class="bpa-right-popper"
-                    :disabled="!editMode || !selectedItemId"
-                    @change="onRotationStepPresetChange"
-                  >
-                    <el-option
-                      v-for="stepOption in rotationStepOptions"
-                      :key="`rotate-${stepOption}`"
-                      :label="formatRotationStepLabel(stepOption)"
-                      :value="String(stepOption)"
-                    />
-                    <el-option label="自定义" value="custom" />
-                  </el-select>
-                  <el-input-number
-                    v-model="rotationAdjustStep"
-                    class="step-input"
-                    size="small"
-                    :min="0.01"
-                    :max="45"
-                    :step="0.01"
-                    :precision="2"
-                    :controls="false"
-                    :disabled="!editMode || !selectedItemId"
-                    @change="onRotationAdjustStepChange"
+            <template v-if="registrationStage === 'fine'">
+              <div class="fine-params">
+                <div class="fine-param-row">
+                  <span class="fine-param-label">负优化策略</span>
+                  <el-switch
+                    v-model="fineApplyWhenRegressed"
+                    :disabled="fineAlignLoading"
+                    active-text="告警但应用精调"
+                    inactive-text="仅告警不应用"
+                    inline-prompt
+                    @change="markFineAlignmentDirty"
                   />
                 </div>
+                <div class="fine-threshold-grid">
+                  <div class="fine-threshold-item">
+                    <span class="fine-threshold-label">RMSE 阈值</span>
+                    <el-input-number
+                      v-model="fineRmseRegressRatio"
+                      :disabled="fineAlignLoading"
+                      :min="1"
+                      :max="2"
+                      :step="0.01"
+                      :precision="2"
+                      controls-position="right"
+                      @change="onFineRmseRegressRatioChange"
+                    />
+                  </div>
+                  <div class="fine-threshold-item">
+                    <span class="fine-threshold-label">Fitness 阈值</span>
+                    <el-input-number
+                      v-model="fineFitnessRegressRatio"
+                      :disabled="fineAlignLoading"
+                      :min="0.5"
+                      :max="1"
+                      :step="0.01"
+                      :precision="2"
+                      controls-position="right"
+                      @change="onFineFitnessRegressRatioChange"
+                    />
+                  </div>
+                </div>
+                <button
+                  class="fine-reset-link"
+                  :disabled="fineAlignLoading"
+                  @click="resetFineThresholdDefaults"
+                >
+                  恢复默认阈值
+                </button>
               </div>
-              <template v-if="showOnlyVerticalAxis">
-                <label
-                  class="slider"
+              <div class="fine-actions">
+                <el-button
+                  type="primary"
+                  :loading="fineAlignLoading"
+                  :disabled="!canRunFineAlignment"
+                  style="width: 100%"
+                  @click="runFineAlignment"
+                >
+                  开始计算
+                </el-button>
+                <el-button
+                  :loading="savingCalibration"
+                  :disabled="!canSaveFineAlignment"
+                  style="width: 100%; margin-left: 0"
+                  @click="saveFineAlignmentMatrix"
+                >
+                  保存配准结果
+                </el-button>
+              </div>
+              <div v-if="fineRunBlockedReason" class="fine-actions__hint">
+                {{ fineRunBlockedReason }}
+              </div>
+              <div
+                v-if="fineAlignResult"
+                class="fine-result"
+                :class="{ 'fine-result--warning': fineAlignResult.regressed }"
+              >
+                <div class="fine-result__title">
+                  {{
+                    fineAlignResult.regressed
+                      ? '精调结果出现退化告警'
+                      : '精调结果'
+                  }}
+                </div>
+                <div class="fine-result__grid">
+                  <span>
+                    RMSE
+                    <strong>
+                      {{
+                        Number(fineAlignResult.metrics?.fineRmse ?? 0).toFixed(
+                          4,
+                        )
+                      }}
+                      m
+                    </strong>
+                  </span>
+                  <span>
+                    Fitness
+                    <strong>
+                      {{
+                        Number(
+                          fineAlignResult.metrics?.fineFitness ?? 0,
+                        ).toFixed(4)
+                      }}
+                    </strong>
+                  </span>
+                  <span>
+                    位移变化
+                    <strong>
+                      {{
+                        Number(
+                          fineAlignResult.metrics?.deltaTranslationM ?? 0,
+                        ).toFixed(3)
+                      }}
+                      m
+                    </strong>
+                  </span>
+                  <span>
+                    旋转变化
+                    <strong>
+                      {{
+                        Number(
+                          fineAlignResult.metrics?.deltaRotationDeg ?? 0,
+                        ).toFixed(3)
+                      }}
+                      deg
+                    </strong>
+                  </span>
+                  <span>
+                    耗时
+                    <strong>
+                      {{
+                        Number(fineAlignResult.metrics?.elapsedS ?? 0).toFixed(
+                          1,
+                        )
+                      }}
+                      s
+                    </strong>
+                  </span>
+                  <span>
+                    点数
+                    <strong>
+                      {{ fineAlignResult.metrics?.sourceTotalPoints ?? 0 }} /
+                      {{ fineAlignResult.metrics?.targetPoints ?? 0 }}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            </template>
+
+            <div class="registration-handle-control">
+              <label for="registration-handles">操作手柄</label>
+              <el-switch
+                id="registration-handles"
+                v-model="showTransformHandles"
+                :disabled="
+                  !hasModel ||
+                  !editMode ||
+                  fineAlignLoading ||
+                  savingCalibration
+                "
+                aria-label="显示配准操作手柄"
+              />
+            </div>
+            <p class="registration-handle-hint">
+              {{
+                enableClipping
+                  ? '剖切时暂时隐藏配准手柄。'
+                  : '控制画布中的平移与旋转手柄；关闭后仍可输入数值调整。'
+              }}
+            </p>
+            <div class="transform-mode" role="tablist" aria-label="变换方式">
+              <button
+                type="button"
+                class="transform-mode-button"
+                :class="{ 'is-active': transformMode === 'translate' }"
+                role="tab"
+                :aria-selected="transformMode === 'translate'"
+                :disabled="!editMode || !hasModel"
+                @click="setTransformMode('translate')"
+              >
+                移动
+              </button>
+              <button
+                type="button"
+                class="transform-mode-button"
+                :class="{ 'is-active': transformMode === 'rotate' }"
+                role="tab"
+                :aria-selected="transformMode === 'rotate'"
+                :disabled="!editMode || !hasModel"
+                @click="setTransformMode('rotate')"
+              >
+                旋转
+              </button>
+            </div>
+
+            <div
+              class="control-row control-row--orientation"
+              :class="{ disabled: !editMode || !selectedItemId }"
+            >
+              <div
+                v-if="transformMode === 'rotate'"
+                class="orientation-sliders"
+              >
+                <div
+                  class="control-row control-row--compact"
                   :class="{ disabled: !editMode || !selectedItemId }"
                 >
-                  <span class="axis">y</span>
-                  <input
-                    v-model.number="orientationDegY"
-                    type="range"
-                    :min="getRotationSliderRange('y').min"
-                    :max="getRotationSliderRange('y').max"
-                    :step="rotationAdjustStep"
-                    :disabled="!editMode || !selectedItemId"
-                    @pointerdown="beginRotationSliderDrag('y')"
-                    @pointerup="endRotationSliderDrag('y')"
-                    @pointercancel="endRotationSliderDrag('y')"
-                    @blur="endRotationSliderDrag('y')"
-                    @input="scheduleOrientationFixRealtime"
-                    @change="flushOrientationFixRealtime"
-                  />
-                  <div class="slider__controls">
+                  <div class="step-control-group">
+                    <span class="step-control-label">步长</span>
+                    <div class="step-control-fields">
+                      <el-select
+                        v-model="rotationStepPreset"
+                        class="step-select"
+                        size="small"
+                        popper-class="bpa-right-popper"
+                        placement="bottom-start"
+                        :fallback-placements="[]"
+                        filterable
+                        allow-create
+                        default-first-option
+                        :disabled="!editMode || !selectedItemId"
+                        @change="onRotationStepPresetChange"
+                      >
+                        <el-option
+                          v-for="stepOption in rotationStepOptions"
+                          :key="`rotate-${stepOption}`"
+                          :label="formatRotationStepLabel(stepOption)"
+                          :value="String(stepOption)"
+                        />
+                      </el-select>
+                      <el-input-number
+                        :model-value="rotationAdjustStep"
+                        class="step-input-number"
+                        size="small"
+                        :min="0.01"
+                        :max="45"
+                        :step="0.01"
+                        :precision="3"
+                        controls-position="right"
+                        :disabled="!editMode || !selectedItemId"
+                        @update:model-value="
+                          onRotationStepPresetChange(String($event ?? 1))
+                        "
+                      />
+                    </div>
+                  </div>
+                </div>
+                <template v-if="showOnlyVerticalAxis">
+                  <label
+                    class="slider"
+                    :class="{ disabled: !editMode || !selectedItemId }"
+                  >
+                    <span class="axis axis--rotation">Z</span>
                     <input
-                      class="axis-number-input"
-                      :value="orientationDegY"
-                      type="number"
-                      inputmode="decimal"
+                      v-model.number="orientationDegY"
+                      type="range"
+                      min="-180"
+                      max="180"
                       :step="rotationAdjustStep"
                       :disabled="!editMode || !selectedItemId"
-                      @input="onRotationNumberInput('y', $event)"
-                      @blur="onRotationNumberBlur('y', $event)"
-                      @keydown="onRotationNumberKeydown($event, 'y')"
+                      @input="applyOrientationFixRealtime"
                     />
-                    <span class="slider__hint">deg</span>
+                    <div class="slider__controls slider__controls--rotation">
+                      <input
+                        class="axis-number-input axis-number-input--rotation"
+                        aria-label="Y 轴旋转，单位度"
+                        :value="formatRotationOffset(orientationDegY)"
+                        type="number"
+                        inputmode="decimal"
+                        min="-180"
+                        max="180"
+                        :step="rotationAdjustStep"
+                        :disabled="!editMode || !selectedItemId"
+                        @input="onRotationNumberInput('y', $event)"
+                        @blur="onRotationNumberBlur('y', $event)"
+                        @keydown="onRotationNumberKeydown($event, 'y')"
+                      />
+                      <span class="slider__hint">deg</span>
+                    </div>
+                  </label>
+                </template>
+                <template v-else>
+                  <label
+                    class="slider"
+                    :class="{ disabled: !editMode || !selectedItemId }"
+                  >
+                    <span class="axis">X</span>
+                    <input
+                      v-model.number="orientationDegX"
+                      type="range"
+                      min="-10"
+                      max="10"
+                      :step="rotationAdjustStep"
+                      :disabled="!editMode || !selectedItemId"
+                      @input="applyOrientationFixRealtime"
+                    />
+                    <div class="slider__controls slider__controls--rotation">
+                      <input
+                        class="axis-number-input axis-number-input--rotation"
+                        aria-label="X 轴旋转，单位度"
+                        :value="formatRotationOffset(orientationDegX)"
+                        type="number"
+                        inputmode="decimal"
+                        min="-10"
+                        max="10"
+                        :step="rotationAdjustStep"
+                        :disabled="!editMode || !selectedItemId"
+                        @input="onRotationNumberInput('x', $event)"
+                        @blur="onRotationNumberBlur('x', $event)"
+                        @keydown="onRotationNumberKeydown($event, 'x')"
+                      />
+                      <span class="slider__hint">deg</span>
+                    </div>
+                  </label>
+                  <label
+                    class="slider"
+                    :class="{ disabled: !editMode || !selectedItemId }"
+                  >
+                    <span class="axis">Y</span>
+                    <input
+                      v-model.number="orientationDegY"
+                      type="range"
+                      min="-10"
+                      max="10"
+                      :step="rotationAdjustStep"
+                      :disabled="!editMode || !selectedItemId"
+                      @input="applyOrientationFixRealtime"
+                    />
+                    <div class="slider__controls slider__controls--rotation">
+                      <input
+                        class="axis-number-input axis-number-input--rotation"
+                        aria-label="Y 轴旋转，单位度"
+                        :value="formatRotationOffset(orientationDegY)"
+                        type="number"
+                        inputmode="decimal"
+                        min="-10"
+                        max="10"
+                        :step="rotationAdjustStep"
+                        :disabled="!editMode || !selectedItemId"
+                        @input="onRotationNumberInput('y', $event)"
+                        @blur="onRotationNumberBlur('y', $event)"
+                        @keydown="onRotationNumberKeydown($event, 'y')"
+                      />
+                      <span class="slider__hint">deg</span>
+                    </div>
+                  </label>
+                  <label
+                    class="slider"
+                    :class="{ disabled: !editMode || !selectedItemId }"
+                  >
+                    <span class="axis">Z</span>
+                    <input
+                      v-model.number="orientationDegZ"
+                      type="range"
+                      min="-10"
+                      max="10"
+                      :step="rotationAdjustStep"
+                      :disabled="!editMode || !selectedItemId"
+                      @input="applyOrientationFixRealtime"
+                    />
+                    <div class="slider__controls slider__controls--rotation">
+                      <input
+                        class="axis-number-input axis-number-input--rotation"
+                        aria-label="Z 轴旋转，单位度"
+                        :value="formatRotationOffset(orientationDegZ)"
+                        type="number"
+                        inputmode="decimal"
+                        min="-10"
+                        max="10"
+                        :step="rotationAdjustStep"
+                        :disabled="!editMode || !selectedItemId"
+                        @input="onRotationNumberInput('z', $event)"
+                        @blur="onRotationNumberBlur('z', $event)"
+                        @keydown="onRotationNumberKeydown($event, 'z')"
+                      />
+                      <span class="slider__hint">deg</span>
+                    </div>
+                  </label>
+                </template>
+              </div>
+              <div v-else class="orientation-sliders">
+                <div
+                  class="control-row control-row--compact"
+                  :class="{ disabled: !editMode || !selectedItemId }"
+                >
+                  <div class="step-control-group">
+                    <span class="step-control-label">步长</span>
+                    <div class="step-control-fields">
+                      <el-select
+                        v-model="positionStepPreset"
+                        class="step-select"
+                        size="small"
+                        popper-class="bpa-right-popper"
+                        placement="bottom-start"
+                        :fallback-placements="[]"
+                        filterable
+                        allow-create
+                        default-first-option
+                        :disabled="!editMode || !selectedItemId"
+                        @change="onPositionStepPresetChange"
+                      >
+                        <el-option
+                          v-for="stepOption in positionStepOptions"
+                          :key="`position-${stepOption}`"
+                          :label="formatPositionStepLabel(stepOption)"
+                          :value="String(stepOption)"
+                        />
+                      </el-select>
+                      <el-input-number
+                        :model-value="positionAdjustStep"
+                        class="step-input-number"
+                        size="small"
+                        :min="0.001"
+                        :max="10"
+                        :step="0.001"
+                        :precision="3"
+                        controls-position="right"
+                        :disabled="!editMode || !selectedItemId"
+                        @update:model-value="
+                          onPositionStepPresetChange(String($event ?? 0.01))
+                        "
+                      />
+                    </div>
                   </div>
-                </label>
-              </template>
-              <template v-else>
+                </div>
                 <label
                   class="slider"
                   :class="{ disabled: !editMode || !selectedItemId }"
                 >
                   <span class="axis">X</span>
                   <input
-                    v-model.number="orientationDegX"
+                    v-model.number="positionOffsetX"
                     type="range"
-                    :min="getRotationSliderRange('x').min"
-                    :max="getRotationSliderRange('x').max"
-                    :step="rotationAdjustStep"
+                    :min="positionSliderRange.min"
+                    :max="positionSliderRange.max"
+                    :step="positionAdjustStep"
                     :disabled="!editMode || !selectedItemId"
-                    @pointerdown="beginRotationSliderDrag('x')"
-                    @pointerup="endRotationSliderDrag('x')"
-                    @pointercancel="endRotationSliderDrag('x')"
-                    @blur="endRotationSliderDrag('x')"
-                    @input="scheduleOrientationFixRealtime"
-                    @change="flushOrientationFixRealtime"
+                    @input="applyPositionFixRealtime"
                   />
                   <div class="slider__controls">
                     <input
                       class="axis-number-input"
-                      :value="orientationDegX"
+                      aria-label="X 轴位移，单位米"
+                      :value="positionOffsetX"
                       type="number"
                       inputmode="decimal"
-                      :step="rotationAdjustStep"
+                      :step="positionAdjustStep"
                       :disabled="!editMode || !selectedItemId"
-                      @input="onRotationNumberInput('x', $event)"
-                      @blur="onRotationNumberBlur('x', $event)"
-                      @keydown="onRotationNumberKeydown($event, 'x')"
+                      @input="onPositionNumberInput('x', $event)"
+                      @blur="onPositionNumberBlur('x', $event)"
+                      @keydown="onPositionNumberKeydown($event, 'x')"
                     />
-                    <span class="slider__hint">deg</span>
+                    <span class="slider__hint">m</span>
                   </div>
                 </label>
                 <label
@@ -543,32 +1055,28 @@
                 >
                   <span class="axis">Y</span>
                   <input
-                    v-model.number="orientationDegY"
+                    v-model.number="positionOffsetY"
                     type="range"
-                    :min="getRotationSliderRange('y').min"
-                    :max="getRotationSliderRange('y').max"
-                    :step="rotationAdjustStep"
+                    :min="positionSliderRange.min"
+                    :max="positionSliderRange.max"
+                    :step="positionAdjustStep"
                     :disabled="!editMode || !selectedItemId"
-                    @pointerdown="beginRotationSliderDrag('y')"
-                    @pointerup="endRotationSliderDrag('y')"
-                    @pointercancel="endRotationSliderDrag('y')"
-                    @blur="endRotationSliderDrag('y')"
-                    @input="scheduleOrientationFixRealtime"
-                    @change="flushOrientationFixRealtime"
+                    @input="applyPositionFixRealtime"
                   />
                   <div class="slider__controls">
                     <input
                       class="axis-number-input"
-                      :value="orientationDegY"
+                      aria-label="Y 轴位移，单位米"
+                      :value="positionOffsetY"
                       type="number"
                       inputmode="decimal"
-                      :step="rotationAdjustStep"
+                      :step="positionAdjustStep"
                       :disabled="!editMode || !selectedItemId"
-                      @input="onRotationNumberInput('y', $event)"
-                      @blur="onRotationNumberBlur('y', $event)"
-                      @keydown="onRotationNumberKeydown($event, 'y')"
+                      @input="onPositionNumberInput('y', $event)"
+                      @blur="onPositionNumberBlur('y', $event)"
+                      @keydown="onPositionNumberKeydown($event, 'y')"
                     />
-                    <span class="slider__hint">deg</span>
+                    <span class="slider__hint">m</span>
                   </div>
                 </label>
                 <label
@@ -577,335 +1085,129 @@
                 >
                   <span class="axis">Z</span>
                   <input
-                    v-model.number="orientationDegZ"
+                    v-model.number="positionOffsetZ"
                     type="range"
-                    :min="getRotationSliderRange('z').min"
-                    :max="getRotationSliderRange('z').max"
-                    :step="rotationAdjustStep"
+                    :min="positionSliderRange.min"
+                    :max="positionSliderRange.max"
+                    :step="positionAdjustStep"
                     :disabled="!editMode || !selectedItemId"
-                    @pointerdown="beginRotationSliderDrag('z')"
-                    @pointerup="endRotationSliderDrag('z')"
-                    @pointercancel="endRotationSliderDrag('z')"
-                    @blur="endRotationSliderDrag('z')"
-                    @input="scheduleOrientationFixRealtime"
-                    @change="flushOrientationFixRealtime"
+                    @input="applyPositionFixRealtime"
                   />
                   <div class="slider__controls">
                     <input
                       class="axis-number-input"
-                      :value="orientationDegZ"
+                      aria-label="Z 轴位移，单位米"
+                      :value="positionOffsetZ"
                       type="number"
                       inputmode="decimal"
-                      :step="rotationAdjustStep"
+                      :step="positionAdjustStep"
                       :disabled="!editMode || !selectedItemId"
-                      @input="onRotationNumberInput('z', $event)"
-                      @blur="onRotationNumberBlur('z', $event)"
-                      @keydown="onRotationNumberKeydown($event, 'z')"
+                      @input="onPositionNumberInput('z', $event)"
+                      @blur="onPositionNumberBlur('z', $event)"
+                      @keydown="onPositionNumberKeydown($event, 'z')"
                     />
-                    <span class="slider__hint">deg</span>
+                    <span class="slider__hint">m</span>
                   </div>
                 </label>
-              </template>
-            </div>
-            <div v-else class="orientation-sliders">
-              <div
-                class="control-row control-row--compact"
-                :class="{
-                  disabled:
-                    !editMode || !selectedItemId || selectedItemIsTileset,
-                }"
-              >
-                <div class="step-control-group">
-                  <span class="label">步长</span>
-                  <el-select
-                    v-model="positionStepPreset"
-                    class="step-select"
-                    popper-class="bpa-right-popper"
-                    :disabled="
-                      !editMode || !selectedItemId || selectedItemIsTileset
-                    "
-                    @change="onPositionStepPresetChange"
-                  >
-                    <el-option
-                      v-for="stepOption in positionStepOptions"
-                      :key="`position-${stepOption}`"
-                      :label="formatPositionStepLabel(stepOption)"
-                      :value="String(stepOption)"
-                    />
-                    <el-option label="自定义" value="custom" />
-                  </el-select>
-                  <el-input-number
-                    v-model="positionAdjustStep"
-                    class="step-input"
-                    size="small"
-                    :min="0.001"
-                    :max="10"
-                    :step="0.001"
-                    :precision="3"
-                    :controls="false"
-                    :disabled="
-                      !editMode || !selectedItemId || selectedItemIsTileset
-                    "
-                    @change="onPositionAdjustStepChange"
-                  />
-                </div>
               </div>
-              <label
-                class="slider"
-                :class="{
-                  disabled:
-                    !editMode || !selectedItemId || selectedItemIsTileset,
-                }"
-              >
-                <span class="axis">X</span>
-                <input
-                  v-model.number="positionOffsetX"
-                  type="range"
-                  :min="getPositionSliderRange('x').min"
-                  :max="getPositionSliderRange('x').max"
-                  :step="positionAdjustStep"
-                  :disabled="
-                    !editMode || !selectedItemId || selectedItemIsTileset
-                  "
-                  @pointerdown="beginPositionSliderDrag('x')"
-                  @pointerup="endPositionSliderDrag('x')"
-                  @pointercancel="endPositionSliderDrag('x')"
-                  @blur="endPositionSliderDrag('x')"
-                  @input="schedulePositionFixRealtime"
-                  @change="flushPositionFixRealtime"
-                />
-                <div class="slider__controls">
-                  <input
-                    class="axis-number-input"
-                    :value="positionOffsetX"
-                    type="number"
-                    inputmode="decimal"
-                    :step="positionAdjustStep"
-                    :disabled="
-                      !editMode || !selectedItemId || selectedItemIsTileset
-                    "
-                    @input="onPositionNumberInput('x', $event)"
-                    @blur="onPositionNumberBlur('x', $event)"
-                    @keydown="onPositionNumberKeydown($event, 'x')"
-                  />
-                  <span class="slider__hint">m</span>
-                </div>
-              </label>
-              <label
-                class="slider"
-                :class="{
-                  disabled:
-                    !editMode || !selectedItemId || selectedItemIsTileset,
-                }"
-              >
-                <span class="axis">Y</span>
-                <input
-                  v-model.number="positionOffsetY"
-                  type="range"
-                  :min="getPositionSliderRange('y').min"
-                  :max="getPositionSliderRange('y').max"
-                  :step="positionAdjustStep"
-                  :disabled="
-                    !editMode || !selectedItemId || selectedItemIsTileset
-                  "
-                  @pointerdown="beginPositionSliderDrag('y')"
-                  @pointerup="endPositionSliderDrag('y')"
-                  @pointercancel="endPositionSliderDrag('y')"
-                  @blur="endPositionSliderDrag('y')"
-                  @input="schedulePositionFixRealtime"
-                  @change="flushPositionFixRealtime"
-                />
-                <div class="slider__controls">
-                  <input
-                    class="axis-number-input"
-                    :value="positionOffsetY"
-                    type="number"
-                    inputmode="decimal"
-                    :step="positionAdjustStep"
-                    :disabled="
-                      !editMode || !selectedItemId || selectedItemIsTileset
-                    "
-                    @input="onPositionNumberInput('y', $event)"
-                    @blur="onPositionNumberBlur('y', $event)"
-                    @keydown="onPositionNumberKeydown($event, 'y')"
-                  />
-                  <span class="slider__hint">m</span>
-                </div>
-              </label>
-              <label
-                class="slider"
-                :class="{
-                  disabled:
-                    !editMode || !selectedItemId || selectedItemIsTileset,
-                }"
-              >
-                <span class="axis">Z</span>
-                <input
-                  v-model.number="positionOffsetZ"
-                  type="range"
-                  :min="getPositionSliderRange('z').min"
-                  :max="getPositionSliderRange('z').max"
-                  :step="positionAdjustStep"
-                  :disabled="
-                    !editMode || !selectedItemId || selectedItemIsTileset
-                  "
-                  @pointerdown="beginPositionSliderDrag('z')"
-                  @pointerup="endPositionSliderDrag('z')"
-                  @pointercancel="endPositionSliderDrag('z')"
-                  @blur="endPositionSliderDrag('z')"
-                  @input="schedulePositionFixRealtime"
-                  @change="flushPositionFixRealtime"
-                />
-                <div class="slider__controls">
-                  <input
-                    class="axis-number-input"
-                    :value="positionOffsetZ"
-                    type="number"
-                    inputmode="decimal"
-                    :step="positionAdjustStep"
-                    :disabled="
-                      !editMode || !selectedItemId || selectedItemIsTileset
-                    "
-                    @input="onPositionNumberInput('z', $event)"
-                    @blur="onPositionNumberBlur('z', $event)"
-                    @keydown="onPositionNumberKeydown($event, 'z')"
-                  />
-                  <span class="slider__hint">m</span>
-                </div>
-              </label>
             </div>
-            <div class="orientation-actions">
+            <div
+              v-if="registrationStage === 'coarse'"
+              class="registration-footer-actions"
+            >
               <el-button
-                size="small"
-                :disabled="
-                  !editMode ||
-                  !selectedItemId ||
-                  (transformMode === 'translate' && selectedItemIsTileset)
-                "
+                size="large"
+                :disabled="!editMode || !selectedItemId"
                 @click="resetTransformFixRealtime"
               >
-                重置当前对象到初始
+                重置变换
+              </el-button>
+              <el-button
+                type="primary"
+                size="large"
+                title="保存当前粗配准矩阵并继续当前流程"
+                :loading="savingCalibration"
+                :disabled="!canSaveCoarseAlignment"
+                @click="saveCoarseAlignmentMatrix"
+              >
+                保存粗配准
               </el-button>
             </div>
-          </div>
-        </div>
-
-        <div class="panel-section">
-          <ScanBimComputePanel
-            :project-id="projectId"
-            :bim-file-id="bimFileId"
-            :scan-id="scanFileId"
-            :has-alignment="!!latestAlignmentResult"
-            :mesh-loaded="hasRemeshMesh"
-            :solid-hidden="remeshSolidHidden"
-            :wire-hidden="remeshWireHidden"
-            :wire-available="remeshWireAvailable"
-            :c2m-distances="c2mDistanceArray"
-            @load-remesh="handleLoadRemesh"
-            @toggle-solid="toggleRemeshSolid"
-            @toggle-wire="toggleRemeshWire"
-            @load-c2m-ply="handleLoadC2MPly"
-            @clear-c2m-scene="clearC2MScene"
-            @c2m-viz-change="onC2mVizChange"
-            @c2m-distances-buffer="onC2mDistancesBuffer"
-          />
-        </div>
-
-        <!-- 高级设置（可折叠） -->
-        <div class="panel-section panel-section--advanced">
-          <button
-            class="advanced-toggle"
-            @click="showAdvancedSettings = !showAdvancedSettings"
-          >
-            <span>高级设置</span>
-            <svg
-              class="advanced-toggle__chevron"
-              :class="{ 'is-open': showAdvancedSettings }"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+            <el-button
+              class="registration-complete-button"
+              :loading="savingCalibration"
+              :disabled="!canSaveCalibration"
+              title="保存当前配准结果"
+              @click="handleCalibrationComplete"
             >
-              <polyline points="4,6 8,10 12,6" />
-            </svg>
-          </button>
-          <div v-show="showAdvancedSettings" class="advanced-content">
-            <!-- 渲染 -->
-            <div class="adv-group">
-              <div class="adv-group__title">渲染</div>
-              <div class="control-row">
-                <el-select
-                  v-model="materialMode"
-                  popper-class="bpa-right-popper"
-                  :disabled="!hasModel"
-                  @change="onMaterialModeChange"
-                >
-                  <el-option label="原始材质" value="original" />
-                  <el-option label="无光照（TSL Unlit）" value="unlit" />
-                  <el-option label="漫反射光照（Lambert）" value="lambert" />
-                </el-select>
-              </div>
-              <div class="control-row">
-                <span class="label">背景</span>
-                <div class="color-row">
-                  <input
-                    v-model="backgroundColor"
-                    class="color-picker"
-                    type="color"
-                    @input="onBackgroundColorChange"
-                  />
-                  <input
-                    v-model="backgroundColor"
-                    class="color-hex"
-                    type="text"
-                    inputmode="text"
-                    spellcheck="false"
-                    placeholder="#0b1020"
-                    @change="onBackgroundColorChange"
-                  />
-                  <el-button size="small" @click="resetBackgroundColor">
-                    重置
-                  </el-button>
-                </div>
-              </div>
-              <div class="hint2">
-                点云太黑看不清时，调亮背景（例如 #222 或 #555）
-              </div>
-            </div>
-            <!-- 构件 -->
-            <div class="adv-group">
-              <div class="adv-group__title">构件</div>
-              <div class="control-row">
-                <el-switch v-model="enableElementPicking" />
-                <span class="label">点击高亮</span>
-              </div>
-              <div
-                class="control-row"
-                :class="{ disabled: !enableElementPicking || !hasModel }"
-              >
-                <span class="label">已选</span>
-                <el-input
-                  :model-value="pickedElementText"
-                  readonly
-                  placeholder="未选择"
-                />
-                <el-button
-                  size="small"
-                  :disabled="!enableElementPicking || !pickedElement"
-                  @click="clearPickedElement"
-                >
-                  清除
-                </el-button>
-              </div>
-            </div>
+              完成校准
+            </el-button>
+          </div>
+
+          <!-- 偏差对比（Scan vs BIM 快速预估），对齐参考项目第二步 -->
+          <div v-if="activeWorkflowStep === 2" class="panel-section">
+            <ScanBimComputePanel
+              section="c2m"
+              :project-id="projectId"
+              :bim-file-id="bimFileId"
+              :scan-id="scanFileId"
+              :has-alignment="!!latestAlignmentResult"
+              :mesh-loaded="hasRemeshMesh"
+              :solid-hidden="remeshSolidHidden"
+              :wire-hidden="remeshWireHidden"
+              :wire-available="remeshWireAvailable"
+              :c2m-distances="c2mDistanceArray"
+              @load-remesh="handleLoadRemesh"
+              @toggle-solid="toggleRemeshSolid"
+              @toggle-wire="toggleRemeshWire"
+              @load-c2m-ply="handleLoadC2MPly"
+              @clear-c2m-scene="clearC2MScene"
+              @c2m-viz-change="onC2mVizChange"
+              @c2m-distances-buffer="onC2mDistancesBuffer"
+            />
+          </div>
+
+          <!-- 网格均匀化（第一步，对齐参考项目） -->
+          <div v-if="activeWorkflowStep === 1" class="panel-section">
+            <ScanBimComputePanel
+              section="remesh"
+              :project-id="projectId"
+              :bim-file-id="bimFileId"
+              :scan-id="scanFileId"
+              :has-alignment="!!latestAlignmentResult"
+              :mesh-loaded="hasRemeshMesh"
+              :solid-hidden="remeshSolidHidden"
+              :wire-hidden="remeshWireHidden"
+              :wire-available="remeshWireAvailable"
+              :c2m-distances="c2mDistanceArray"
+              @load-remesh="handleLoadRemesh"
+              @toggle-solid="toggleRemeshSolid"
+              @toggle-wire="toggleRemeshWire"
+              @load-c2m-ply="handleLoadC2MPly"
+              @clear-c2m-scene="clearC2MScene"
+              @c2m-viz-change="onC2mVizChange"
+              @c2m-distances-buffer="onC2mDistancesBuffer"
+            />
           </div>
         </div>
       </div>
+      <button
+        v-if="activeWorkflowStep !== 3"
+        type="button"
+        class="right-panel-toggle"
+        aria-controls="alignment-control-panel"
+        :aria-expanded="showPanel"
+        :aria-label="showPanel ? '收起控制面板' : '展开控制面板'"
+        :title="showPanel ? '收起控制面板' : '展开控制面板'"
+        @click="showPanel = !showPanel"
+      >
+        <el-icon :size="16">
+          <component :is="showPanel ? DArrowRight : DArrowLeft" />
+        </el-icon>
+      </button>
     </div>
 
-    <div class="status-bar">
+    <div v-if="activeWorkflowStep !== 2" class="status-bar">
       <el-tag v-if="!webgpuSupported" type="warning" size="small">
         WebGPU 不支持
       </el-tag>
@@ -974,7 +1276,16 @@ import {
   watch,
 } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Hide, RefreshLeft, View } from '@element-plus/icons-vue'
+import {
+  ArrowLeft,
+  DArrowLeft,
+  DArrowRight,
+  Hide,
+  Moon,
+  RefreshLeft,
+  Sunny,
+  View,
+} from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import wanggeIcon from '@/assets/images/wangge.png'
 import toushiIcon from '@/assets/images/toushi.png'
@@ -1009,6 +1320,21 @@ import {
 import ScanBimComputePanel, {
   type C2MLoadPayload,
 } from './components/ScanBimComputePanel.vue'
+import AnalysisReportView from './components/AnalysisReportView.vue'
+import ViewportToolGlyph from './components/ViewportToolGlyph.vue'
+import MeasurementToolbar, {
+  type AnalysisMode,
+} from './components/MeasurementToolbar.vue'
+import ViewerAnalysisOverlay, {
+  type AnalysisArea,
+  type AnalysisDistance,
+  type AnalysisPoint,
+} from './components/ViewerAnalysisOverlay.vue'
+import ViewerMeasurementBadge from './components/ViewerMeasurementBadge.vue'
+import PointcloudViewCube from '@/views/preview/PointcloudViewCube.vue'
+import PointcloudAxesTriad from '@/views/preview/PointcloudAxesTriad.vue'
+import { PointCloudEdlPipeline } from '@/utils/three/pointCloudEdl'
+import { InfiniteGroundGrid } from '@/utils/three/infiniteGroundGrid'
 import { applyC2mVertexColors } from '@/utils/c2mColormap'
 import { sampleC2MDeviationAtPick } from '@/utils/c2mPick'
 import { getToken, getOrganizationId, formatToken } from '@/utils/auth'
@@ -1525,16 +1851,505 @@ const hasTileset = ref(false)
 const hasGltf = ref(false)
 const modelHidden = ref(false)
 const pointCloudHidden = ref(false)
+const bimVisible = computed(() => !modelHidden.value)
+const pointcloudVisible = computed(() => !pointCloudHidden.value)
+const bimVisibilityLabel = computed(() =>
+  bimVisible.value ? '隐藏模型' : '显示模型',
+)
+const pointcloudVisibilityLabel = computed(() =>
+  pointcloudVisible.value ? '隐藏点云' : '显示点云',
+)
+/** 工具栏：切换 BIM 可见性（对齐参考页 solidModel 图标按钮）。 */
+const toggleBimVisibility = () => toggleModelVisibility()
+
+// ---------- 点云显示（点大小 / 配色 / EDL）----------
+const showPointcloudSettings = ref(false)
+const edlEnabled = ref(true)
+const pointcloudPointSize = ref(2.5)
+const pointcloudColorMode = ref<'rgb' | 'intensity'>('rgb')
+const pointcloudColorRamp = ref<'grayscale' | 'spectrum' | 'viridis'>(
+  'spectrum',
+)
+
+/** 作用：把点云显示设置（点大小 / 配色 / EDL）应用到当前场景。 */
+function applyPointcloudDisplay() {
+  applyPointcloudPointSize(pointcloudPointSize.value)
+}
+function setPointcloudColorMode(mode: 'rgb' | 'intensity') {
+  pointcloudColorMode.value = mode
+  applyPointcloudDisplay()
+}
+function setPointcloudColorRamp(ramp: 'grayscale' | 'spectrum' | 'viridis') {
+  pointcloudColorRamp.value = ramp
+  applyPointcloudDisplay()
+}
+function toggleEdl(value: string | number | boolean) {
+  edlEnabled.value = Boolean(value)
+  if (edlPipeline) edlPipeline.enabled = edlEnabled.value
+  applyPointcloudDisplay()
+  requestRender()
+}
+
+const meshWireframeTooltip = computed(() =>
+  showMeshWireframe.value ? '关闭线框' : '显示线框',
+)
+/** 参考页：粗配准默认进入几何载体编辑态并显示组合变换手柄。 */
+const showTransformHandles = ref(true)
+const positionSliderRange = computed(() => {
+  const maxAbs = Math.max(
+    50,
+    Math.abs(positionOffsetX.value),
+    Math.abs(positionOffsetY.value),
+    Math.abs(positionOffsetZ.value),
+  )
+  const padded = Math.ceil((maxAbs + 5) / 5) * 5
+  return { min: -padded, max: padded }
+})
+
+// ---------- 测量工具（测距 / 定位 / 面积）----------
+type MeasurementBadge = {
+  id: string
+  title: string
+  mainLabel: string
+  mainValue: string
+  rows: Array<{ label: string; value: string }>
+  anchor: THREE.Vector3
+  overlay: { visible: boolean; x: number; y: number }
+}
+const analysisMode = ref<AnalysisMode>('none')
+const analysisToolbarCollapsed = ref(true)
+const measureBadges = ref<MeasurementBadge[]>([])
+const analysisPoint = ref<AnalysisPoint | null>(null)
+const analysisDistance = ref<AnalysisDistance | null>(null)
+const analysisPoints = ref<AnalysisPoint[]>([])
+const analysisDistances = ref<AnalysisDistance[]>([])
+const analysisAreas = ref<AnalysisArea[]>([])
+const measurementBadgeOffsets = new Map<string, { x: number; y: number }>()
+let measureGroup: THREE.Group | null = null
+let measurePreviewGroup: THREE.Group | null = null
+let distanceStart: THREE.Vector3 | null = null
+let areaPoints: THREE.Vector3[] = []
+let measurePointerDown: { x: number; y: number } | null = null
+let measureIdSeq = 0
+const measureCounts = { point: 0, distance: 0, area: 0 }
+
+function formatMeasureLength(value: number) {
+  return `${value.toFixed(3)} m`
+}
+function toAnalysisPoint(point: THREE.Vector3): AnalysisPoint {
+  return { x: point.x, y: point.y, z: point.z }
+}
+function ensureMeasureGroup() {
+  if (!contentGroup) return null
+  if (!measureGroup) {
+    measureGroup = new THREE.Group()
+    measureGroup.name = '__measurementGroup'
+    measureGroup.renderOrder = 9999
+    contentGroup.add(measureGroup)
+  }
+  return measureGroup
+}
+function createMeasurePin(
+  point: THREE.Vector3,
+  color: string,
+  scale = 1,
+  parent?: THREE.Group | null,
+) {
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      color: new THREE.Color(color),
+      depthTest: false,
+      depthWrite: false,
+      sizeAttenuation: false,
+    }),
+  )
+  sprite.position.copy(point)
+  sprite.scale.set(0.012 * scale, 0.012 * scale, 1)
+  sprite.renderOrder = 10000
+  ;(parent ?? ensureMeasureGroup())?.add(sprite)
+  return sprite
+}
+function createMeasureLine(points: THREE.Vector3[], color = '#ff5a5a') {
+  const geometry = new THREE.BufferGeometry().setFromPoints(points)
+  const material = new THREE.LineBasicMaterial({
+    color: new THREE.Color(color),
+    depthTest: false,
+    depthWrite: false,
+    transparent: true,
+    opacity: 0.95,
+  })
+  const line = new THREE.Line(geometry, material)
+  line.renderOrder = 10000
+  return line
+}
+function addMeasureBadge(
+  badge: Omit<MeasurementBadge, 'overlay'> & { anchor: THREE.Vector3 },
+) {
+  measureBadges.value.push({
+    ...badge,
+    overlay: { visible: true, x: 0, y: 0 },
+  })
+}
+function updateMeasurementBadgePositions() {
+  if (!camera || !viewportEl.value) return
+  const rect = viewportEl.value.getBoundingClientRect()
+  if (!rect.width || !rect.height) return
+  for (const badge of measureBadges.value) {
+    const ndc = badge.anchor.clone().project(camera)
+    const offset = measurementBadgeOffsets.get(badge.id) ?? { x: 0, y: 0 }
+    badge.overlay.x = (ndc.x * 0.5 + 0.5) * rect.width + offset.x
+    badge.overlay.y = (-ndc.y * 0.5 + 0.5) * rect.height + offset.y
+    badge.overlay.visible = ndc.z < 1
+  }
+}
+function moveMeasurementBadge(id: string, delta: { x: number; y: number }) {
+  const current = measurementBadgeOffsets.get(id) ?? { x: 0, y: 0 }
+  measurementBadgeOffsets.set(id, {
+    x: current.x + delta.x,
+    y: current.y + delta.y,
+  })
+  updateMeasurementBadgePositions()
+}
+function resetMeasurementBadge(id: string) {
+  measurementBadgeOffsets.delete(id)
+  updateMeasurementBadgePositions()
+}
+function hideMeasurementBadge(id: string) {
+  const badge = measureBadges.value.find((item) => item.id === id)
+  if (badge) badge.overlay.visible = false
+}
+function deleteMeasurementBadge(badge: MeasurementBadge) {
+  measureBadges.value = measureBadges.value.filter(
+    (item) => item.id !== badge.id,
+  )
+  measurementBadgeOffsets.delete(badge.id)
+  requestRender()
+}
+
+/** 作用：射线拾取测量点（BIM 或点云表面）。 */
+function pickMeasurePoint(ev: PointerEvent): THREE.Vector3 | null {
+  if (!raycaster || !camera || !contentGroup) return null
+  const ndc = getPointerNdc(ev)
+  if (!ndc) return null
+  raycaster.setFromCamera(ndc, camera)
+  const hits = raycaster.intersectObjects(contentGroup.children, true)
+  const hit = (hits as any[]).find(
+    (h) => !h?.object?.userData?.__viewerPickIgnore,
+  )
+  return hit?.point ? (hit.point as THREE.Vector3).clone() : null
+}
+
+/** 作用：处理测量点击（定位 / 测距 / 面积）。 */
+function handleMeasurePoint(point: THREE.Vector3) {
+  if (analysisMode.value === 'locate') {
+    createMeasurePin(point, '#22d3ee')
+    analysisPoint.value = toAnalysisPoint(point)
+    analysisPoints.value.push(toAnalysisPoint(point))
+    addMeasureBadge({
+      id: `measure-${++measureIdSeq}`,
+      title: `定位 #${++measureCounts.point}`,
+      mainLabel: '坐标',
+      mainValue: '',
+      rows: [
+        { label: 'X', value: formatMeasureLength(point.x) },
+        { label: 'Y', value: formatMeasureLength(point.z) },
+        { label: 'Z', value: formatMeasureLength(point.y) },
+      ],
+      anchor: point,
+    })
+  } else if (analysisMode.value === 'distance') {
+    if (!distanceStart) {
+      distanceStart = point
+      createMeasurePin(point, '#ff4040')
+    } else {
+      const start = distanceStart
+      ensureMeasureGroup()?.add(createMeasureLine([start, point]))
+      createMeasurePin(point, '#ff5a5a', 0.96)
+      const dx = point.x - start.x
+      const dy = point.y - start.y
+      const dz = point.z - start.z
+      const horizontal = Math.hypot(dx, dz)
+      const vertical = Math.abs(dy)
+      const slope =
+        horizontal <= 1e-8
+          ? vertical <= 1e-8
+            ? 0
+            : 90
+          : (Math.atan2(vertical, horizontal) * 180) / Math.PI
+      const record: AnalysisDistance = {
+        start: toAnalysisPoint(start),
+        end: toAnalysisPoint(point),
+        distance: start.distanceTo(point),
+        heightDifference: dy,
+        horizontalDistance: horizontal,
+        verticalDistance: vertical,
+        slopeDegrees: slope,
+      }
+      analysisDistance.value = record
+      analysisDistances.value.push(record)
+      addMeasureBadge({
+        id: `measure-${++measureIdSeq}`,
+        title: `测距 #${++measureCounts.distance}`,
+        mainLabel: '直线距离',
+        mainValue: formatMeasureLength(start.distanceTo(point)),
+        rows: [
+          { label: '水平距离', value: formatMeasureLength(horizontal) },
+          { label: '垂直距离', value: formatMeasureLength(vertical) },
+          { label: '坡度', value: `${slope.toFixed(2)}°` },
+        ],
+        anchor: start.clone().add(point).multiplyScalar(0.5),
+      })
+      distanceStart = null
+    }
+  } else if (analysisMode.value === 'area') {
+    const closeThreshold = Math.max(
+      0.15,
+      (camera?.position.distanceTo(point) ?? 1) * 0.025,
+    )
+    if (
+      areaPoints.length >= 3 &&
+      point.distanceTo(areaPoints[0]) < closeThreshold
+    ) {
+      closeAreaMeasurement()
+      return
+    }
+    areaPoints.push(point)
+    if (!measurePreviewGroup) {
+      measurePreviewGroup = new THREE.Group()
+      measurePreviewGroup.renderOrder = 10000
+      ensureMeasureGroup()?.add(measurePreviewGroup)
+    }
+    createMeasurePin(point, '#ff4040', 1, measurePreviewGroup)
+    updateAreaPreview()
+  }
+  requestRender()
+}
+
+function removeAreaPreviewLines() {
+  if (!measurePreviewGroup) return
+  for (const child of [...measurePreviewGroup.children]) {
+    if ((child as any).isSprite) continue
+    measurePreviewGroup.remove(child)
+    ;(child as any).geometry?.dispose?.()
+    ;(child as any).material?.dispose?.()
+  }
+}
+
+/** 作用：刷新面积预览（≥3 点时自动闭合并填充）。 */
+function updateAreaPreview() {
+  removeAreaPreviewLines()
+  if (!measurePreviewGroup || areaPoints.length < 2) return
+  const closed = areaPoints.length >= 3
+  const outline = closed ? [...areaPoints, areaPoints[0]] : [...areaPoints]
+  measurePreviewGroup.add(createMeasureLine(outline))
+  if (!closed) return
+  const geometry = new THREE.BufferGeometry().setFromPoints(areaPoints)
+  const indices: number[] = []
+  for (let i = 1; i < areaPoints.length - 1; i += 1) {
+    indices.push(0, i, i + 1)
+  }
+  geometry.setIndex(indices)
+  const fill = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({
+      color: 0xff5a5a,
+      transparent: true,
+      opacity: 0.16,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  fill.renderOrder = 10000
+  measurePreviewGroup.add(fill)
+}
+
+/** 作用：闭合面积测量并生成结果卡片。 */
+function closeAreaMeasurement() {
+  if (analysisMode.value !== 'area' || areaPoints.length < 3) return
+  const points = [...areaPoints]
+  removeAreaPreviewLines()
+  ensureMeasureGroup()?.add(createMeasureLine([...points, points[0]]))
+  const geometry = new THREE.BufferGeometry().setFromPoints(points)
+  const indices: number[] = []
+  for (let i = 1; i < points.length - 1; i += 1) {
+    indices.push(0, i, i + 1)
+  }
+  geometry.setIndex(indices)
+  const fill = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({
+      color: 0xff5a5a,
+      transparent: true,
+      opacity: 0.16,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  fill.renderOrder = 10000
+  ensureMeasureGroup()?.add(fill)
+  let area = 0
+  for (let i = 1; i < points.length - 1; i += 1) {
+    area += new THREE.Triangle(points[0], points[i], points[i + 1]).getArea()
+  }
+  let perimeter = 0
+  for (let i = 0; i < points.length; i += 1) {
+    perimeter += points[i].distanceTo(points[(i + 1) % points.length])
+  }
+  const centroid = points
+    .reduce((sum, p) => sum.add(p), new THREE.Vector3())
+    .multiplyScalar(1 / points.length)
+  const record: AnalysisArea = {
+    points: points.map(toAnalysisPoint),
+    area,
+    perimeter,
+  }
+  analysisAreas.value.push(record)
+  addMeasureBadge({
+    id: `measure-${++measureIdSeq}`,
+    title: `面积 #${++measureCounts.area}`,
+    mainLabel: '面积',
+    mainValue: `${area.toFixed(2)} m²`,
+    rows: [{ label: '周长', value: `${perimeter.toFixed(2)} m` }],
+    anchor: centroid,
+  })
+  areaPoints = []
+  measurePreviewGroup = null
+  requestRender()
+}
+
+function disposeMeasurementGroup() {
+  if (!measureGroup) return
+  measureGroup.parent?.remove(measureGroup)
+  measureGroup.traverse((obj: any) => {
+    obj.geometry?.dispose?.()
+    const material = obj.material
+    if (Array.isArray(material)) {
+      material.forEach((m: any) => m?.dispose?.())
+    } else {
+      material?.map?.dispose?.()
+      material?.dispose?.()
+    }
+  })
+  measureGroup = null
+  measurePreviewGroup = null
+}
+
+function selectAnalysisMode(mode: AnalysisMode) {
+  analysisMode.value = analysisMode.value === mode ? 'none' : mode
+  distanceStart = null
+  areaPoints = []
+  removeAreaPreviewLines()
+  requestRender()
+}
+
+function clearAllMeasurements() {
+  analysisMode.value = 'none'
+  distanceStart = null
+  areaPoints = []
+  measurePreviewGroup = null
+  measureBadges.value = []
+  measurementBadgeOffsets.clear()
+  analysisPoint.value = null
+  analysisDistance.value = null
+  analysisPoints.value = []
+  analysisDistances.value = []
+  analysisAreas.value = []
+  measureCounts.point = 0
+  measureCounts.distance = 0
+  measureCounts.area = 0
+  disposeMeasurementGroup()
+  requestRender()
+}
+
+/** 作用：Esc 退出测量。 */
+function onMeasureKeyDown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && analysisMode.value !== 'none') {
+    clearAllMeasurements()
+  }
+}
+
 // 0 means the traversal continues to visible leaf tiles instead of stopping
 // at an intermediate, lower-density LOD tile.
 const tilesErrorTarget = ref(0)
 const tilesetZUpRotationX = -Math.PI / 2
 const showPanel = ref(true)
-const showAdvancedSettings = ref(false)
+
+// ---------- 分析工作流（配准 → 出报告）----------
+type WorkflowStepId = 1 | 2 | 3
+const workflowSteps = [
+  {
+    id: 1 as const,
+    title: '点云与工程坐标配准',
+    subtitle: '调整 BIM 与点云位置',
+  },
+  { id: 2 as const, title: '偏差对比', subtitle: '查看 Scan vs BIM 偏差' },
+  { id: 3 as const, title: '出报告', subtitle: '生成分析成果报告' },
+]
+const requestedWorkflowStep = Number(getQueryString('step'))
+const activeWorkflowStep = ref<WorkflowStepId>(
+  requestedWorkflowStep === 2 ? 2 : requestedWorkflowStep === 3 ? 3 : 1,
+)
+const activeWorkflowStepMeta = computed(
+  () =>
+    workflowSteps.find((step) => step.id === activeWorkflowStep.value) ||
+    workflowSteps[0],
+)
+const titleBlockSubtitle = computed(
+  () =>
+    `${activeWorkflowStepMeta.value.subtitle} · ${pointCloudNameForDisplay.value}`,
+)
+/** 偏差对比 / 出报告步骤需已完成并保存粗配准。 */
+const canOpenDeviationStep = computed(
+  () =>
+    Boolean(bimFileId.value && scanFileId.value) &&
+    hasSavedAlignmentMatrix.value &&
+    !coarseAlignmentDirty.value,
+)
+const canOpenReportStep = canOpenDeviationStep
+function workflowStepDisabled(step: WorkflowStepId): boolean {
+  if (step === 1) return false
+  if (step === 3) {
+    return !canOpenDeviationStep.value || activeWorkflowStep.value < 2
+  }
+  return !canOpenDeviationStep.value
+}
+function workflowStepDisabledReason(step: WorkflowStepId): string {
+  if (step === 1) return ''
+  return '请先完成并保存点云与工程坐标配准'
+}
+function openWorkflowStep(step: WorkflowStepId) {
+  if (workflowStepDisabled(step)) {
+    ElMessage.warning(workflowStepDisabledReason(step))
+    return
+  }
+  if (step === activeWorkflowStep.value) return
+  activeWorkflowStep.value = step
+  showPanel.value = true
+  void router.replace({
+    query: { ...route.query, step: String(step) },
+  })
+}
+
 const showBounds = ref(false)
 const showGrid = ref(true)
 const showMeshWireframe = ref(false)
 const backgroundColor = ref('#0b1020')
+const showMaterialMenu = ref(false)
+const isLightBackground = computed(() => {
+  const color = new THREE.Color(backgroundColor.value || '#0b1020')
+  return color.r * 0.299 + color.g * 0.587 + color.b * 0.114 > 0.6
+})
+function toggleBackground() {
+  backgroundColor.value = isLightBackground.value ? '#0b1020' : '#eef3f8'
+  onBackgroundColorChange()
+}
+function selectMaterialMode(mode: 'original' | 'unlit' | 'lambert') {
+  materialMode.value = mode
+  showMaterialMenu.value = false
+  onMaterialModeChange()
+}
 const enableClipping = ref(false)
 const clipAxis = ref<'x' | 'y' | 'z'>('z')
 const clipInvert = ref(false)
@@ -1559,7 +2374,8 @@ const clipBoundsDisabledReason = computed(() => {
 const clipBoundsTooltip = computed(() => {
   return clipBoundsDisabledReason.value || '裁切框'
 })
-const editMode = ref(false)
+// 粗配准默认进入几何载体编辑态（对齐参考页，面板不再提供手动开关）。
+const editMode = ref(true)
 type RegistrationStage = 'coarse' | 'fine'
 const registrationStage = ref<RegistrationStage>('coarse')
 const transformMode = ref<'translate' | 'rotate'>('translate')
@@ -2267,8 +3083,11 @@ let renderRequested = false
 let dprCap = 1.25
 let stats: any = null
 let transformControls: any = null
+let rotationControls: any = null
 let raycaster: any = null
+let edlPipeline: PointCloudEdlPipeline | null = null
 let transformHelper: any = null
+let rotationHelper: any = null
 let clippingGroup: any = null
 let clipUpdateScheduled = false
 let wireframeOverlayGroup: THREE.Group | null = null
@@ -2888,6 +3707,11 @@ function flushPositionFixRealtime() {
   applyPositionFixRealtimeNow()
 }
 
+/** 作用：滑块拖动时实时应用位置修正（参考页命名）。 */
+function applyPositionFixRealtime() {
+  schedulePositionFixRealtime()
+}
+
 /** 作用：将当前选中对象完整恢复到首次加载时的初始姿态（位置 + 旋转）。 */
 function restoreSelectedToInitialTransform() {
   const item = getSelectedItem()
@@ -3498,74 +4322,77 @@ function rebuildLoadedItems() {
 }
 
 /** 作用：根据 editMode/selectedItemId 将 TransformControls 绑定或解绑到当前对象。 */
+/** 作用：按参考项目规则同步组合手柄可见性（手柄开关/剖切/测量时隐藏）。 */
+function syncTransformHandleVisibility() {
+  const visible =
+    showTransformHandles.value &&
+    editMode.value &&
+    !enableClipping.value &&
+    analysisMode.value === 'none' &&
+    !!getSelectedItem()?.obj
+  for (const controller of [transformControls, rotationControls]) {
+    if (!controller) continue
+    controller.visible = visible
+    controller.enabled = visible
+  }
+  for (const helper of [transformHelper, rotationHelper]) {
+    if (helper) helper.visible = visible
+  }
+  requestRender()
+}
+
 function applyTransformSelection() {
   if (!transformControls) return
 
-  if (!editMode.value || !selectedItemId.value) {
-    transformControls.detach()
-    if (transformHelper) transformHelper.visible = false
-    requestRender()
-    return
-  }
-
   const item = loadedItems.value.find((i) => i.id === selectedItemId.value)
-  if (!item) {
+
+  if (
+    !editMode.value ||
+    !selectedItemId.value ||
+    !showTransformHandles.value ||
+    !item ||
+    !item.obj.visible ||
+    item.kind === 'tileset'
+  ) {
     transformControls.detach()
+    rotationControls?.detach()
     if (transformHelper) transformHelper.visible = false
+    if (rotationHelper) rotationHelper.visible = false
     requestRender()
     return
   }
 
-  // 若对应场景对象已被隐藏，则不显示操作手柄
-  if (!item.obj.visible) {
-    transformControls.detach()
-    if (transformHelper) transformHelper.visible = false
-    requestRender()
-    return
-  }
-
+  const target = item.obj
   // Some dynamically-managed groups (e.g. 3D Tiles) may toggle matrix updates internally.
   // Ensure we can render and manipulate the transform gizmo reliably.
-  item.obj.matrixAutoUpdate = true
-  item.obj.updateMatrixWorld?.(true)
-  ensureInitialTransformState(item.obj)
+  target.matrixAutoUpdate = true
+  target.updateMatrixWorld?.(true)
+  ensureInitialTransformState(target)
 
   syncTransformModeForSelection()
 
-  transformControls.setSpace?.(transformSpace.value)
-  transformControls.setMode(transformMode.value)
+  transformControls.setSpace?.('world')
+  transformControls.setMode('translate')
+  rotationControls?.setSpace?.('world')
+  rotationControls?.setMode('rotate')
 
-  if (item.kind === 'tileset') {
-    transformControls.showX = false
-    transformControls.showY = false
-    transformControls.showZ = false
-    transformControls.detach()
-    if (transformHelper) transformHelper.visible = false
-    resetOrientationFix()
-    ensureOrientationBase(item.obj)
-    resetPositionFix()
-    ensurePositionBase(item.obj)
-    requestRender()
-    return
+  // 组合 Gizmo：平移箭头/平面 + 仅绕 Three Y（业务 Z）旋转的绿色环。
+  transformControls.showX = true
+  transformControls.showY = true
+  transformControls.showZ = true
+  if (rotationControls) {
+    rotationControls.showX = false
+    rotationControls.showY = true
+    rotationControls.showZ = false
   }
 
-  if (transformMode.value === 'rotate') {
-    transformControls.showX = false
-    transformControls.showY = true
-    transformControls.showZ = false
-  } else {
-    transformControls.showX = true
-    transformControls.showY = true
-    transformControls.showZ = true
-  }
-
-  transformControls.attach(item.obj)
-  if (transformHelper) transformHelper.visible = true
-  transformHelper?.updateMatrixWorld?.(true)
+  transformControls.attach(target)
+  rotationControls?.attach(target)
+  syncTransformHandleVisibility()
   resetOrientationFix()
-  ensureOrientationBase(item.obj)
+  ensureOrientationBase(target)
   resetPositionFix()
-  ensurePositionBase(item.obj)
+  ensurePositionBase(target)
   requestRender()
 }
 
@@ -3598,22 +4425,14 @@ function updateGridPlacement() {
   const placementTarget =
     pointcloudTarget ?? (contentGroup.children?.length ? contentGroup : null)
 
-  if (!placementTarget) {
-    gridHelper.position.set(0, -10.01, 0)
-    return
-  }
+  if (!placementTarget) return
 
   placementTarget.updateMatrixWorld?.(true)
   const box = new THREE.Box3().setFromObject(placementTarget)
-  if (box.isEmpty()) {
-    gridHelper.position.set(0, -10.01, 0)
-    return
-  }
+  if (box.isEmpty()) return
 
-  const center = box.getCenter(new THREE.Vector3())
-  const size = box.getSize(new THREE.Vector3())
-  const offset = Math.max(10.5, size.y * 0.01)
-  gridHelper.position.set(center.x, box.min.y - offset, center.z)
+  // 无限网格按内容包围盒自适应尺度与原点。
+  gridHelper.setBounds?.(box)
 }
 
 function buildClipHandles(box: THREE.Box3, itemId: string) {
@@ -3840,7 +4659,9 @@ function clearScene() {
   updateGridPlacement()
   invalidateClipBounds()
   transformControls?.detach?.()
+  rotationControls?.detach?.()
   if (transformHelper) transformHelper.visible = false
+  if (rotationHelper) rotationHelper.visible = false
 
   for (const entry of loadedTilesets) {
     const host = removeClipHostForObject(entry.wrapper)
@@ -3930,6 +4751,29 @@ const togglePointCloudVisibility = () => {
   invalidateClipBounds()
   // 隐藏/显示点云时同步更新操作手柄状态
   applyTransformSelection()
+  requestRender()
+}
+
+/** 作用：把点大小应用到已加载点云（点材质 size，与预览页一致）。 */
+function applyPointcloudPointSize(size: number) {
+  const nextSize = Math.max(1, Math.min(5, Number(size) || 2.5))
+  const applyToRoot = (root: any) => {
+    root?.traverse?.((child: any) => {
+      if (!child?.isPoints || !child.material) return
+      const materials = Array.isArray(child.material)
+        ? child.material
+        : [child.material]
+      for (const material of materials) {
+        if (!material) continue
+        if ('size' in material) material.size = nextSize
+        // 与预览页一致：屏幕空间固定像素点，不随距离缩放；开启深度写入。
+        if ('sizeAttenuation' in material) material.sizeAttenuation = false
+        if ('depthWrite' in material) material.depthWrite = true
+        material.needsUpdate = true
+      }
+    })
+  }
+  for (const entry of loadedTilesets) applyToRoot(entry.wrapper)
   requestRender()
 }
 
@@ -5303,6 +6147,7 @@ async function loadTileset(url: string) {
     const { fixedAttributes, oversizedGeometries } =
       sanitizeObjectForWebGPU(tileScene)
     applyMaterialMode(tileScene, materialMode.value)
+    applyPointcloudPointSize(pointcloudPointSize.value)
     void computedPointBounds
     if (oversizedGeometries > 0) {
       statusText.value = `Tile too large for WebGPU (>${256}MB). Consider increasing SSE or re-tiling.`
@@ -5476,6 +6321,8 @@ function onBackgroundColorChange() {
   const c = new THREE.Color(backgroundColor.value || '#0b1020')
   scene.background = c
   renderer.setClearColor(c, 1)
+  // 网格颜色随背景明暗切换（对齐参考项目 InfiniteGroundGrid）。
+  gridHelper?.setColor?.(isLightBackground.value ? '#6d8399' : '#2a6f82')
   requestRender()
 }
 
@@ -5890,7 +6737,9 @@ function onEditModeChange() {
   syncTransformModeForSelection()
   if (!editMode.value) {
     transformControls?.detach?.()
+    rotationControls?.detach?.()
     if (transformHelper) transformHelper.visible = false
+    if (rotationHelper) rotationHelper.visible = false
   }
   applyTransformSelection()
   if (editMode.value) {
@@ -5964,6 +6813,55 @@ function setSideView() {
   requestRender()
 }
 
+/** 视角立方体使用的相机引用（随投影模式切换更新）。 */
+const viewerCamera = shallowRef<any>(null)
+
+/** 作用：按方向向量切换视角（ViewCube 点击面/棱/角）。 */
+function setPointcloudViewDirection(direction: [number, number, number]) {
+  if (!camera || !controls) return
+  const target = (controls.target as THREE.Vector3).clone()
+  const dir = new THREE.Vector3(...direction).normalize()
+  const distance = Math.max(camera.position.distanceTo(target), 10, 1)
+  camera.up.set(0, 1, 0)
+  if (Math.abs(dir.y) > 0.99) {
+    camera.up.set(0, 0, dir.y > 0 ? -1 : 1)
+  }
+  camera.position.copy(target.clone().add(dir.multiplyScalar(distance)))
+  camera.lookAt(target)
+  controls.update?.()
+  activeView.value = ''
+  requestRender()
+}
+
+/** 作用：按经纬增量环绕视角（ViewCube 拖动/方向键）。 */
+function orbitView(delta: { lon: number; lat: number }) {
+  if (!camera || !controls) return
+  const target = (controls.target as THREE.Vector3).clone()
+  const offset = camera.position.clone().sub(target)
+  const spherical = new THREE.Spherical().setFromVector3(offset)
+  spherical.theta -= THREE.MathUtils.degToRad(delta.lon)
+  spherical.phi -= THREE.MathUtils.degToRad(delta.lat)
+  spherical.phi = THREE.MathUtils.clamp(spherical.phi, 0.001, Math.PI - 0.001)
+  offset.setFromSpherical(spherical)
+  camera.position.copy(target.clone().add(offset))
+  camera.up.set(0, 1, 0)
+  camera.lookAt(target)
+  controls.update?.()
+  activeView.value = ''
+  requestRender()
+}
+
+/** 作用：绕视线方向翻滚 90°（ViewCube 旋转按钮）。 */
+function rollView(direction: -1 | 1) {
+  if (!camera) return
+  const forward = new THREE.Vector3()
+  camera.getWorldDirection(forward)
+  camera.up.applyAxisAngle(forward, direction * (Math.PI / 2))
+  if (controls?.target) camera.lookAt(controls.target as THREE.Vector3)
+  controls?.update?.()
+  requestRender()
+}
+
 /** 作用：执行一帧渲染（含控制器更新、tiles 更新与高亮 overlay 同步）。 */
 function renderFrame() {
   renderRequested = false
@@ -5983,7 +6881,24 @@ function renderFrame() {
       }
     }
   }
-  renderer.render(scene, camera)
+  updateMeasurementBadgePositions()
+  if (gridHelper?.visible) gridHelper.updateForCamera?.(camera)
+  if (
+    edlEnabled.value &&
+    edlPipeline &&
+    projectionMode.value === 'perspective' &&
+    camera === perspectiveCamera
+  ) {
+    const dom = renderer.domElement
+    const dpr = renderer.getPixelRatio?.() ?? 1
+    edlPipeline.render(
+      camera,
+      Math.max(1, dom.clientWidth) * dpr,
+      Math.max(1, dom.clientHeight) * dpr,
+    )
+  } else {
+    renderer.render(scene, camera)
+  }
   stats?.end?.()
 }
 
@@ -6055,16 +6970,15 @@ function rebuildOrbitControls() {
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = false
   controls.addEventListener?.('change', requestRender)
+  // 注意：交互期间不要改动 pixelRatio / 重新 setSize。
+  // 点云使用 sizeAttenuation=false（屏幕空间固定像素点），一旦在点击/拖动时
+  // 降低像素比，点的显示尺寸会随之变化，表现为「点一下点云放大/跳动」。
   controls.addEventListener?.('start', () => {
     setInteractionMode(true)
-    dprCap = 0.75
-    resizeRenderer()
     requestRender()
   })
   controls.addEventListener?.('end', () => {
     setInteractionMode(false)
-    dprCap = 1.25
-    resizeRenderer()
     requestRender()
   })
   if (prevTarget) controls.target.copy(prevTarget)
@@ -6114,7 +7028,9 @@ function setProjectionMode(mode: 'perspective' | 'orthographic') {
     camera.updateProjectionMatrix()
   }
 
+  viewerCamera.value = camera
   if (transformControls) (transformControls as any).camera = camera
+  if (rotationControls) (rotationControls as any).camera = camera
   rebuildOrbitControls()
   if (prevTarget) controls?.target?.copy(prevTarget)
   controls?.update?.()
@@ -6149,9 +7065,10 @@ async function initThree() {
   scene = new THREE.Scene()
   scene.background = new THREE.Color(backgroundColor.value || '#0b1020')
 
-  // 添加网格辅助线
-  gridHelper = new THREE.GridHelper(10000, 2000, 0x444466, 0x222244)
-  gridHelper.position.y = -10.01
+  // 无限地面网格（与 cloudBIM-viewer 点云与工程坐标配准一致）
+  gridHelper = new InfiniteGroundGrid(
+    isLightBackground.value ? '#6d8399' : '#2a6f82',
+  )
   scene.add(gridHelper)
 
   // WebGPU clipping is encoded in scene graph via ClippingGroup.
@@ -6174,6 +7091,7 @@ async function initThree() {
     projectionMode.value === 'orthographic'
       ? orthographicCamera
       : perspectiveCamera
+  viewerCamera.value = camera
 
   renderer = new WebGPURenderer({ antialias: true })
   dprCap = 1.25
@@ -6185,43 +7103,72 @@ async function initThree() {
   el.appendChild(renderer.domElement)
 
   raycaster = new THREE.Raycaster()
-  transformControls = new TransformControls(camera, renderer.domElement)
-  transformControls.enabled = true
-  transformHelper = transformControls.getHelper()
-  transformHelper.visible = false
-  transformControls.setSize?.(1.5)
-  transformControls.setSpace?.('local')
-  transformHelper.frustumCulled = false
-  transformHelper.traverse?.((o: any) => {
-    o.frustumCulled = false
-    if (o.material) {
-      if (Array.isArray(o.material))
-        o.material.forEach((m: any) => (m.depthTest = false))
-      else o.material.depthTest = false
-    }
-  })
-  transformControls.addEventListener?.('change', () => {
-    syncTransformFixFromSelected()
-    invalidateClipBounds()
-    scheduleBoundsHelpersUpdate()
-    if (transformControls?.dragging) {
-      markCoarseAlignmentDirty()
-    }
-    requestRender()
-  })
-  transformControls.addEventListener?.('dragging-changed', (e: any) => {
-    const dragging = !!e?.value
-    if (controls && !clipDragState) controls.enabled = !dragging
-    setInteractionMode(dragging)
-    if (!dragging) {
+
+  // 组合操作手柄（对齐参考项目）：平移箭头/平面 + 仅绕场景竖直轴(Y)的旋转环。
+  const configureTransformController = (
+    controller: any,
+    mode: 'translate' | 'rotate',
+    size: number,
+  ) => {
+    controller.visible = false
+    controller.enabled = false
+    controller.setSize?.(size)
+    controller.setSpace?.('world')
+    controller.setMode(mode)
+    const helper = controller.getHelper()
+    helper.visible = false
+    helper.frustumCulled = false
+    helper.traverse?.((o: any) => {
+      o.frustumCulled = false
+      if (o.material) {
+        if (Array.isArray(o.material)) {
+          o.material.forEach((m: any) => (m.depthTest = false))
+        } else {
+          o.material.depthTest = false
+        }
+      }
+    })
+    controller.addEventListener?.('change', () => {
       syncTransformFixFromSelected()
-    }
-    if (!dragging && enableClipping.value) {
-      updateClipRangeFromContent({ preserveT: true })
-      applyClippingState()
-    }
-  })
-  scene.add(transformHelper)
+      invalidateClipBounds()
+      scheduleBoundsHelpersUpdate()
+      if (transformControls?.dragging || rotationControls?.dragging) {
+        markCoarseAlignmentDirty()
+      }
+      requestRender()
+    })
+    controller.addEventListener?.('dragging-changed', (e: any) => {
+      const dragging = !!e?.value
+      const anyDragging =
+        dragging ||
+        !!transformControls?.dragging ||
+        !!rotationControls?.dragging
+      if (controls && !clipDragState) controls.enabled = !anyDragging
+      setInteractionMode(anyDragging)
+      if (!anyDragging) {
+        syncTransformFixFromSelected()
+      }
+      if (!anyDragging && enableClipping.value) {
+        updateClipRangeFromContent({ preserveT: true })
+        applyClippingState()
+      }
+    })
+    scene.add(helper)
+    return helper
+  }
+
+  transformControls = new TransformControls(camera, renderer.domElement)
+  rotationControls = new TransformControls(camera, renderer.domElement)
+  transformHelper = configureTransformController(
+    transformControls,
+    'translate',
+    1.35,
+  )
+  rotationHelper = configureTransformController(
+    rotationControls,
+    'rotate',
+    1.55,
+  )
 
   stats = new Stats()
   stats.dom.style.position = 'absolute'
@@ -6233,16 +7180,16 @@ async function initThree() {
   stats.dom.style.opacity = '0.9'
   el.appendChild(stats.dom)
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6)
-  scene.add(ambient)
+  // 灯光与 cloudBIM-viewer 点云与工程坐标配准一致
+  scene.add(new THREE.AmbientLight(0xffffff, 0.78))
 
-  const key = new THREE.DirectionalLight(0xffffff, 1.3)
-  key.position.set(3, 6, 4)
-  scene.add(key)
+  const keyLight = new THREE.DirectionalLight(0xffffff, 0.92)
+  keyLight.position.set(14, 18, 12)
+  scene.add(keyLight)
 
-  const fill = new THREE.DirectionalLight(0x99bbff, 0.5)
-  fill.position.set(-4, 2, -3)
-  scene.add(fill)
+  const fillLight = new THREE.DirectionalLight(0x9cc3ff, 0.42)
+  fillLight.position.set(-10, 8, -10)
+  scene.add(fillLight)
 
   rebuildOrbitControls()
 
@@ -6283,8 +7230,34 @@ async function initThree() {
   )
 
   renderer.domElement.addEventListener(
+    'pointerup',
+    (ev: PointerEvent) => {
+      if (analysisMode.value === 'none' || !measurePointerDown) return
+      const dx = ev.clientX - measurePointerDown.x
+      const dy = ev.clientY - measurePointerDown.y
+      measurePointerDown = null
+      if (dx * dx + dy * dy > 25) return
+      const point = pickMeasurePoint(ev)
+      if (point) handleMeasurePoint(point)
+    },
+    true,
+  )
+
+  renderer.domElement.addEventListener(
+    'dblclick',
+    () => {
+      if (analysisMode.value === 'area') closeAreaMeasurement()
+    },
+    true,
+  )
+
+  renderer.domElement.addEventListener(
     'pointerdown',
     (ev: PointerEvent) => {
+      if (analysisMode.value !== 'none') {
+        measurePointerDown = { x: ev.clientX, y: ev.clientY }
+        return
+      }
       if (!raycaster || !camera || !contentGroup) return
 
       if (ev.shiftKey && c2mMeshObj) {
@@ -6337,7 +7310,17 @@ async function initThree() {
 
       const hit = pickedHit as any
       const topIsGltf = loadedRoots.includes(top)
-      const topIsTileset = loadedTilesets.some((e) => e.wrapper === top)
+      // 点云（3D Tiles）被包在剖切宿主里，点击命中的是宿主而非 wrapper，
+      // 需要按 itemId 判断，避免把点云当成可编辑对象导致点击后位置跳动。
+      const topItemId = String(top?.userData?.__viewerItemId ?? '')
+      const topIsTileset = loadedTilesets.some(
+        (e) =>
+          e.wrapper === top ||
+          (!!topItemId &&
+            String(e.wrapper?.userData?.__viewerItemId ?? '') === topItemId),
+      )
+      // 点云不可编辑：点击点云不做选中/变换，避免每次点击点云跳动。
+      if (topIsTileset) return
       const wantElementPick =
         enableElementPicking.value &&
         topIsGltf &&
@@ -6405,11 +7388,20 @@ async function initThree() {
   await renderer.init()
   applyRendererToneMapping()
   applyClippingState()
+  // EDL（显示增强）后处理：与点云预览页保持一致（WebGPU / TSL）。
+  try {
+    edlPipeline = new PointCloudEdlPipeline(renderer, scene, perspectiveCamera)
+    edlPipeline.enabled = edlEnabled.value
+  } catch (error) {
+    console.warn('[BimPointcloudAlign] EDL 初始化失败，回退直渲', error)
+    edlPipeline = null
+  }
   statusText.value = 'Ready.'
   requestRender()
 }
 
 onMounted(() => {
+  window.addEventListener('keydown', onMeasureKeyDown)
   if (!webgpuSupported.value) {
     statusText.value =
       'WebGPU not supported. Please use Chrome/Edge with WebGPU enabled.'
@@ -6419,6 +7411,22 @@ onMounted(() => {
     viewerReady.value = true
     void autoLoadSceneResources(true)
   })
+})
+
+watch(showTransformHandles, () => {
+  applyTransformSelection()
+})
+
+// 粗配准默认编辑态：内容加载后自动选中默认编辑对象并显示手柄。
+watch(
+  () => [hasGltf.value, hasTileset.value],
+  () => {
+    if (editMode.value && !selectedItemId.value) onEditModeChange()
+  },
+)
+
+watch(pointcloudPointSize, (value) => {
+  applyPointcloudPointSize(value)
 })
 
 watch(
@@ -6452,11 +7460,17 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(animationHandle)
   cancelAnimationFrame(positionFixFrameHandle)
   cancelAnimationFrame(orientationFixFrameHandle)
+  window.removeEventListener('keydown', onMeasureKeyDown)
+  edlPipeline?.dispose?.()
+  edlPipeline = null
   resizeObserver?.disconnect()
   controls?.dispose()
   clearScene()
   transformControls?.dispose?.()
   transformHelper?.removeFromParent?.()
+  rotationControls?.dispose?.()
+  rotationHelper?.removeFromParent?.()
+  gridHelper?.dispose?.()
   renderer?.dispose()
   renderer?.domElement?.remove()
   stats?.dom?.remove?.()
@@ -6474,8 +7488,11 @@ onBeforeUnmount(() => {
   stats = null
   contentGroup = null
   transformControls = null
+  rotationControls = null
   raycaster = null
   transformHelper = null
+  rotationHelper = null
+  gridHelper = null
   clippingGroup = null
 })
 </script>
@@ -6493,27 +7510,27 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 12px;
-  color: #7fb3ff;
+  color: var(--color-primary);
   font-size: 12px;
 }
 
 .matrix-dialog__meta span {
   padding: 4px 8px;
   border-radius: 6px;
-  background: rgba(46, 108, 202, 0.12);
-  border: 1px solid rgba(127, 179, 255, 0.2);
+  background: var(--color-primary-soft);
+  border: 1px solid var(--border-color);
 }
 
 .matrix-dialog__matrix {
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(127, 179, 255, 0.2);
-  background: rgba(11, 16, 32, 0.9);
+  border: 1px solid var(--border-color);
+  background: var(--bg-control);
 }
 
 .matrix-dialog__label {
   margin-bottom: 8px;
-  color: #8dbdff;
+  color: var(--color-primary);
   font-size: 12px;
 }
 
@@ -6525,7 +7542,7 @@ onBeforeUnmount(() => {
 
 .matrix-dialog__line {
   margin: 0;
-  color: #dbe8ff;
+  color: var(--text-primary);
   font-size: 13px;
   line-height: 1.6;
   font-family: 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
@@ -6534,13 +7551,13 @@ onBeforeUnmount(() => {
 
 .matrix-dialog__line--bottom {
   padding-top: 6px;
-  border-top: 1px dashed rgba(127, 179, 255, 0.25);
+  border-top: 1px dashed var(--border-color-hover);
 }
 
 .matrix-dialog__raw {
   border-radius: 8px;
-  border: 1px solid rgba(127, 179, 255, 0.2);
-  background: rgba(11, 16, 32, 0.6);
+  border: 1px solid var(--border-color);
+  background: var(--bg-control);
   overflow: hidden;
 }
 
@@ -6548,12 +7565,12 @@ onBeforeUnmount(() => {
   cursor: pointer;
   padding: 10px 12px;
   font-size: 13px;
-  color: #a5c8ff;
+  color: var(--text-secondary);
   user-select: none;
 }
 
 .matrix-dialog__raw[open] summary {
-  border-bottom: 1px solid rgba(127, 179, 255, 0.2);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .matrix-dialog__content {
@@ -6562,7 +7579,7 @@ onBeforeUnmount(() => {
   overflow: auto;
   padding: 12px;
   background: transparent;
-  color: #dbe8ff;
+  color: var(--text-primary);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -6571,16 +7588,16 @@ onBeforeUnmount(() => {
 </style>
 <style>
 .el-popper.bpa-right-popper {
-  background: rgba(6, 12, 28, 0.55) !important;
+  background: var(--bg-card) !important;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 
-  border: 1px solid rgba(64, 158, 255, 0.35);
+  border: 1px solid var(--border-color);
 
   box-shadow:
-    0 0 0 1px rgba(64, 158, 255, 0.15),
+    0 0 0 1px var(--border-color-light),
     0 12px 32px rgba(0, 0, 0, 0.6),
-    0 0 24px rgba(64, 158, 255, 0.25);
+    0 8px 24px var(--shadow-md);
 }
 
 .el-popper.bpa-right-popper .el-select-dropdown {
@@ -6588,20 +7605,102 @@ onBeforeUnmount(() => {
 }
 
 .el-popper.bpa-right-popper .el-select-dropdown__item {
-  color: rgba(120, 190, 255, 0.85);
+  color: var(--text-secondary);
 }
 
 .el-popper.bpa-right-popper .el-select-dropdown__item:hover {
   background: linear-gradient(
     90deg,
-    rgba(64, 158, 255, 0.05),
-    rgba(64, 158, 255, 0.18),
-    rgba(64, 158, 255, 0.05)
+    var(--color-primary-soft),
+    var(--bg-control-hover),
+    var(--color-primary-soft)
   );
 }
 
 .el-popper.bpa-right-popper .el-select-dropdown__item.selected {
   background: rgba(64, 158, 255, 0.28);
   color: #fff;
+}
+
+/* 点云显示弹层（teleported，需全局样式） */
+.pointcloud-tools-popover {
+  display: grid;
+  gap: 16px;
+  color: var(--text-primary);
+  font-family: var(--font-family-base);
+  font-size: 14px;
+}
+
+.pointcloud-tools-popover .pointcloud-display-row {
+  display: grid;
+  gap: 8px;
+}
+
+.pointcloud-tools-popover .pointcloud-segmented {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-page);
+}
+
+.pointcloud-tools-popover .pointcloud-segmented button {
+  flex: 1;
+  min-height: 36px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.pointcloud-tools-popover .pointcloud-segmented button.on,
+.pointcloud-tools-popover .pointcloud-segmented button:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.pointcloud-tools-popover .pointcloud-size-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  font-size: 12px;
+}
+
+.pointcloud-tools-popover .pointcloud-size-control input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.pointcloud-tools-popover output {
+  min-width: 40px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pointcloud-tools-popover :is(button, input):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.pointcloud-tools-popover .pointcloud-edl-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.pointcloud-tools-popover .pointcloud-display-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
 }
 </style>

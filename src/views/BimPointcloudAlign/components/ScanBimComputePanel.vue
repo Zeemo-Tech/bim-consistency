@@ -1,680 +1,669 @@
 <template>
   <div class="scan-bim-compute">
-    <!-- ───────── 网格均匀化 ───────── -->
-    <div class="section-title">网格均匀化</div>
+    <template v-if="showRemeshSection">
+      <div class="section-title">网格均匀化</div>
 
-    <div
-      v-if="remeshStatusSummary"
-      class="remesh-status-bar"
-      :class="`remesh-status-bar--${remeshStatusTone}`"
-    >
-      <div class="remesh-status-bar__head">
-        <span class="remesh-status-bar__title">{{ remeshStatusSummary }}</span>
-        <el-tag
-          v-if="remeshStatus?.supported"
-          size="small"
-          effect="plain"
-          :type="remeshStatusTagType"
-        >
-          {{ remeshStatusLabel }}
-        </el-tag>
-      </div>
-      <div v-if="remeshStatusDescription" class="remesh-status-bar__desc">
-        {{ remeshStatusDescription }}
-      </div>
-    </div>
-
-    <!-- 历史结果提示 -->
-    <div v-if="remeshReadyToUse && !result" class="history-bar">
-      <span class="history-text">
-        {{
-          storedResult
-            ? `有上次结果（面数 ${storedResult.stats.faceAfter.toLocaleString()}）`
-            : '服务端已有可用的均匀化结果'
-        }}
-      </span>
-      <div class="history-actions">
-        <el-button size="small" @click="handleDownloadPly">下载 PLY</el-button>
-        <el-button size="small" type="primary" plain @click="handleLoadHistory">
-          加载结果
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 算法选择 -->
-    <div class="compute-row algo-row">
-      <span class="compute-label">算法</span>
-      <el-select
-        v-model="selectedAlgorithm"
-        size="small"
-        :disabled="!canConfigureRemesh"
-        style="flex: 1"
-        @change="handleAlgorithmChange"
+      <div
+        class="mesh-remesh-summary"
+        :class="`mesh-remesh-summary--${remeshSummaryTone}`"
       >
-        <el-option
-          v-for="algo in algorithms"
-          :key="algo.name"
-          :label="algo.label"
-          :value="algo.name"
-        />
-      </el-select>
-    </div>
+        <span class="mesh-remesh-summary__icon" aria-hidden="true">
+          {{ remeshSummaryIcon }}
+        </span>
+        <div>
+          <strong>{{ remeshSummaryTitle }}</strong>
+          <span>{{ remeshSummaryDesc }}</span>
+        </div>
+      </div>
 
-    <!-- 目标边长（主参数） -->
-    <div class="compute-row">
-      <el-tooltip
-        content="Isotropic 目标边长（米）。边长收敛至 [0.8t, 1.33t]，均值 ~t。建议 ≥ 0.05m"
-        placement="top"
-        :show-after="300"
-      >
-        <span class="compute-label compute-label--hint">目标边长 (m)</span>
-      </el-tooltip>
-      <el-input-number
-        v-model="targetEdgeLength"
-        :min="0.05"
-        :max="5"
-        :step="0.05"
-        :precision="3"
-        :controls="true"
-        size="small"
-        :disabled="!canConfigureRemesh"
-      />
-    </div>
-    <div class="edge-length-hint">
-      最小 5cm（0.05m）。细分+Isotropic 算法默认阈值系数 2.0，边长均匀收敛至
-      [0.8t, 1.33t]。
-    </div>
+      <details class="mesh-remesh-advanced">
+        <summary>
+          <span class="mesh-remesh-advanced__title">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="4" y1="6" x2="20" y2="6" />
+              <circle cx="9" cy="6" r="2" fill="white" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <circle cx="15" cy="12" r="2" fill="white" />
+              <line x1="4" y1="18" x2="20" y2="18" />
+              <circle cx="7" cy="18" r="2" fill="white" />
+            </svg>
+            高级操作
+          </span>
+        </summary>
+        <div class="mesh-remesh-advanced__body">
+          <!-- 算法选择 -->
+          <div class="compute-row algo-row">
+            <span class="compute-label">算法</span>
+            <el-select
+              v-model="selectedAlgorithm"
+              size="small"
+              :disabled="!canConfigureRemesh"
+              style="flex: 1"
+              @change="handleAlgorithmChange"
+            >
+              <el-option
+                v-for="algo in algorithms"
+                :key="algo.name"
+                :label="algo.label"
+                :value="algo.name"
+              />
+            </el-select>
+          </div>
 
-    <!-- 高级选项（折叠） -->
-    <div class="advanced-block">
-      <button class="advanced-toggle" @click="showAdvanced = !showAdvanced">
-        <span>高级选项</span>
-        <svg
-          class="advanced-toggle__chevron"
-          :class="{ 'is-open': showAdvanced }"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <polyline points="4,6 8,10 12,6" />
-        </svg>
-      </button>
-      <div v-show="showAdvanced" class="advanced-content">
-        <template v-for="param in advancedParams" :key="param.key">
-          <div v-show="isParamVisible(param)" class="compute-row">
+          <!-- 目标边长（主参数） -->
+          <div class="compute-row">
             <el-tooltip
-              :content="(param as any).tooltip"
-              :disabled="!(param as any).tooltip"
+              content="Isotropic 目标边长（米）。边长收敛至 [0.8t, 1.33t]，均值 ~t。建议 ≥ 0.05m"
               placement="top"
               :show-after="300"
             >
-              <span
-                class="compute-label"
-                :class="{ 'compute-label--hint': (param as any).tooltip }"
-              >
-                {{ param.label }}
+              <span class="compute-label compute-label--hint">
+                目标边长 (m)
               </span>
             </el-tooltip>
-            <el-switch
-              v-if="param.type === 'bool'"
-              v-model="boolValues[param.key]"
-              :disabled="!canConfigureRemesh"
-            />
             <el-input-number
-              v-else
-              v-model="
-                (paramValues as Record<string, number | undefined>)[param.key]
-              "
-              :min="param.min"
-              :max="param.max"
-              :step="param.type === 'int' ? 1 : 0.1"
-              :precision="param.type === 'int' ? 0 : 3"
+              v-model="targetEdgeLength"
+              :min="0.05"
+              :max="5"
+              :step="0.05"
+              :precision="3"
               :controls="true"
               size="small"
               :disabled="!canConfigureRemesh"
             />
           </div>
-        </template>
-        <div class="compute-row compute-actions--reset">
-          <el-button
-            size="small"
-            :disabled="running"
-            @click="handleResetParams"
-          >
-            重置参数
-          </el-button>
+          <div class="edge-length-hint">
+            最小 5cm（0.05m）。细分+Isotropic 算法默认阈值系数
+            2.0，边长均匀收敛至 [0.8t, 1.33t]。
+          </div>
+
+          <!-- 高级选项（折叠） -->
+          <div class="advanced-block">
+            <button
+              class="advanced-toggle"
+              @click="showAdvanced = !showAdvanced"
+            >
+              <span>高级选项</span>
+              <svg
+                class="advanced-toggle__chevron"
+                :class="{ 'is-open': showAdvanced }"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="4,6 8,10 12,6" />
+              </svg>
+            </button>
+            <div v-show="showAdvanced" class="advanced-content">
+              <template v-for="param in advancedParams" :key="param.key">
+                <div v-show="isParamVisible(param)" class="compute-row">
+                  <el-tooltip
+                    :content="(param as any).tooltip"
+                    :disabled="!(param as any).tooltip"
+                    placement="top"
+                    :show-after="300"
+                  >
+                    <span
+                      class="compute-label"
+                      :class="{ 'compute-label--hint': (param as any).tooltip }"
+                    >
+                      {{ param.label }}
+                    </span>
+                  </el-tooltip>
+                  <el-switch
+                    v-if="param.type === 'bool'"
+                    v-model="boolValues[param.key]"
+                    :disabled="!canConfigureRemesh"
+                  />
+                  <el-input-number
+                    v-else
+                    v-model="
+                      (paramValues as Record<string, number | undefined>)[
+                        param.key
+                      ]
+                    "
+                    :min="param.min"
+                    :max="param.max"
+                    :step="param.type === 'int' ? 1 : 0.1"
+                    :precision="param.type === 'int' ? 0 : 3"
+                    :controls="true"
+                    size="small"
+                    :disabled="!canConfigureRemesh"
+                  />
+                </div>
+              </template>
+              <div class="compute-row compute-actions--reset">
+                <el-button
+                  size="small"
+                  :disabled="running"
+                  @click="handleResetParams"
+                >
+                  重置参数
+                </el-button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 操作按钮 -->
+          <div class="compute-row compute-actions">
+            <el-button
+              v-if="!running"
+              type="primary"
+              size="small"
+              :disabled="!canRunRemesh"
+              @click="handleRun"
+            >
+              {{ remeshActionText }}
+            </el-button>
+            <el-button v-else type="danger" size="small" @click="handleStop">
+              停止计算
+            </el-button>
+            <el-button
+              v-if="
+                !running &&
+                (remeshStatus?.status === 'processing' ||
+                  remeshStatus?.status === 'queued')
+              "
+              size="small"
+              type="warning"
+              :loading="resettingRemesh"
+              @click="handleResetRemesh"
+            >
+              重置任务
+            </el-button>
+          </div>
+
+          <!-- 均匀化网格可视化开关（加载成功后才显示） -->
+          <div v-if="meshLoaded" class="remesh-control-bar">
+            <span class="remesh-label">均匀化结果可视化</span>
+            <div class="remesh-btns">
+              <el-button
+                size="small"
+                :type="solidHidden ? 'default' : 'warning'"
+                @click="emit('toggle-solid')"
+              >
+                {{ solidHidden ? '显示模型' : '隐藏模型' }}
+              </el-button>
+              <el-tooltip
+                :disabled="wireAvailable !== false"
+                content="面片数超过阈值，线框已跳过（面数过多时线框无实际意义）"
+                placement="top"
+                :show-after="100"
+              >
+                <el-button
+                  v-if="wireAvailable !== false"
+                  size="small"
+                  :type="wireHidden ? 'default' : 'success'"
+                  @click="emit('toggle-wire')"
+                >
+                  {{ wireHidden ? '显示线框' : '隐藏线框' }}
+                </el-button>
+                <el-button v-else size="small" disabled>线框不可用</el-button>
+              </el-tooltip>
+            </div>
+          </div>
+
+          <div v-if="result" class="compute-result">
+            <div class="result-header">
+              <span class="result-title">处理结果</span>
+              <div class="result-actions">
+                <el-button
+                  size="small"
+                  :loading="downloadingPly"
+                  @click="handleDownloadPly"
+                >
+                  下载 PLY
+                </el-button>
+                <el-button
+                  size="small"
+                  type="success"
+                  :loading="loadingToScene"
+                  @click="handleLoadToScene"
+                >
+                  加载到场景
+                </el-button>
+              </div>
+            </div>
+            <div class="result-grid">
+              <span class="result-cell head" />
+              <span class="result-cell head">处理前</span>
+              <span class="result-cell head">处理后</span>
+              <span class="result-cell label">顶点数</span>
+              <span class="result-cell">
+                {{ result.stats.vertexBefore.toLocaleString() }}
+              </span>
+              <span class="result-cell">
+                {{ result.stats.vertexAfter.toLocaleString() }}
+              </span>
+              <span class="result-cell label">面数</span>
+              <span class="result-cell">
+                {{ result.stats.faceBefore.toLocaleString() }}
+              </span>
+              <span class="result-cell">
+                {{ result.stats.faceAfter.toLocaleString() }}
+              </span>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
+      </details>
 
-    <!-- 操作按钮 -->
-    <div class="compute-row compute-actions">
-      <el-button
-        v-if="!running"
-        type="primary"
-        size="small"
-        :disabled="!canRunRemesh"
-        @click="handleRun"
-      >
-        {{ remeshActionText }}
-      </el-button>
-      <el-button v-else type="danger" size="small" @click="handleStop">
-        停止计算
-      </el-button>
-      <el-button
-        v-if="!running && (remeshStatus?.status === 'processing' || remeshStatus?.status === 'queued')"
-        size="small"
-        type="warning"
-        :loading="resettingRemesh"
-        @click="handleResetRemesh"
-      >
-        重置任务
-      </el-button>
-    </div>
-
-    <!-- 均匀化网格可视化开关（加载成功后才显示） -->
-    <div v-if="meshLoaded" class="remesh-control-bar">
-      <span class="remesh-label">均匀化结果可视化</span>
-      <div class="remesh-btns">
-        <el-button
-          size="small"
-          :type="solidHidden ? 'default' : 'warning'"
-          @click="emit('toggle-solid')"
-        >
-          {{ solidHidden ? '显示模型' : '隐藏模型' }}
-        </el-button>
-        <el-tooltip
-          :disabled="wireAvailable !== false"
-          content="面片数超过阈值，线框已跳过（面数过多时线框无实际意义）"
-          placement="top"
-          :show-after="100"
-        >
-          <el-button
-            v-if="wireAvailable !== false"
-            size="small"
-            :type="wireHidden ? 'default' : 'success'"
-            @click="emit('toggle-wire')"
-          >
-            {{ wireHidden ? '显示线框' : '隐藏线框' }}
-          </el-button>
-          <el-button v-else size="small" disabled>线框不可用</el-button>
-        </el-tooltip>
+      <div v-if="errorMsg" class="compute-error">
+        {{ errorMsg }}
       </div>
-    </div>
+    </template>
 
-    <div v-if="result" class="compute-result">
-      <div class="result-header">
-        <span class="result-title">处理结果</span>
-        <div class="result-actions">
-          <el-button
-            size="small"
-            :loading="downloadingPly"
-            @click="handleDownloadPly"
-          >
-            下载 PLY
-          </el-button>
-          <el-button
-            size="small"
-            type="success"
-            :loading="loadingToScene"
-            @click="handleLoadToScene"
-          >
-            加载到场景
-          </el-button>
-        </div>
-      </div>
-      <div class="result-grid">
-        <span class="result-cell head" />
-        <span class="result-cell head">处理前</span>
-        <span class="result-cell head">处理后</span>
-        <span class="result-cell label">顶点数</span>
-        <span class="result-cell">
-          {{ result.stats.vertexBefore.toLocaleString() }}
-        </span>
-        <span class="result-cell">
-          {{ result.stats.vertexAfter.toLocaleString() }}
-        </span>
-        <span class="result-cell label">面数</span>
-        <span class="result-cell">
-          {{ result.stats.faceBefore.toLocaleString() }}
-        </span>
-        <span class="result-cell">
-          {{ result.stats.faceAfter.toLocaleString() }}
+    <template v-if="showC2mSection">
+      <!-- ───────── Scan vs BIM 快速预估（对齐参考项目第二步 偏差对比） ───────── -->
+      <div v-if="showRemeshSection" class="section-divider" />
+      <div class="section-title c2m-panel__title">Scan vs BIM 快速预估</div>
+
+      <div v-if="c2mServerHydratedHint" class="history-bar c2m-history-hint">
+        <span class="history-text">
+          已从服务端恢复上次统计（重新计算将覆盖）
         </span>
       </div>
-    </div>
 
-    <div v-if="errorMsg" class="compute-error">
-      {{ errorMsg }}
-    </div>
-
-    <!-- ───────── Scan vs BIM 计算 ───────── -->
-    <div class="section-divider" />
-    <div class="section-title">Scan vs BIM 计算</div>
-
-    <div v-if="c2mServerHydratedHint" class="history-bar c2m-history-hint">
-      <span class="history-text">已从服务端恢复上次统计（重新计算将覆盖）</span>
-    </div>
-
-    <!-- 前置条件检查 -->
-    <div class="c2m-prereqs">
-      <div class="prereq-item" :class="{ 'prereq-ok': props.hasAlignment }">
-        <span class="prereq-icon">{{ props.hasAlignment ? '✓' : '✗' }}</span>
-        <span>配准矩阵</span>
-      </div>
-      <div class="prereq-item" :class="{ 'prereq-ok': hasRemeshResult }">
-        <span class="prereq-icon">{{ hasRemeshResult ? '✓' : '✗' }}</span>
-        <span>网格均匀化</span>
-      </div>
-    </div>
-
-    <div class="c2m-subtitle">计算参数（参与服务端重算）</div>
-    <!-- C2M 参数 -->
-    <div class="compute-row">
-      <el-tooltip
-        content="体素降采样尺寸（米）。越小保留越多点、精度越高，但计算时间更长"
-        placement="top"
-        :show-after="300"
-      >
-        <span class="compute-label compute-label--hint">降采样 (m)</span>
-      </el-tooltip>
-      <el-input-number
-        v-model="c2mVoxelSize"
-        :min="0.01"
-        :max="1"
-        :step="0.01"
-        :precision="3"
-        :controls="true"
-        size="small"
-        :disabled="!c2mCanRun || c2mRunning"
-      />
-    </div>
-
-    <!-- 法向约束高级参数（折叠） -->
-    <div class="advanced-block">
-      <button
-        class="advanced-toggle"
-        @click="c2mShowNormalAdvanced = !c2mShowNormalAdvanced"
-      >
-        <span>法向量约束（高级）</span>
-        <svg
-          class="advanced-toggle__chevron"
-          :class="{ 'is-open': c2mShowNormalAdvanced }"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <polyline points="4,6 8,10 12,6" />
-        </svg>
-      </button>
-      <div v-show="c2mShowNormalAdvanced" class="advanced-content">
-        <div class="compute-row">
-          <el-tooltip
-            content="启用后使用 kNN 候选点 + 法向方向筛选，抑制背侧噪声点干扰。关闭时退化为原始 1-NN。"
-            placement="top"
-            :show-after="300"
-          >
-            <span class="compute-label compute-label--hint">法向约束</span>
-          </el-tooltip>
+      <section class="c2m-primary-card" aria-label="快速预估主要操作">
+        <div class="c2m-primary-toggle">
+          <span>
+            <i aria-hidden="true" />
+            启用降采样
+          </span>
           <el-switch
-            v-model="c2mNormalConstraintEnabled"
-            :disabled="!c2mCanRun || c2mRunning"
+            v-model="c2mDownsampleEnabled"
+            size="small"
+            :disabled="!c2mCanRun"
+            aria-label="启用 C2M 点云降采样"
           />
         </div>
-        <template v-if="c2mNormalConstraintEnabled">
-          <div class="compute-row">
-            <el-tooltip
-              content="每个顶点取 k 个候选最近邻，从符合法向约束的候选中选最近者。建议 8~16。"
-              placement="top"
-              :show-after="300"
-            >
-              <span class="compute-label compute-label--hint">候选邻居 k</span>
-            </el-tooltip>
-            <el-input-number
-              v-model="c2mKnnK"
-              :min="2"
-              :max="32"
-              :step="1"
-              :precision="0"
-              size="small"
-              :disabled="!c2mCanRun || c2mRunning"
-            />
-          </div>
-          <div class="compute-row">
-            <el-tooltip
-              content="仅保留位于顶点外法线前半空间的候选点（dot(N, vec) ≥ 0）。关闭后仅用夹角阈值过滤。"
-              placement="top"
-              :show-after="300"
-            >
-              <span class="compute-label compute-label--hint">前半空间</span>
-            </el-tooltip>
-            <el-switch
-              v-model="c2mNormalHalfSpaceOnly"
-              :disabled="!c2mCanRun || c2mRunning"
-            />
-          </div>
-          <div class="compute-row">
-            <el-tooltip
-              content="法向量与候选点方向的夹角上限（度）。超过此角度的候选点被过滤。建议 60~80°。"
-              placement="top"
-              :show-after="300"
-            >
-              <span class="compute-label compute-label--hint">
-                夹角上限 (°)
-              </span>
-            </el-tooltip>
-            <el-input-number
-              v-model="c2mNormalMaxAngleDeg"
-              :min="10"
-              :max="90"
-              :step="5"
-              :precision="0"
-              size="small"
-              :disabled="!c2mCanRun || c2mRunning"
-            />
-          </div>
-        </template>
-      </div>
-    </div>
-
-    <!-- C2M 操作按钮 -->
-    <div class="compute-row compute-actions">
-      <el-button
-        v-if="!c2mRunning"
-        type="primary"
-        size="small"
-        :disabled="!c2mCanRun"
-        @click="handleC2MRun"
-      >
-        开始计算
-      </el-button>
-      <el-button v-else type="danger" size="small" @click="handleC2MStop">
-        停止计算
-      </el-button>
-    </div>
-
-    <!-- C2M 结果 -->
-    <div v-if="c2mResult" class="c2m-result-block">
-      <!-- 降采样统计 -->
-      <div class="c2m-downsample-info">
-        {{ c2mResult.pointsBefore.toLocaleString() }} →
-        {{ c2mResult.pointsAfter.toLocaleString() }} 点
-        <span class="c2m-ratio">
-          ({{
-            (
-              (c2mResult.pointsAfter / Math.max(c2mResult.pointsBefore, 1)) *
-              100
-            ).toFixed(1)
-          }}%)
-        </span>
-      </div>
-
-      <!-- bbox overlap 警告 -->
-      <div
-        v-if="c2mResult.diagnostics?.bboxOverlapIoU < 0.3"
-        class="c2m-warning"
-      >
-        ⚠ 坐标系 overlap 仅
-        {{
-          (c2mResult.diagnostics.bboxOverlapIoU * 100).toFixed(0)
-        }}%，可能未正确对齐
-      </div>
-
-      <!-- 距离统计表（有符号距离：正=外凸，负=内缩） -->
-      <div class="c2m-stats-grid">
-        <span class="c2m-stat-label">Min</span>
-        <span
-          class="c2m-stat-val"
-          :class="c2mResult.stats.min < 0 ? 'negative' : ''"
+        <label class="c2m-primary-field">
+          <span>
+            降采样距离
+            <small>单位 m</small>
+          </span>
+          <el-input-number
+            v-model="c2mVoxelSize"
+            :min="0.001"
+            :max="1"
+            :step="0.001"
+            :precision="3"
+            size="small"
+            :disabled="!c2mCanRun || !c2mDownsampleEnabled || c2mRunning"
+          />
+        </label>
+        <el-button
+          class="c2m-run-button"
+          type="primary"
+          :loading="c2mRunning"
+          :disabled="!c2mCanRun"
+          @click="handleC2MRun"
         >
-          {{ fmtSignedDist(c2mResult.stats.min) }}
-        </span>
-        <span class="c2m-stat-label">Max</span>
-        <span
-          class="c2m-stat-val"
-          :class="c2mResult.stats.max > 0 ? 'positive' : ''"
-        >
-          {{ fmtSignedDist(c2mResult.stats.max) }}
-        </span>
-        <span class="c2m-stat-label">Mean</span>
-        <span class="c2m-stat-val">
-          {{ fmtSignedDist(c2mResult.stats.mean) }}
-        </span>
-        <span class="c2m-stat-label">Std</span>
-        <span class="c2m-stat-val">{{ fmtDist(c2mResult.stats.std) }}</span>
-        <span class="c2m-stat-label">P50</span>
-        <span class="c2m-stat-val">
-          {{ fmtSignedDist(c2mResult.stats.p50) }}
-        </span>
-        <span class="c2m-stat-label">P90</span>
-        <span class="c2m-stat-val">
-          {{ fmtSignedDist(c2mResult.stats.p90) }}
-        </span>
-        <span class="c2m-stat-label">P95</span>
-        <span class="c2m-stat-val">
-          {{ fmtSignedDist(c2mResult.stats.p95) }}
-        </span>
-        <span class="c2m-stat-label">P99</span>
-        <span class="c2m-stat-val">
-          {{ fmtSignedDist(c2mResult.stats.p99) }}
-        </span>
-      </div>
-      <div class="c2m-signed-legend">
-        <span class="c2m-signed-ok">■ 绿：合格范围</span>
-        <span class="c2m-signed-warn">■ 黄：接近异常</span>
-        <span class="c2m-signed-pos">■ 红：异常爆点</span>
-      </div>
+          <el-icon><Promotion /></el-icon>
+          开始快速预估
+        </el-button>
+        <p v-if="!hasRemeshResult" class="c2m-search-hint">
+          需先完成 BIM 网格均匀化（本页下方「网格均匀化」）。
+        </p>
+      </section>
 
-      <!-- 可视化调试：与「开始计算」解耦，仅使用已拉取的 per-vertex 距离 -->
-      <div class="c2m-viz-debug-block">
-        <button
-          type="button"
-          class="advanced-toggle c2m-viz-debug-toggle"
-          @click="c2mShowVizDebug = !c2mShowVizDebug"
-        >
-          <span>可视化调试（不重新计算）</span>
-          <svg
-            class="advanced-toggle__chevron"
-            :class="{ 'is-open': c2mShowVizDebug }"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <polyline points="4,6 8,10 12,6" />
-          </svg>
-        </button>
-        <div v-show="c2mShowVizDebug" class="advanced-content">
-          <div v-if="c2mDistancesReady" class="c2m-viz-debug-hint ok">
-            已加载有符号距离数据。色带：绿色为合格区，黄色为接近异常，红色为异常爆点；灰色=超显示上限。「加载到场景」后修改参数会实时更新模型。
-          </div>
-          <div v-else class="c2m-viz-debug-hint wait">
-            <template v-if="c2mDistancesFetching">正在拉取距离数据…</template>
-            <template v-else-if="c2mDistancesFetchError">
-              {{ c2mDistancesFetchError }}
-            </template>
-            <template v-else-if="!c2mResult?.distancesFileId">
-              当前结果为旧数据，无 distances
-              文件；可点击「重新拉取距离数据」验证，或重新执行 C2M
-              计算后本地调试直方图与色温。
-            </template>
-            <template v-else>
-              距离数据尚未就绪，请点击「重新拉取」或稍后重试。
-            </template>
-          </div>
-          <div class="compute-row">
-            <el-tooltip
-              content="合格界限（m）：±此值以内显示为绿色合格区；须小于显示上限。"
-              placement="top"
-              :show-after="300"
+      <details class="c2m-advanced-card" open>
+        <summary>
+          <span>
+            <el-icon><Setting /></el-icon>
+            高级操作
+          </span>
+          <el-icon class="c2m-advanced-card__arrow"><ArrowDown /></el-icon>
+        </summary>
+        <div class="c2m-advanced-card__body">
+          <div class="c2m-preset-block">
+            <span class="c2m-preset-block__label">
+              预估范围
+              <small>单位 mm</small>
+            </span>
+            <div
+              class="c2m-range-presets"
+              role="group"
+              aria-label="配色色域预设，单位毫米"
             >
-              <span class="compute-label compute-label--hint">
-                合格界限 (m)
+              <el-button size="small" @click="selectC2MRangePreset('auto')">
+                自动
+              </el-button>
+              <el-button size="small" @click="selectC2MRangePreset('50')">
+                ±50
+              </el-button>
+              <el-button size="small" @click="selectC2MRangePreset('100')">
+                ±100
+              </el-button>
+              <el-button size="small" @click="selectC2MRangePreset('200')">
+                ±200
+              </el-button>
+              <el-button size="small" @click="selectC2MRangePreset('full')">
+                全范围
+              </el-button>
+            </div>
+          </div>
+
+          <div class="c2m-secondary-settings" aria-label="偏差显示参数">
+            <div class="c2m-setting-row">
+              <span class="c2m-setting-row__icon">
+                <el-icon><Brush /></el-icon>
               </span>
-            </el-tooltip>
-            <el-input-number
-              v-model="c2mToleranceLimit"
-              :min="0.001"
-              :max="c2mVizMaxDistance - 0.001"
-              :step="0.005"
-              :precision="3"
-              size="small"
-            />
-          </div>
-          <div class="compute-row">
-            <el-tooltip
-              content="显示上限（m）：[-上限, +上限] 映射为绿→黄→红；超出范围显示灰色，表示极端偏差或未检测区域。须大于合格界限。"
-              placement="top"
-              :show-after="300"
-            >
-              <span class="compute-label compute-label--hint">
-                显示上限 (m)
+              <span class="c2m-setting-row__label">
+                配色范围 ±C
+                <small>mm</small>
               </span>
-            </el-tooltip>
-            <el-input-number
-              v-model="c2mVizMaxDistance"
-              :min="c2mToleranceLimit + 0.001"
-              :max="50"
-              :step="0.05"
-              :precision="2"
-              size="small"
-            />
+              <el-input-number
+                v-model="c2mColorRangeMm"
+                :min="10"
+                :max="10000"
+                :step="10"
+                :precision="0"
+                size="small"
+                aria-label="配色色域半宽，单位毫米"
+                @change="onC2MColorRangeChange"
+              />
+            </div>
+            <div class="c2m-setting-row c2m-follow-row">
+              <span class="c2m-setting-row__icon">
+                <el-icon><Grid /></el-icon>
+              </span>
+              <span class="c2m-setting-row__label">直方图跟随配色</span>
+              <el-switch
+                v-model="c2mHistogramFollowsColor"
+                size="small"
+                aria-label="直方图范围跟随配色色域"
+              />
+            </div>
+            <div class="c2m-setting-row">
+              <span class="c2m-setting-row__icon">
+                <el-icon><FullScreen /></el-icon>
+              </span>
+              <span class="c2m-setting-row__label">
+                直方图范围 ±H
+                <small>mm</small>
+              </span>
+              <el-input-number
+                v-model="c2mHistogramRangeMm"
+                :min="10"
+                :max="10000"
+                :step="10"
+                :precision="0"
+                size="small"
+                :disabled="c2mHistogramFollowsColor"
+                aria-label="直方图视窗半宽，单位毫米"
+              />
+            </div>
+            <div class="c2m-setting-row">
+              <span class="c2m-setting-row__icon">
+                <el-icon><Aim /></el-icon>
+              </span>
+              <span class="c2m-setting-row__label">
+                工程容差 ±T
+                <small>mm</small>
+              </span>
+              <el-input-number
+                v-model="c2mToleranceMm"
+                :min="1"
+                :max="c2mColorRangeMm"
+                :step="1"
+                :precision="0"
+                size="small"
+                aria-label="工程容差半宽，单位毫米"
+              />
+            </div>
           </div>
-          <div class="compute-row">
-            <el-tooltip
-              content="直方图分段数"
-              placement="top"
-              :show-after="300"
-            >
-              <span class="compute-label compute-label--hint">直方图分段</span>
-            </el-tooltip>
+
+          <div class="c2m-setting-row">
+            <span class="c2m-setting-row__icon">
+              <el-icon><Histogram /></el-icon>
+            </span>
+            <span class="c2m-setting-row__label">直方图桶数</span>
             <el-input-number
               v-model="c2mHistBins"
               :min="10"
               :max="200"
               :step="10"
+              :precision="0"
               size="small"
+              aria-label="直方图桶数"
             />
           </div>
-          <div class="compute-row compute-actions--retry">
+
+          <!-- 法向约束高级参数（折叠） -->
+          <div class="advanced-block">
+            <button
+              class="advanced-toggle"
+              @click="c2mShowNormalAdvanced = !c2mShowNormalAdvanced"
+            >
+              <span>法向量约束（高级）</span>
+              <svg
+                class="advanced-toggle__chevron"
+                :class="{ 'is-open': c2mShowNormalAdvanced }"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="4,6 8,10 12,6" />
+              </svg>
+            </button>
+            <div v-show="c2mShowNormalAdvanced" class="advanced-content">
+              <div class="compute-row">
+                <el-tooltip
+                  content="启用后使用 kNN 候选点 + 法向方向筛选，抑制背侧噪声点干扰。关闭时退化为原始 1-NN。"
+                  placement="top"
+                  :show-after="300"
+                >
+                  <span class="compute-label compute-label--hint">
+                    法向约束
+                  </span>
+                </el-tooltip>
+                <el-switch
+                  v-model="c2mNormalConstraintEnabled"
+                  :disabled="!c2mCanRun || c2mRunning"
+                />
+              </div>
+              <template v-if="c2mNormalConstraintEnabled">
+                <div class="compute-row">
+                  <el-tooltip
+                    content="每个顶点取 k 个候选最近邻，从符合法向约束的候选中选最近者。建议 8~16。"
+                    placement="top"
+                    :show-after="300"
+                  >
+                    <span class="compute-label compute-label--hint">
+                      候选邻居 k
+                    </span>
+                  </el-tooltip>
+                  <el-input-number
+                    v-model="c2mKnnK"
+                    :min="2"
+                    :max="32"
+                    :step="1"
+                    :precision="0"
+                    size="small"
+                    :disabled="!c2mCanRun || c2mRunning"
+                  />
+                </div>
+                <div class="compute-row">
+                  <el-tooltip
+                    content="仅保留位于顶点外法线前半空间的候选点（dot(N, vec) ≥ 0）。关闭后仅用夹角阈值过滤。"
+                    placement="top"
+                    :show-after="300"
+                  >
+                    <span class="compute-label compute-label--hint">
+                      前半空间
+                    </span>
+                  </el-tooltip>
+                  <el-switch
+                    v-model="c2mNormalHalfSpaceOnly"
+                    :disabled="!c2mCanRun || c2mRunning"
+                  />
+                </div>
+                <div class="compute-row">
+                  <el-tooltip
+                    content="法向量与候选点方向的夹角上限（度）。超过此角度的候选点被过滤。建议 60~80°。"
+                    placement="top"
+                    :show-after="300"
+                  >
+                    <span class="compute-label compute-label--hint">
+                      夹角上限 (°)
+                    </span>
+                  </el-tooltip>
+                  <el-input-number
+                    v-model="c2mNormalMaxAngleDeg"
+                    :min="10"
+                    :max="90"
+                    :step="5"
+                    :precision="0"
+                    size="small"
+                    :disabled="!c2mCanRun || c2mRunning"
+                  />
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <el-button
+            class="c2m-apply-button"
+            size="small"
+            :loading="c2mRecoloring"
+            :disabled="!canRecolorC2M"
+            @click="handleC2MRecolor"
+          >
+            <el-icon><CircleCheck /></el-icon>
+            {{ c2mSettingsDirty ? '应用配色与分布' : '当前设置已应用' }}
+          </el-button>
+          <div class="c2m-actions">
             <el-button
               size="small"
-              :disabled="c2mDistancesFetching"
-              :loading="c2mDistancesFetching"
-              @click="syncDistancesToParent"
+              :disabled="!c2mResult || c2mRunning"
+              @click="handleLoadC2MPly"
             >
-              重新拉取距离数据
+              <el-icon><Download /></el-icon>
+              加载到场景
             </el-button>
-            <el-tooltip
-              content="将当前色彩参数固化为服务端 PLY，确保批注/四分屏视图颜色与此处一致"
-              placement="top"
-              :show-after="300"
+            <el-button
+              size="small"
+              :disabled="!props.meshLoaded"
+              @click="handleClearC2MScene"
             >
-              <el-button
-                size="small"
-                type="success"
-                :disabled="!c2mResult || c2mRecoloring"
-                :loading="c2mRecoloring"
-                @click="handleC2MRecolor"
-              >
-                确认应用
-              </el-button>
-            </el-tooltip>
+              <el-icon><Delete /></el-icon>
+              清空场景
+            </el-button>
           </div>
         </div>
-      </div>
+      </details>
 
-      <!-- 迷你直方图（有本地距离数组时用当前范围/分段重算） -->
-      <div v-if="displayHistogram" class="c2m-histogram">
-        <svg
-          :viewBox="`0 0 ${histWidth} ${histHeight}`"
-          class="c2m-histogram-svg"
-        >
-          <!-- 零轴参考线 -->
-          <line
-            :x1="histWidth / 2"
-            y1="0"
-            :x2="histWidth / 2"
-            :y2="histHeight"
-            stroke="rgba(255,255,255,0.2)"
-            stroke-width="1"
-          />
-          <rect
-            v-for="(count, i) in displayHistogram.counts"
-            :key="'b' + i"
-            :x="i * barW"
-            :y="histHeight - (count / histMaxCount) * histHeight"
-            :width="Math.max(barW - 1, 1)"
-            :height="(count / histMaxCount) * histHeight"
-            :fill="histBarColor(i)"
-          />
-        </svg>
-        <div class="c2m-histogram-labels">
-          <span class="c2m-hist-neg">-{{ c2mVizMaxDistance }}m</span>
-          <span>0</span>
-          <span class="c2m-hist-pos">+{{ c2mVizMaxDistance }}m</span>
-        </div>
-      </div>
+      <div v-if="c2mError" class="mesh-remesh-error">{{ c2mError }}</div>
 
-      <!-- C2M 可视化控制 -->
-      <div class="c2m-vis-block">
-        <span class="c2m-vis-title">有符号偏差可视化</span>
-        <div class="c2m-vis-btns">
-          <el-button
-            size="small"
-            type="primary"
-            plain
-            @click="handleLoadC2MPly"
+      <details v-if="c2mResult" class="c2m-result-card" open>
+        <summary>
+          <span>
+            <el-icon><Histogram /></el-icon>
+            结果
+          </span>
+          <el-icon class="c2m-result-card__arrow"><ArrowDown /></el-icon>
+        </summary>
+        <div class="c2m-result-card__body">
+          <div
+            v-if="c2mResult.diagnostics?.bboxOverlapIoU < 0.3"
+            class="c2m-result-warning"
+            role="status"
           >
-            加载到场景
-          </el-button>
-          <el-button size="small" plain @click="handleClearC2MScene">
-            清空场景
-          </el-button>
-        </div>
-        <!-- 色带：中间绿色合格，超出合格界限后逐步过渡为黄红异常 -->
-        <div class="c2m-colorbar">
-          <span class="c2m-colorbar-label c2m-colorbar-neg">合格</span>
-          <div class="c2m-colorbar-wrap">
-            <div class="c2m-colorbar-gradient" />
-            <!-- 合格界限标记线（±toleranceLimit 对应位置） -->
-            <div
-              class="c2m-colorbar-tol-line"
-              :style="{ left: tolLineLeftPct + '%' }"
-            />
-            <div
-              class="c2m-colorbar-tol-line"
-              :style="{ left: tolLineRightPct + '%' }"
-            />
+            BBox 重叠度低于
+            30%，当前配准可能偏离，请先检查模型位置再判断偏差结果。
           </div>
-          <span class="c2m-colorbar-label c2m-colorbar-pos">异常</span>
-        </div>
-        <div class="c2m-colorbar-hint">
-          绿色占比为合格区 &nbsp;|&nbsp; 竖线 = ±{{
-            Math.round(c2mToleranceLimit * 1000)
-          }}mm 合格界限
-        </div>
-        <div class="c2m-pick-hint">
-          提示：加载后按住 Shift 点击赋色网格可查看该点有符号偏差（m），红点为重点复核位置
-        </div>
-      </div>
-    </div>
+          <div class="c2m-result-summary">
+            <div>
+              点云降采样：{{ c2mResult.pointsBefore.toLocaleString() }} →
+              {{ c2mResult.pointsAfter.toLocaleString() }}
+            </div>
+            <div>
+              Min / Max：{{ c2mResult.stats.min.toFixed(4) }} m /
+              {{ c2mResult.stats.max.toFixed(4) }} m
+            </div>
+            <div>
+              Mean / P95：{{ c2mResult.stats.mean.toFixed(4) }} m /
+              {{ c2mResult.stats.p95.toFixed(4) }} m
+            </div>
+            <div>
+              Std：{{ c2mResult.stats.std.toFixed(4) }} m · 合格界限 ±{{
+                Math.round(c2mToleranceLimit * 1000)
+              }}
+              mm
+            </div>
+          </div>
 
-    <div v-if="c2mError" class="compute-error">{{ c2mError }}</div>
+          <!-- 迷你直方图（有本地距离数组时用当前范围/分段重算） -->
+          <div v-if="displayHistogram" class="c2m-histogram">
+            <svg
+              :viewBox="`0 0 ${histWidth} ${histHeight}`"
+              class="c2m-histogram-svg"
+            >
+              <line
+                :x1="histWidth / 2"
+                y1="0"
+                :x2="histWidth / 2"
+                :y2="histHeight"
+                stroke="var(--border-color)"
+                stroke-width="1"
+              />
+              <rect
+                v-for="(count, i) in displayHistogram.counts"
+                :key="'b' + i"
+                :x="i * barW"
+                :y="histHeight - (count / histMaxCount) * histHeight"
+                :width="Math.max(barW - 1, 1)"
+                :height="(count / histMaxCount) * histHeight"
+                :fill="histBarColor(i)"
+              />
+            </svg>
+            <div class="c2m-histogram-labels">
+              <span class="c2m-hist-neg">-{{ c2mVizMaxDistance }}m</span>
+              <span>0</span>
+              <span class="c2m-hist-pos">+{{ c2mVizMaxDistance }}m</span>
+            </div>
+          </div>
+
+          <div class="c2m-panel-tip">
+            <strong>提示：</strong>
+            调整参数后点击「应用配色与分布」即可查看更新效果，建议从默认值开始微调。
+          </div>
+        </div>
+      </details>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  Aim,
+  ArrowDown,
+  Brush,
+  CircleCheck,
+  Delete,
+  Download,
+  FullScreen,
+  Grid,
+  Histogram,
+  Promotion,
+  Setting,
+} from '@element-plus/icons-vue'
 import {
   getRemeshAlgorithms,
   getRemeshStatus,
@@ -718,7 +707,16 @@ const props = defineProps<{
   wireAvailable?: boolean
   /** 父组件加载 C2M 后的 per-vertex 距离（与 PLY 顶点顺序一致），用于本地直方图 */
   c2mDistances?: Float32Array | null
+  /** 只渲染指定分区：工作流分步时用于把「网格均匀化」与「偏差对比」拆到不同步骤 */
+  section?: 'all' | 'remesh' | 'c2m'
 }>()
+
+const showRemeshSection = computed(
+  () => !props.section || props.section === 'all' || props.section === 'remesh',
+)
+const showC2mSection = computed(
+  () => !props.section || props.section === 'all' || props.section === 'c2m',
+)
 
 const emit = defineEmits<{
   (e: 'load-remesh', url: string): void
@@ -1094,6 +1092,35 @@ const remeshStatusDescription = computed(() => {
   }
   return ''
 })
+/** 作用：网格均匀化摘要卡片的状态色调（对齐参考项目 mesh-remesh-summary）。 */
+const remeshSummaryTone = computed(() => {
+  if (remeshReadyToUse.value) return 'succeeded'
+  const status = remeshStatus.value?.status
+  if (status === 'succeeded') return 'succeeded'
+  if (status === 'queued') return 'queued'
+  if (status === 'processing') return 'processing'
+  if (status === 'failed') return 'failed'
+  return 'idle'
+})
+const remeshSummaryIcon = computed(() => {
+  if (remeshReadyToUse.value) return '✓'
+  const status = remeshStatus.value?.status
+  if (running.value || status === 'processing' || status === 'queued')
+    return '…'
+  if (status === 'failed') return '!'
+  return '○'
+})
+const remeshSummaryTitle = computed(() =>
+  remeshReadyToUse.value
+    ? 'BIM 网格已自动均匀化'
+    : remeshStatusSummary.value || '等待网格均匀化',
+)
+const remeshSummaryDesc = computed(() =>
+  remeshReadyToUse.value
+    ? '上传 BIM 时已由系统处理，可直接用于后续分析。'
+    : remeshStatusDescription.value || '等待系统生成均匀化网格。',
+)
+
 const canConfigureRemesh = computed(() => {
   return (
     !!props.projectId &&
@@ -1455,6 +1482,34 @@ onBeforeUnmount(() => {
 // ── C2M (Cloud-to-Mesh Distance) ──────────────────────────────────────
 
 const c2mVoxelSize = ref(0.05)
+/** 快速预估：是否启用降采样（对齐参考项目第二步） */
+const c2mDownsampleEnabled = ref(true)
+/** 直方图范围是否跟随配色色域 */
+const c2mHistogramFollowsColor = ref(true)
+/** 直方图视窗半宽（mm） */
+const c2mHistogramRangeMm = ref(100)
+/** 配色设置是否已修改（用于「应用配色与分布」按钮文案） */
+const c2mSettingsDirty = ref(false)
+/** 配色范围半宽（mm）↔ 内部显示上限（m） */
+const c2mColorRangeMm = computed<number>({
+  get: () => Math.round(c2mVizMaxDistance.value * 1000),
+  set: (value: number) => {
+    const next = Number(value)
+    if (!Number.isFinite(next)) return
+    c2mVizMaxDistance.value = Math.max(0.001, next / 1000)
+    c2mSettingsDirty.value = true
+  },
+})
+/** 工程容差（mm）↔ 内部合格界限（m） */
+const c2mToleranceMm = computed<number>({
+  get: () => Math.round(c2mToleranceLimit.value * 1000),
+  set: (value: number) => {
+    const next = Number(value)
+    if (!Number.isFinite(next)) return
+    c2mToleranceLimit.value = Math.max(0.001, next / 1000)
+    c2mSettingsDirty.value = true
+  },
+})
 /** 显示上限（米），默认 10cm */
 const c2mVizMaxDistance = ref(0.1)
 const c2mHistBins = ref(50)
@@ -1494,6 +1549,40 @@ const c2mCanRun = computed(
 const c2mServerHydratedHint = computed(
   () => c2mHydratedFromApi.value && !!c2mResult.value,
 )
+
+/** 是否可应用配色（已有结果且未在计算/重着色）。 */
+const canRecolorC2M = computed(
+  () => !!c2mResult.value && !c2mRunning.value && !c2mRecoloring.value,
+)
+
+/** 作用：按预设设置配色色域（对齐参考项目「预估范围」）。 */
+function selectC2MRangePreset(preset: 'auto' | '50' | '100' | '200' | 'full') {
+  if (preset === 'full') {
+    const stats = c2mResult.value?.stats
+    const maxAbs = stats
+      ? Math.max(Math.abs(stats.min), Math.abs(stats.max))
+      : 0
+    if (maxAbs > 0) {
+      c2mVizMaxDistance.value = Math.max(0.001, maxAbs)
+      c2mSettingsDirty.value = true
+    }
+    return
+  }
+  const mm = preset === 'auto' ? null : Number(preset)
+  if (mm == null) {
+    c2mVizMaxDistance.value = 0.1
+    c2mToleranceLimit.value = 0.05
+  } else {
+    c2mVizMaxDistance.value = mm / 1000
+    c2mToleranceLimit.value = Math.min(c2mToleranceLimit.value, mm / 1000)
+  }
+  c2mSettingsDirty.value = true
+}
+
+/** 作用：配色范围变化时保持直方图范围跟随。 */
+function onC2MColorRangeChange() {
+  c2mSettingsDirty.value = true
+}
 
 const c2mDistancesReady = computed(
   () => !!(props.c2mDistances && props.c2mDistances.length > 0),
@@ -1645,7 +1734,7 @@ async function handleC2MRun() {
       {
         bimFileId: props.bimFileId,
         params: {
-          voxelSize: c2mVoxelSize.value,
+          voxelSize: c2mDownsampleEnabled.value ? c2mVoxelSize.value : 0.001,
           maxColormapDistance: c2mVizMaxDistance.value,
           maxHistogramDistance: c2mVizMaxDistance.value,
           histogramBins: c2mHistBins.value,
@@ -1660,6 +1749,7 @@ async function handleC2MRun() {
       controller.signal,
     )
     c2mResult.value = res.data
+    c2mSettingsDirty.value = false
     ElMessage.success('C2M 计算完成')
     await syncDistancesToParent()
   } catch (e: any) {
@@ -1697,6 +1787,7 @@ async function handleC2MRecolor() {
       toleranceLimit: c2mToleranceLimit.value,
     })
     if (res.code === 200) {
+      c2mSettingsDirty.value = false
       ElMessage.success('色彩方案已固化至服务端，批注/四分屏视图将使用新配色')
       // 更新结果中的 coloredPlyFileId，使后续「加载到场景」也能拿到新文件
       if (c2mResult.value && res.data?.coloredPlyFileId) {
@@ -1821,12 +1912,12 @@ function histBarColor(index: number): string {
 .section-title {
   font-size: 13px;
   font-weight: 600;
-  color: #cfd8e6;
+  color: var(--text-primary);
   margin-bottom: 8px;
 }
 .section-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-control);
   margin: 16px 0 14px;
 }
 .history-bar {
@@ -1841,7 +1932,7 @@ function histBarColor(index: number): string {
 
   .history-text {
     font-size: 11px;
-    color: #70c8d8;
+    color: var(--color-primary);
   }
 
   .history-actions {
@@ -1854,8 +1945,8 @@ function histBarColor(index: number): string {
   margin-bottom: 10px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: rgba(87, 103, 132, 0.12);
-  border: 1px solid rgba(143, 163, 191, 0.2);
+  background: var(--bg-control);
+  border: 1px solid var(--border-color);
 
   &__head {
     display: flex;
@@ -1867,14 +1958,14 @@ function histBarColor(index: number): string {
   &__title {
     font-size: 12px;
     font-weight: 600;
-    color: #d9e2ef;
+    color: var(--text-primary);
   }
 
   &__desc {
     margin-top: 6px;
     font-size: 11px;
     line-height: 1.5;
-    color: #8fa3bf;
+    color: var(--text-secondary);
   }
 }
 
@@ -1907,12 +1998,12 @@ function histBarColor(index: number): string {
     flex-shrink: 0;
     min-width: 64px;
     font-size: 12px;
-    color: #8fa3bf;
+    color: var(--text-secondary);
     white-space: nowrap;
 
     &--hint {
       cursor: help;
-      border-bottom: 1px dashed rgba(143, 163, 191, 0.5);
+      border-bottom: 1px dashed var(--border-color-hover);
     }
   }
 
@@ -1924,7 +2015,7 @@ function histBarColor(index: number): string {
 }
 .edge-length-hint {
   font-size: 11px;
-  color: #6b7e96;
+  color: var(--text-tertiary);
   line-height: 1.5;
   margin-bottom: 10px;
   padding: 4px 6px;
@@ -1945,12 +2036,12 @@ function histBarColor(index: number): string {
   border: none;
   padding: 4px 0;
   cursor: pointer;
-  color: #7a9abd;
+  color: var(--text-secondary);
   font-size: 12px;
   width: 100%;
 
   &:hover {
-    color: #a8c0d8;
+    color: var(--text-secondary);
   }
 
   span {
@@ -1982,7 +2073,7 @@ function histBarColor(index: number): string {
 }
 .compute-result {
   margin-top: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-control);
   border-radius: 6px;
   padding: 8px;
 
@@ -1994,7 +2085,7 @@ function histBarColor(index: number): string {
   }
   .result-title {
     font-size: 12px;
-    color: #8fa3bf;
+    color: var(--text-secondary);
   }
   .result-actions {
     display: flex;
@@ -2008,13 +2099,13 @@ function histBarColor(index: number): string {
     font-size: 12px;
 
     .result-cell {
-      color: #d0d8e4;
+      color: var(--text-primary);
       &.head {
-        color: #8fa3bf;
+        color: var(--text-secondary);
         font-weight: 600;
       }
       &.label {
-        color: #8fa3bf;
+        color: var(--text-secondary);
       }
     }
   }
@@ -2031,7 +2122,7 @@ function histBarColor(index: number): string {
 
   .remesh-label {
     font-size: 11px;
-    color: #00ffaa;
+    color: var(--color-success);
     font-weight: 600;
     letter-spacing: 0.5px;
   }
@@ -2055,7 +2146,7 @@ function histBarColor(index: number): string {
 /* ── C2M 区域 ── */
 .c2m-subtitle {
   font-size: 11px;
-  color: #6b7e96;
+  color: var(--text-tertiary);
   margin-bottom: 6px;
 }
 .c2m-history-hint {
@@ -2064,7 +2155,7 @@ function histBarColor(index: number): string {
 .c2m-pick-hint {
   margin-top: 6px;
   font-size: 10px;
-  color: #6b7e96;
+  color: var(--text-tertiary);
   line-height: 1.4;
 }
 .c2m-prereqs {
@@ -2077,7 +2168,7 @@ function histBarColor(index: number): string {
     align-items: center;
     gap: 4px;
     font-size: 11px;
-    color: #6b7e96;
+    color: var(--text-tertiary);
 
     &.prereq-ok {
       color: #67c23a;
@@ -2090,17 +2181,17 @@ function histBarColor(index: number): string {
 }
 .c2m-result-block {
   margin-top: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-control);
   border-radius: 6px;
   padding: 8px;
 }
 .c2m-downsample-info {
   font-size: 11px;
-  color: #8fa3bf;
+  color: var(--text-secondary);
   margin-bottom: 6px;
 
   .c2m-ratio {
-    color: #6b7e96;
+    color: var(--text-tertiary);
   }
 }
 .c2m-warning {
@@ -2120,11 +2211,11 @@ function histBarColor(index: number): string {
   margin-bottom: 4px;
 
   .c2m-stat-label {
-    color: #8fa3bf;
+    color: var(--text-secondary);
     font-weight: 500;
   }
   .c2m-stat-val {
-    color: #d0d8e4;
+    color: var(--text-primary);
     text-align: right;
     font-variant-numeric: tabular-nums;
 
@@ -2151,7 +2242,7 @@ function histBarColor(index: number): string {
 }
 .c2m-viz-debug-block {
   margin: 8px 0;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--bg-control);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -2172,7 +2263,7 @@ function histBarColor(index: number): string {
   }
   &.wait {
     color: #b8c4d6;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--bg-control);
   }
 }
 .compute-actions--retry {
@@ -2192,7 +2283,7 @@ function histBarColor(index: number): string {
   justify-content: space-between;
   align-items: center;
   font-size: 10px;
-  color: #6b7e96;
+  color: var(--text-tertiary);
   margin-top: 2px;
 }
 .c2m-hist-neg {
@@ -2226,7 +2317,7 @@ function histBarColor(index: number): string {
 }
 .c2m-colorbar-label {
   font-size: 10px;
-  color: #6b7e96;
+  color: var(--text-tertiary);
   flex-shrink: 0;
   &.c2m-colorbar-neg {
     color: #3fd36b;
@@ -2259,7 +2350,7 @@ function histBarColor(index: number): string {
   top: -2px;
   width: 2px;
   height: 12px;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--bg-card);
   border-radius: 1px;
   transform: translateX(-50%);
   pointer-events: none;
@@ -2269,5 +2360,884 @@ function histBarColor(index: number): string {
   color: #5a6a7a;
   margin-top: 3px;
   line-height: 1.4;
+}
+
+/* ===== cloudBIM-viewer 参考样式（第二步 偏差对比 / C2M 面板） ===== */
+.c2m-result-summary {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(64, 158, 255, 0.28);
+  background: rgba(10, 20, 45, 0.45);
+  color: rgba(231, 240, 255, 0.88);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.c2m-pick-hint {
+  margin-top: 8px;
+  color: rgba(214, 228, 248, 0.68);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.c2m-result-histogram {
+  margin-top: 8px;
+}
+
+.c2m-range-presets {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  margin: 8px 0px;
+
+  .el-button {
+    min-width: 0;
+    margin-left: 0;
+    padding-inline: 4px;
+  }
+}
+
+.c2m-visualization-controls {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+
+  .control-row {
+    min-width: 0;
+  }
+
+  .label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .el-input-number {
+    width: 112px;
+    min-width: 96px;
+  }
+}
+
+.c2m-follow-row {
+  min-height: 28px;
+}
+
+.c2m-result-warning {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--color-warning);
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.c2m-result-warning--stale {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+@media (max-width: 720px) {
+  .c2m-range-presets {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .c2m-visualization-controls .el-input-number {
+    width: 104px;
+    min-width: 88px;
+  }
+}
+
+.c2m-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+
+  .el-button {
+    flex: 1 1 0;
+    min-width: 0;
+    margin-left: 0;
+  }
+}
+
+.control-panel .c2m-panel {
+  padding: 18px 16px 20px;
+  background: #fff;
+}
+
+.control-panel .c2m-panel__title {
+  margin-bottom: 16px;
+  color: #172e50;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.c2m-primary-card,
+.c2m-secondary-settings,
+.c2m-advanced-card {
+  border: 1px solid #dce5f1;
+  background: #fff;
+}
+
+.c2m-primary-card {
+  padding: 16px;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+}
+
+.c2m-primary-toggle {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #1e3759;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.c2m-primary-toggle > span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.c2m-primary-toggle i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+}
+
+.c2m-panel :deep(.el-switch) {
+  --el-switch-on-color: var(--color-primary);
+  --el-switch-off-color: #b7c2d1;
+}
+
+.c2m-primary-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.c2m-primary-field > span,
+.c2m-preset-block__label {
+  color: #516b8f;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.c2m-primary-field small,
+.c2m-preset-block__label small,
+.c2m-setting-row__label small {
+  color: #8493a8;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.c2m-primary-field :deep(.el-input-number) {
+  width: 100%;
+}
+
+.c2m-primary-field :deep(.el-input__wrapper) {
+  height: 38px;
+  padding-inline: 36px !important;
+  border-color: #ced9e8 !important;
+  border-radius: 6px;
+  background: #fff !important;
+}
+
+.c2m-primary-field :deep(.el-input-number__input) {
+  color: #1b3355;
+  font-family: var(--font-family-number);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.c2m-primary-field :deep(.el-input-number__increase),
+.c2m-primary-field :deep(.el-input-number__decrease) {
+  width: 34px;
+  color: #31567f;
+  background: #f8fafe;
+}
+
+.c2m-run-button.el-button {
+  width: 100%;
+  height: 42px;
+  margin-top: 14px;
+  border-color: #326fe0;
+  border-radius: 6px;
+  color: #fff;
+  background: #326fe0;
+  box-shadow: 0 6px 14px rgb(50 111 224 / 17%);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.c2m-run-button .el-icon {
+  margin-right: 7px;
+  font-size: 16px;
+}
+
+.c2m-preset-block {
+  margin-top: 15px;
+}
+
+.c2m-range-presets {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.c2m-range-presets .el-button {
+  height: 34px;
+  padding: 0 3px;
+  border-color: #d7e0ed;
+  border-radius: 6px;
+  color: #4e6687;
+  background: #fff;
+  font-family: var(--font-family-number);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.c2m-range-presets .el-button:hover,
+.c2m-range-presets .el-button:focus-visible {
+  border-color: #82aef1;
+  color: #2867c7;
+  background: #f7faff;
+}
+
+.c2m-secondary-settings {
+  padding: 8px 16px;
+  border-top-color: #e7edf5;
+  border-radius: 0 0 8px 8px;
+}
+
+.c2m-secondary-settings .c2m-setting-row {
+  grid-template-columns: 28px minmax(0, 1fr) 88px;
+}
+
+.c2m-setting-row {
+  min-width: 0;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 104px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #edf1f6;
+}
+
+.c2m-setting-row:last-child {
+  border-bottom: 0;
+}
+
+.c2m-setting-row__icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: #356db8;
+  background: #f0f5fd;
+}
+
+.c2m-setting-row__icon .el-icon {
+  font-size: 15px;
+}
+
+.c2m-setting-row__label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  color: #263f61;
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.35;
+}
+
+.c2m-secondary-settings .c2m-setting-row > :deep(.el-input-number) {
+  width: 88px;
+  align-self: center;
+}
+
+.c2m-setting-row > :deep(.el-input-number),
+.c2m-setting-row > :deep(.el-select) {
+  width: 104px;
+}
+
+.c2m-setting-row > :deep(.el-switch) {
+  justify-self: end;
+}
+
+.c2m-setting-row :deep(.el-input__wrapper),
+.c2m-setting-row :deep(.el-select__wrapper) {
+  min-height: 30px;
+  border-color: #d6e0ed !important;
+  border-radius: 5px;
+  background: #fff !important;
+}
+
+.c2m-setting-row :deep(.el-input-number__input),
+.c2m-setting-row :deep(.el-select__selected-item),
+.c2m-setting-row :deep(.el-select__caret) {
+  color: #223b5d !important;
+  font-family: var(--font-family-number);
+  font-size: 11px;
+}
+
+.c2m-setting-row :deep(.el-input-number__increase),
+.c2m-setting-row :deep(.el-input-number__decrease) {
+  width: 24px;
+  color: #31567f;
+  background: #f8fafe;
+}
+
+.c2m-advanced-card {
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.c2m-result-card {
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid #dce5f1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.c2m-advanced-card summary {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  color: #245da8;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  list-style: none;
+  user-select: none;
+}
+
+.c2m-advanced-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.c2m-advanced-card summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.c2m-advanced-card summary > span .el-icon {
+  font-size: 17px;
+}
+
+.c2m-advanced-card__arrow {
+  flex: 0 0 auto;
+  transition: transform var(--transition-fast);
+}
+
+.c2m-advanced-card[open] .c2m-advanced-card__arrow {
+  transform: rotate(180deg);
+}
+
+.c2m-advanced-card__body {
+  padding: 2px 16px 14px;
+  border-top: 1px solid #e8eef6;
+}
+
+.c2m-result-card summary {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  color: #245da8;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  list-style: none;
+  user-select: none;
+}
+
+.c2m-result-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.c2m-result-card summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.c2m-result-card summary > span .el-icon {
+  font-size: 17px;
+}
+
+.c2m-result-card__arrow {
+  flex: 0 0 auto;
+  transition: transform var(--transition-fast);
+}
+
+.c2m-result-card[open] .c2m-result-card__arrow {
+  transform: rotate(180deg);
+}
+
+.c2m-result-card__body {
+  padding: 2px 16px 14px;
+  border-top: 1px solid #e8eef6;
+}
+
+.c2m-apply-button.el-button {
+  width: 100%;
+  height: 36px;
+  margin-top: 12px;
+  border-color: #bcd2f2;
+  border-radius: 6px;
+  color: #2c6bca;
+  background: #f6f9ff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.c2m-apply-button .el-icon {
+  margin-right: 6px;
+}
+
+.c2m-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.c2m-actions .el-button {
+  width: 100%;
+  height: 36px;
+  margin: 0;
+  padding: 0 7px;
+  border-color: #d7e0ed;
+  border-radius: 6px;
+  color: #34577f;
+  background: #fff;
+  font-size: 10px;
+}
+
+.c2m-actions .el-icon {
+  margin-right: 5px;
+}
+
+.c2m-panel-tip {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2eaf5;
+  border-radius: 7px;
+  color: #617694;
+  background: #f5f8fd;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.c2m-panel-tip strong {
+  color: #2f69bd;
+  font-weight: 650;
+}
+
+.c2m-panel .mesh-remesh-error,
+.c2m-panel .c2m-result-warning,
+.c2m-panel .c2m-result-summary,
+.c2m-panel .c2m-pick-hint,
+.c2m-panel .c2m-result-histogram {
+  margin-top: 12px;
+}
+
+/* ===== cloudBIM-viewer 参考样式（网格均匀化 / 高级操作） ===== */
+.mesh-remesh-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+}
+
+.mesh-remesh-summary__icon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text-tertiary);
+  background: var(--bg-card);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mesh-remesh-summary > div {
+  min-width: 0;
+}
+
+.mesh-remesh-summary strong,
+.mesh-remesh-summary span:not(.mesh-remesh-summary__icon) {
+  display: block;
+}
+
+.mesh-remesh-summary strong {
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.mesh-remesh-summary span:not(.mesh-remesh-summary__icon) {
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.mesh-remesh-summary--succeeded {
+  border-color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.mesh-remesh-summary--succeeded .mesh-remesh-summary__icon {
+  color: #fff;
+  background: var(--color-success);
+}
+
+.mesh-remesh-summary--queued,
+.mesh-remesh-summary--processing {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.mesh-remesh-summary--queued .mesh-remesh-summary__icon,
+.mesh-remesh-summary--processing .mesh-remesh-summary__icon {
+  color: #fff;
+  background: var(--color-primary);
+}
+
+.mesh-remesh-summary--failed {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.mesh-remesh-summary--failed .mesh-remesh-summary__icon {
+  color: #fff;
+  background: var(--color-danger);
+}
+
+.mesh-remesh-advanced {
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid #dce5f1;
+  border-radius: 10px;
+  background: var(--bg-card);
+  box-shadow: 0 2px 8px rgb(38 75 127 / 5%);
+}
+
+.mesh-remesh-advanced summary {
+  position: relative;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  padding: 0 44px 0 20px;
+  color: #23446f;
+  background: #fff;
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.mesh-remesh-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.mesh-remesh-advanced summary::after {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  color: #4c7cc8;
+  content: '⌃';
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1;
+  transform: translateY(-38%) rotate(180deg);
+  transition: transform var(--transition-fast);
+}
+
+.mesh-remesh-advanced[open] summary::after {
+  transform: translateY(-62%);
+}
+
+.mesh-remesh-advanced summary:hover {
+  color: var(--color-primary);
+}
+
+.mesh-remesh-advanced__body {
+  padding: 4px 20px 20px;
+}
+
+.mesh-remesh-advanced__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mesh-remesh-advanced__title svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  color: #3974d3;
+}
+
+.mesh-algorithm-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid #dfe7f2;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 1px 5px rgb(45 78 123 / 3%);
+}
+
+.mesh-algorithm-card__icon {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: #3877dd;
+  background: linear-gradient(145deg, #d8e5ff, #edf2ff);
+}
+
+.mesh-algorithm-card__icon svg {
+  width: 27px;
+  height: 27px;
+}
+
+.mesh-algorithm-card__content {
+  min-width: 0;
+}
+
+.mesh-algorithm-card__content strong {
+  display: block;
+  overflow: hidden;
+  color: #1b3355;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mesh-algorithm-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.mesh-algorithm-card__tags span {
+  padding: 3px 9px;
+  border-radius: 4px;
+  color: #4d75b5;
+  background: #edf3ff;
+  font-family: var(--font-family-number);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.mesh-algorithm-card__content p {
+  margin: 10px 0 0;
+  color: #6b7f9a;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.mesh-remesh-param-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 13px;
+}
+
+.mesh-remesh-param {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.mesh-remesh-param > span {
+  color: #294363;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.mesh-remesh-param :deep(.el-select),
+.mesh-remesh-param :deep(.el-input-number) {
+  width: 100%;
+}
+
+.mesh-remesh-param :deep(.el-select__wrapper),
+.mesh-remesh-param :deep(.el-input__wrapper) {
+  min-height: 34px;
+  border-color: #d7e0ed !important;
+  background: #fff !important;
+}
+
+.mesh-remesh-param :deep(.el-select__selected-item),
+.mesh-remesh-param :deep(.el-input-number__input),
+.mesh-remesh-param :deep(.el-select__caret) {
+  color: var(--text-primary) !important;
+}
+
+.mesh-remesh-primary-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.mesh-remesh-primary-actions > .el-button {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  height: 36px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.mesh-remesh-primary-actions > .el-button--primary {
+  border-color: #326fe0;
+  background: #326fe0;
+  box-shadow: 0 5px 12px rgb(50 111 224 / 18%);
+}
+
+.mesh-remesh-primary-actions > .el-button:not(.el-button--primary) {
+  border-color: #d6e0ed;
+  color: #315b93;
+  background: #fff;
+}
+
+.mesh-action-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  margin-right: 6px;
+}
+
+.mesh-remesh-provenance {
+  margin: -2px 0 10px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.mesh-remesh-stats {
+  margin-top: 8px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.mesh-remesh-advanced .mesh-remesh-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #e5ebf3;
+  color: #203650;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.mesh-stat-item {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-right: 10px;
+}
+
+.mesh-stat-item + .mesh-stat-item {
+  padding-right: 0;
+  padding-left: 13px;
+  border-left: 1px solid #edf1f6;
+}
+
+.mesh-stat-item > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 20px;
+  margin-top: 1px;
+  color: #73a4ed;
+}
+
+.mesh-stat-item > div {
+  min-width: 0;
+}
+
+.mesh-stat-item span,
+.mesh-stat-item strong {
+  display: block;
+}
+
+.mesh-stat-item span {
+  margin-bottom: 5px;
+  color: #708199;
+  font-size: 10px;
+}
+
+.mesh-stat-item strong {
+  color: #1f334e;
+  font-family: var(--font-family-number);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.mesh-stat-item em {
+  color: var(--color-success);
+  font-style: normal;
+}
+
+.mesh-remesh-error {
+  margin-top: 8px;
+  color: var(--color-danger);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.mesh-remesh-visual-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+
+  .el-button {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: 0;
+  }
 }
 </style>

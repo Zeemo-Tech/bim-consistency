@@ -61,6 +61,10 @@ import { GLTFExtensionsPlugin } from '3d-tiles-renderer/three/plugins'
 import type { TrajectoryPoint } from '@/api/calibration'
 import { getScanTilesetUrl, getScanTilesAsset } from '@/api/fileManage'
 import { buildGaussianTrajectoryYUpPose } from '../utils/fusionTransforms'
+import { InfiniteGroundGrid } from '@/utils/three/infiniteGroundGrid'
+import { InfiniteGroundGrid as InfiniteGroundGridWebgl } from '@/utils/three/infiniteGroundGridWebgl'
+import { PointCloudEdlPipeline } from '@/utils/three/pointCloudEdl'
+import { PointCloudEdlPipeline as PointCloudEdlPipelineWebgl } from '@/utils/three/pointCloudEdlWebgl'
 
 type MoveDirection = 'up' | 'down' | 'left' | 'right'
 
@@ -190,6 +194,13 @@ let isPointcloudLoading = false
 let resizeObserver: ResizeObserver | null = null
 let pointcloudMaxDim = 1
 let fixedViewSize: number | null = null
+let desiredPointSize: number | null = null
+let pointcloudGroundGrid: InfiniteGroundGrid | null = null
+let pointcloudGroundGridWebgl: InfiniteGroundGridWebgl | null = null
+let pointcloudGroundGridVisible = false
+let edlPipeline: PointCloudEdlPipeline | null = null
+let edlPipelineWebgl: PointCloudEdlPipelineWebgl | null = null
+let edlEnabled = true
 let lastTilesErrorTarget = -1
 let rendererReady = false
 let initPromise: Promise<void> | null = null
@@ -278,8 +289,9 @@ const getOrCreateUnlitMaterialWebGL = (
   let mat: THREE.Material
   if (opts.isPoints) {
     const next = new THREE.PointsMaterial({
-      size: src?.size ?? 1,
-      sizeAttenuation: src?.sizeAttenuation ?? true,
+      size: desiredPointSize ?? src?.size ?? 1,
+      sizeAttenuation:
+        desiredPointSize !== null ? false : (src?.sizeAttenuation ?? true),
       color: baseColor,
       vertexColors: opts.vertexColors,
     })
@@ -351,12 +363,13 @@ const getOrCreatePointsTSLMaterial = (
   mat.colorNode = opts.vertexColors
     ? tslVertexColor()
     : tslColor(src?.color ?? 0xffffff)
-  mat.size = src?.size ?? 1
-  mat.sizeAttenuation = src?.sizeAttenuation ?? true
+  mat.size = desiredPointSize ?? src?.size ?? 1
+  mat.sizeAttenuation =
+    desiredPointSize !== null ? false : (src?.sizeAttenuation ?? true)
   mat.map = src?.map ?? null
   mat.alphaMap = src?.alphaMap ?? null
   mat.depthTest = src?.depthTest ?? true
-  mat.depthWrite = src?.depthWrite ?? false
+  mat.depthWrite = desiredPointSize !== null ? true : (src?.depthWrite ?? false)
 
   originalMaterialByTSL.set(mat, src)
   ;(mat as any).__viewerOriginalMaterial = src
@@ -396,7 +409,9 @@ const applyMaterialMode = (root: any) => {
       return
     }
 
-    if (!useUnlitMaterial) return
+    // 点云始终使用统一材质（与参考页一致：sizeAttenuation=false / toneMapped=false），
+    // 非点对象才受 useUnlitMaterial 控制
+    if (!useUnlitMaterial && !obj.isPoints) return
 
     const opts = {
       vertexColors: hasVertexColors,
@@ -1173,6 +1188,74 @@ const setFixedViewBySize = (size: number) => {
   requestRender()
 }
 
+/** 作用：把当前点大小应用到场景中所有点材质 */
+const applyPointSizeToScene = () => {
+  if (desiredPointSize === null || !pointcloudScene) return
+  pointcloudScene.traverse((obj: any) => {
+    if (!obj?.isPoints) return
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
+    mats.forEach((m: any) => {
+      if (!m) return
+      if ('size' in m) m.size = desiredPointSize
+      // 与参考页一致：屏幕空间固定像素点，不随距离缩放；开启深度写入
+      if ('sizeAttenuation' in m) m.sizeAttenuation = false
+      if ('depthWrite' in m) m.depthWrite = true
+    })
+  })
+}
+
+/** 作用：设置点云点大小（供预览页滑块调用） */
+const setPointSize = (size: number) => {
+  const next = Number(size)
+  if (!Number.isFinite(next) || next <= 0) return
+  desiredPointSize = next
+  applyPointSizeToScene()
+  requestRender()
+}
+
+/** 作用：切换 EDL 显示增强 */
+const setEdlEnabled = (enabled: boolean) => {
+  edlEnabled = !!enabled
+  if (edlPipeline) edlPipeline.enabled = edlEnabled
+  if (edlPipelineWebgl) edlPipelineWebgl.setEnabled(edlEnabled)
+  requestRender()
+}
+
+/** 作用：切换点云场景参考网格 */
+const setShowGrid = (show: boolean) => {
+  pointcloudGroundGridVisible = !!show
+  if (!pointcloudScene) return
+  // WebGL：使用与参考页一致的 GLSL 无限网格
+  if (rendererMode === 'webgl') {
+    if (!pointcloudGroundGridWebgl) {
+      pointcloudGroundGridWebgl = new InfiniteGroundGridWebgl()
+      pointcloudScene.add(pointcloudGroundGridWebgl)
+    }
+    pointcloudGroundGridWebgl.visible = pointcloudGroundGridVisible
+    if (pointcloudGroundGridVisible) {
+      const box = getPointcloudWorldBox()
+      if (box && !box.isEmpty()) pointcloudGroundGridWebgl.setBounds(box)
+      if (pointcloudCamera) {
+        pointcloudGroundGridWebgl.updateForCamera(pointcloudCamera)
+      }
+    }
+    requestRender()
+    return
+  }
+  if (rendererMode !== 'webgpu') return
+  if (!pointcloudGroundGrid) {
+    pointcloudGroundGrid = new InfiniteGroundGrid()
+    pointcloudScene.add(pointcloudGroundGrid)
+  }
+  pointcloudGroundGrid.visible = pointcloudGroundGridVisible
+  if (pointcloudGroundGridVisible) {
+    const box = getPointcloudWorldBox()
+    if (box && !box.isEmpty()) pointcloudGroundGrid.setBounds(box)
+    if (pointcloudCamera) pointcloudGroundGrid.updateForCamera(pointcloudCamera)
+  }
+  requestRender()
+}
+
 const getRotationLookDistance = () => {
   if (!pointcloudCamera || !pointcloudControls) return 10
   return Math.max(
@@ -1596,6 +1679,32 @@ const initPointcloudViewer = async () => {
       dir.position.set(10, 10, 10)
       pointcloudScene?.add(ambient, dir)
 
+      // EDL（显示增强）后处理
+      // - WebGL：1:1 使用 cloudBIM-viewer 的 GLSL 管线
+      // - WebGPU：使用 TSL 等价实现
+      if (pointcloudRenderer && pointcloudScene && pointcloudCamera) {
+        try {
+          if (rendererMode === 'webgl' && !edlPipelineWebgl) {
+            edlPipelineWebgl = new PointCloudEdlPipelineWebgl(
+              pointcloudRenderer as THREE.WebGLRenderer,
+              { enabled: edlEnabled, strength: 1, radius: 1 },
+            )
+          } else if (rendererMode === 'webgpu' && !edlPipeline) {
+            edlPipeline = new PointCloudEdlPipeline(
+              pointcloudRenderer,
+              pointcloudScene,
+              pointcloudCamera,
+            )
+            edlPipeline.enabled = edlEnabled
+          }
+        } catch (error) {
+          console.warn('[PointCloudViewer] EDL 初始化失败，回退直渲', error)
+          edlPipeline = null
+          edlPipelineWebgl = null
+          edlEnabled = false
+        }
+      }
+
       if (!resizeObserver && typeof ResizeObserver !== 'undefined') {
         resizeObserver = new ResizeObserver(() => {
           if (
@@ -1750,6 +1859,27 @@ const requestRender = () => {
   animationId = requestAnimationFrame(renderPointcloud)
 }
 
+/** 作用：渲染一帧（EDL 开启时走 TSL 后处理） */
+const renderSceneFrame = () => {
+  if (!pointcloudRenderer || !pointcloudScene || !pointcloudCamera) return
+  if (edlEnabled && edlPipelineWebgl) {
+    edlPipelineWebgl.enabled = true
+    edlPipelineWebgl.render(pointcloudScene, pointcloudCamera)
+    return
+  }
+  if (edlEnabled && edlPipeline) {
+    const dom = pointcloudRenderer.domElement
+    const dpr = pointcloudRenderer.getPixelRatio?.() ?? 1
+    edlPipeline.render(
+      pointcloudCamera,
+      Math.max(1, dom.clientWidth) * dpr,
+      Math.max(1, dom.clientHeight) * dpr,
+    )
+    return
+  }
+  pointcloudRenderer.render(pointcloudScene, pointcloudCamera)
+}
+
 const forceCaptureDataUrl = async () => {
   if (
     !pointcloudRenderer ||
@@ -1775,7 +1905,7 @@ const forceCaptureDataUrl = async () => {
       }
     }
 
-    pointcloudRenderer.render(pointcloudScene, pointcloudCamera)
+    renderSceneFrame()
     const gl = (pointcloudRenderer as THREE.WebGLRenderer).getContext?.()
     try {
       if (gl) {
@@ -1827,6 +1957,12 @@ const renderPointcloud = () => {
     const didUpdate = pointcloudControls?.update() ?? false
     const didMove = updateFirstPersonMovement(performance.now())
     pointcloudCamera.updateMatrixWorld()
+    if (pointcloudGroundGrid?.visible) {
+      pointcloudGroundGrid.updateForCamera(pointcloudCamera)
+    }
+    if (pointcloudGroundGridWebgl?.visible) {
+      pointcloudGroundGridWebgl.updateForCamera(pointcloudCamera)
+    }
     refreshAnnotationMarkerScales()
     const isTilesLoading = tilesLoadingCount > 0
     if (pointcloudTileset) {
@@ -1843,7 +1979,7 @@ const renderPointcloud = () => {
       needsRender = true
     }
     if (needsRender || didUpdate || isActiveLoading || didMove) {
-      pointcloudRenderer.render(pointcloudScene, pointcloudCamera)
+      renderSceneFrame()
       needsRender = false
     }
 
@@ -1985,6 +2121,7 @@ const loadPointcloudTileset = async (
         sanitizeObjectForWebGPU(tileScene)
       }
       applyMaterialMode(tileScene)
+      applyPointSizeToScene()
       applyManualClipBox()
       requestRender()
     })
@@ -2001,6 +2138,7 @@ const loadPointcloudTileset = async (
         sanitizeObjectForWebGPU(tr.group)
       }
       applyMaterialMode(tr.group)
+      applyPointSizeToScene()
       applyManualClipBox()
       wrapper.updateMatrixWorld(true)
       tr.group.updateMatrixWorld(true)
@@ -2534,6 +2672,27 @@ const cleanup = () => {
   })
   captureTarget = null
 
+  runCleanupSafely('参考网格释放', () => {
+    if (pointcloudGroundGrid) {
+      pointcloudScene?.remove(pointcloudGroundGrid)
+      pointcloudGroundGrid.dispose()
+    }
+    if (pointcloudGroundGridWebgl) {
+      pointcloudScene?.remove(pointcloudGroundGridWebgl)
+      pointcloudGroundGridWebgl.dispose()
+    }
+  })
+  pointcloudGroundGrid = null
+  pointcloudGroundGridWebgl = null
+  pointcloudGroundGridVisible = false
+
+  runCleanupSafely('EDL 后处理释放', () => {
+    edlPipeline?.dispose?.()
+    edlPipelineWebgl?.dispose?.()
+  })
+  edlPipeline = null
+  edlPipelineWebgl = null
+
   pointcloudScene = null
   pointcloudCamera = null
   pointcloudRenderer = null
@@ -2690,6 +2849,10 @@ defineExpose({
     }
     requestRender()
   },
+  setPointSize,
+  setShowGrid,
+  setEdlEnabled,
+  requestRender,
   setClipBox: (box: THREE.Box3 | null) => {
     manualClipBox = box ? box.clone() : null
     applyManualClipBox()

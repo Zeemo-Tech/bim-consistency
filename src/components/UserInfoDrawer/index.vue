@@ -468,7 +468,7 @@ const visible = computed({
 })
 const initialSection = computed(() => props.initialSection || 'profile')
 const drawerTitle = computed(() =>
-  initialSection.value === 'system' ? '系统管理' : '我的信息',
+  initialSection.value === 'system' ? '品牌设置' : '我的信息',
 )
 const drawerSubtitle = computed(() =>
   initialSection.value === 'system'

@@ -126,6 +126,19 @@
         </el-select>
       </el-form-item>
 
+      <el-form-item v-if="form.fileType === 'scan'" label="关联设计模型">
+        <div
+          class="upload-related-bim"
+          :class="{ 'is-ready': matchedBimForScan }"
+        >
+          {{
+            matchedBimForScan
+              ? `已匹配：${matchedBimForScan.originalName}`
+              : '请选择所属幢以匹配对应的 BIM 设计模型'
+          }}
+        </div>
+      </el-form-item>
+
       <el-form-item
         v-if="form.fileType === 'scan'"
         label="扫描日期"
@@ -672,6 +685,21 @@ const showsFloorName = computed(() => {
 
 const requiresFloorName = computed(() => {
   return ['CAD', 'scan', 'gauss'].includes(form.value.fileType)
+})
+
+/**
+ * 作用：扫描点云上传时，按所属幢匹配项目内对应的 BIM 设计模型。
+ * 与参考项目「归档编号关联点云与 BIM」一致：上传即可确认一一对应关系，
+ * 之后进入分析会自动带上该 BIM。
+ */
+const matchedBimForScan = computed(() => {
+  if (form.value.fileType !== 'scan') return null
+  const target = normalizedBuildingName.value
+  if (!target) return null
+  const matched = projectBuildings.value.find(
+    (item) => normalizeSlotName(item.buildingName) === target && item.bimFile,
+  )
+  return matched?.bimFile ?? null
 })
 
 const isUploadMetadataLocked = computed(() => {
@@ -1698,5 +1726,20 @@ defineExpose({
       margin-left: 16px;
     }
   }
+}
+
+.upload-related-bim {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: var(--font-size-xs);
+  color: var(--text-warning, #b45309);
+  background: var(--color-warning-soft, #f8f3e9);
+  border-radius: var(--radius-xs);
+  line-height: 1.5;
+}
+
+.upload-related-bim.is-ready {
+  color: var(--color-success, #15803d);
+  background: var(--color-success-soft, #edf4f4);
 }
 </style>

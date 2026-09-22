@@ -1,72 +1,220 @@
 <template>
-  <div class="scan-preview-page">
-    <PointCloudViewer
-      ref="pointcloudViewerRef"
-      class="scan-preview-viewer"
-      :is-preset-mode="true"
-      :apply-tileset-transform="true"
-      :click-to-enter-first-person="false"
-      :pixel-ratio-cap="1"
-      :tiles-resolution-scale="0.72"
-      @loaded-change="handlePointcloudLoadedChange"
-      @world-ready="handlePointcloudWorldReady"
-    />
+  <div class="pointcloud-preview-page" :class="`theme-${backgroundTheme}`">
+    <header class="pc-header">
+      <span class="pc-heading">
+        <strong :title="fileName">{{ fileName || '点云预览' }}</strong>
+        <small :title="projectName">
+          {{ projectName || '实测扫描' }} · 点云预览
+        </small>
+      </span>
 
-    <div class="scan-preview-toolbar">
-      <div class="toolbar-left">
-        <el-button size="small" :icon="ArrowLeft" @click="handleClose">
-          返回
-        </el-button>
-        <span class="file-title">{{ fileName || '点云预览' }}</span>
-      </div>
-      <div class="toolbar-right">
-        <el-tooltip :content="clipBoundsTooltip" placement="bottom">
-          <el-button
-            size="small"
-            class="toolbar-tool-btn toolbar-tool-btn--svg"
-            :class="{
-              'is-on': showBounds,
-              'is-disabled': !showBounds && !!clipBoundsDisabledReason,
-            }"
-            @click="onBoundsButtonClick"
+      <div class="pc-header-controls" role="group" aria-label="预览背景">
+        <span class="pc-header-label">背景</span>
+        <div class="pc-segmented">
+          <button
+            v-for="option in backgroundOptions"
+            :key="option.value"
+            type="button"
+            :class="{ on: backgroundTheme === option.value }"
+            :aria-pressed="backgroundTheme === option.value"
+            @click="backgroundTheme = option.value"
           >
-            <svg
-              class="toolbar-tool-btn__svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path d="M3 7 L12 3 L21 7 L21 17 L12 21 L3 17 Z" />
-              <line x1="3" y1="7" x2="21" y2="7" />
-              <line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 2" />
-              <line x1="12" y1="3" x2="12" y2="7" />
-            </svg>
-            裁切框
-          </el-button>
-        </el-tooltip>
-        <el-button size="small" :icon="RefreshLeft" @click="resetView">
-          重置视角
-        </el-button>
-        <el-button size="small" :icon="FullScreen" @click="toggleFullscreen">
-          全屏
-        </el-button>
-      </div>
-    </div>
-
-    <div v-if="errorMessage" class="error-overlay">
-      <div class="error-card">
-        <div class="error-title">预览失败</div>
-        <div class="error-message">{{ errorMessage }}</div>
-        <div class="error-actions">
-          <el-button type="primary" @click="loadPreview">重试</el-button>
-          <el-button @click="handleClose">返回</el-button>
+            {{ option.label }}
+          </button>
         </div>
       </div>
-    </div>
+
+      <button
+        class="pc-close"
+        type="button"
+        aria-label="关闭预览"
+        title="关闭预览"
+        @click="handleClose"
+      >
+        <el-icon><Close /></el-icon>
+      </button>
+    </header>
+
+    <main ref="stageRef" class="pc-stage" :class="`theme-${backgroundTheme}`">
+      <PointCloudViewer
+        ref="pointcloudViewerRef"
+        class="pc-viewer"
+        :is-preset-mode="true"
+        :apply-tileset-transform="true"
+        :click-to-enter-first-person="false"
+        :show-internal-controls="false"
+        :prefer-webgl="true"
+        :pixel-ratio-cap="1.25"
+        :tiles-resolution-scale="0.72"
+        @loaded-change="handlePointcloudLoadedChange"
+        @world-ready="handlePointcloudWorldReady"
+      />
+
+      <div class="pc-viewport-toolbar">
+        <div class="pc-toolbar-cluster">
+          <button
+            type="button"
+            aria-label="重置视角"
+            title="重置视角"
+            @click="resetView"
+          >
+            <el-icon><Aim /></el-icon>
+          </button>
+          <button
+            type="button"
+            :class="{ 'is-active': isFullscreen }"
+            :aria-label="isFullscreen ? '退出全屏' : '进入全屏'"
+            :title="isFullscreen ? '退出全屏' : '进入全屏'"
+            @click="toggleFullscreen"
+          >
+            <el-icon><FullScreen /></el-icon>
+          </button>
+        </div>
+
+        <div class="pc-display-panel">
+          <div class="pc-display-row">
+            <div
+              class="pc-segmented pc-color-modes"
+              role="group"
+              aria-label="点云着色"
+            >
+              <button type="button" class="on" aria-pressed="true" disabled>
+                真彩
+              </button>
+            </div>
+          </div>
+
+          <div class="pc-display-row">
+            <label class="pc-size-control" title="点大小">
+              <span>点大小</span>
+              <input
+                v-model.number="pointSize"
+                type="range"
+                min="1"
+                max="5"
+                step="0.1"
+                aria-label="点大小"
+              />
+              <output>{{ pointSize.toFixed(1) }}</output>
+            </label>
+          </div>
+
+          <div class="pc-display-row">
+            <div class="pc-segmented" role="group" aria-label="场景辅助显示">
+              <button
+                type="button"
+                :class="{ on: edlEnabled }"
+                :aria-pressed="edlEnabled"
+                @click="edlEnabled = !edlEnabled"
+              >
+                显示增强
+              </button>
+              <button
+                type="button"
+                :class="{ on: showAxes }"
+                :aria-pressed="showAxes"
+                @click="showAxes = !showAxes"
+              >
+                坐标轴
+              </button>
+              <button
+                type="button"
+                :class="{ on: showGrid }"
+                :aria-pressed="showGrid"
+                @click="showGrid = !showGrid"
+              >
+                网格
+              </button>
+              <button
+                type="button"
+                :class="{ on: showBounds }"
+                :aria-pressed="showBounds"
+                @click="onBoundsButtonClick"
+              >
+                剖切
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <PointcloudAxesTriad
+        v-show="showAxes"
+        class="pc-axes-triad"
+        :camera="viewerCamera"
+      />
+
+      <PointcloudViewCube
+        class="pc-view-cube"
+        :camera="viewerCamera"
+        @select-direction="setViewDirection"
+        @orbit="orbitView"
+        @roll="rollView"
+        @home="resetView"
+      />
+
+      <div v-if="analysisMode !== 'none'" class="pc-analysis-toolbar">
+        <strong>{{ analysisTitle }}</strong>
+        <span v-if="analysisSummary" class="pc-analysis-value">
+          {{ analysisSummary }}
+        </span>
+        <span v-else class="pc-analysis-hint">{{ analysisHint }}</span>
+        <span class="pc-analysis-exit">Esc 退出测量</span>
+        <button type="button" @click="clearAnalysis">清除</button>
+      </div>
+
+      <div class="pc-measure-badges">
+        <div
+          v-for="badge in measureBadges"
+          v-show="badge.visible"
+          :key="badge.id"
+          class="pc-measure-badge"
+          :style="{ transform: `translate(${badge.x}px, ${badge.y}px)` }"
+        >
+          <header @pointerdown="startBadgeDrag(badge, $event)">
+            <span class="pc-measure-badge__dots" aria-hidden="true" />
+            <span class="pc-measure-badge__title">{{ badge.title }}</span>
+          </header>
+          <div v-if="badge.mainValue" class="pc-measure-badge__main">
+            <span>{{ badge.mainLabel }}</span>
+            <strong>{{ badge.mainValue }}</strong>
+          </div>
+          <div v-if="badge.rows.length" class="pc-measure-badge__rows">
+            <div v-for="row in badge.rows" :key="row.label">
+              <span>{{ row.label }}</span>
+              <span>{{ row.value }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pc-status" role="status">
+        <i :class="{ loading: !pointcloudLoadedState }" aria-hidden="true" />
+        {{ pointcloudLoadedState ? '点云已加载' : '正在加载点云' }}
+      </div>
+
+      <div class="pc-measurement-dock">
+        <MeasurementToolbar
+          v-model:collapsed="analysisToolbarCollapsed"
+          :mode="analysisMode"
+          :disabled="!pointcloudLoadedState"
+          orientation="vertical"
+          @update:mode="selectAnalysisMode"
+          @clear="clearAnalysis"
+        />
+      </div>
+
+      <div v-if="errorMessage" class="pc-error-overlay">
+        <div class="pc-error-card">
+          <div class="pc-error-title">预览失败</div>
+          <div class="pc-error-message">{{ errorMessage }}</div>
+          <div class="pc-error-actions">
+            <el-button type="primary" @click="loadPreview">重试</el-button>
+            <el-button @click="handleClose">返回</el-button>
+          </div>
+        </div>
+      </div>
+    </main>
   </div>
 </template>
 
@@ -74,9 +222,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, RefreshLeft, FullScreen } from '@element-plus/icons-vue'
+import { Aim, Close, FullScreen } from '@element-plus/icons-vue'
 import * as THREE from 'three'
 import PointCloudViewer from '@/views/twoScreen/components/PointCloudViewer.vue'
+import { Line2 } from 'three/examples/jsm/lines/Line2.js'
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
+import MeasurementToolbar from './MeasurementToolbar.vue'
+import PointcloudAxesTriad from './PointcloudAxesTriad.vue'
+import PointcloudViewCube from './PointcloudViewCube.vue'
 
 defineOptions({
   name: 'PreviewScan',
@@ -108,21 +262,27 @@ type ViewerThreeContext = {
         domElement?: HTMLCanvasElement
       }
     | null
-  controls:
-    | {
-        enabled: boolean
-      }
-    | null
+  controls: {
+    enabled: boolean
+  } | null
 }
 type PointCloudViewerExpose = InstanceType<typeof PointCloudViewer> & {
   setStatusText?: (text: string) => void
-  loadPointcloudByScanId: (projectId: number, scanFileId: number) => Promise<void>
+  loadPointcloudByScanId: (
+    projectId: number,
+    scanFileId: number,
+  ) => Promise<void>
   resetView?: () => void
   cleanup?: () => void
   getThreeContext?: () => ViewerThreeContext
   getPointcloudWorldBox?: () => THREE.Box3 | null
   setClipBox?: (box: THREE.Box3 | null) => void
   setControlsEnabled?: (enabled: boolean) => void
+  setPointSize?: (size: number) => void
+  setShowGrid?: (show: boolean) => void
+  setEdlEnabled?: (enabled: boolean) => void
+  setTilesErrorTargetOverride?: (value: number | null) => void
+  requestRender?: () => void
 }
 
 const pointcloudViewerRef = ref<PointCloudViewerExpose | null>(null)
@@ -133,6 +293,712 @@ const activeClipAxis = ref<ClipAxisKey>('z')
 const activeClipInvert = ref(false)
 const pointcloudLoadedState = ref(false)
 const pointcloudWorldReady = ref(false)
+
+// ==================== 预览页 UI 状态（对齐 cloudBIM-viewer 点云预览） ====================
+type PreviewBackgroundTheme = 'deep' | 'light' | 'black' | 'gradient'
+const backgroundTheme = ref<PreviewBackgroundTheme>('deep')
+const backgroundOptions: Array<{
+  label: string
+  value: PreviewBackgroundTheme
+}> = [
+  { label: '蓝色', value: 'gradient' },
+  { label: '深色', value: 'deep' },
+  { label: '浅色', value: 'light' },
+  { label: '纯黑', value: 'black' },
+]
+const projectName = computed(() => String(route.query.projectName || ''))
+const stageRef = ref<HTMLElement | null>(null)
+const viewerCamera = ref<THREE.Camera | null>(null)
+const isFullscreen = ref(false)
+const showAxes = ref(true)
+const showGrid = ref(false)
+const edlEnabled = ref(true)
+const pointSize = ref(2.5)
+let scanMaxDim = 10
+
+// 测量工具
+type AnalysisMode = 'none' | 'distance' | 'locate' | 'area'
+const analysisMode = ref<AnalysisMode>('none')
+const analysisToolbarCollapsed = ref(true)
+type MeasureBadge = {
+  id: string
+  title: string
+  mainLabel: string
+  mainValue: string
+  rows: Array<{ label: string; value: string }>
+  anchor: THREE.Vector3
+  offset: { x: number; y: number }
+  x: number
+  y: number
+  visible: boolean
+}
+const measureBadges = ref<MeasureBadge[]>([])
+let measureGroup: THREE.Group | null = null
+let areaPreviewGroup: THREE.Group | null = null
+let measureIdSeq = 0
+const measureCounts = { point: 0, distance: 0, area: 0 }
+let distanceStart: THREE.Vector3 | null = null
+let areaPoints: THREE.Vector3[] = []
+let measurePointerDown: { x: number; y: number } | null = null
+let badgeDrag: {
+  id: string
+  startX: number
+  startY: number
+  originX: number
+  originY: number
+  moved: boolean
+} | null = null
+let labelRaf = 0
+
+function ensureMeasureGroup(): THREE.Group | null {
+  const scene = getViewerScene()
+  if (!scene) return null
+  if (!measureGroup) {
+    measureGroup = new THREE.Group()
+    measureGroup.name = '__scan_measure_group__'
+    measureGroup.renderOrder = 10000
+    scene.add(measureGroup)
+  }
+  return measureGroup
+}
+
+function requestScanRender() {
+  pointcloudViewerRef.value?.requestRender?.()
+}
+
+/** 作用：创建测量标记（水滴形图钉），与参考页一致 */
+function createMeasurementPinSprite(color = '#ff4040', opacity = 1) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 128
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('无法创建测量标记画布')
+  context.shadowColor = 'rgba(255, 86, 86, .38)'
+  context.shadowBlur = 18
+  context.fillStyle = color
+  context.beginPath()
+  context.moveTo(64, 10)
+  context.bezierCurveTo(33, 10, 18, 32, 18, 55)
+  context.bezierCurveTo(18, 82, 39, 96, 64, 118)
+  context.bezierCurveTo(89, 96, 110, 82, 110, 55)
+  context.bezierCurveTo(110, 32, 95, 10, 64, 10)
+  context.closePath()
+  context.fill()
+  context.shadowBlur = 0
+  context.fillStyle = '#fff1f1'
+  context.beginPath()
+  context.arc(64, 52, 18, 0, Math.PI * 2)
+  context.fill()
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  const marker = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      opacity,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    }),
+  )
+  marker.center.set(0.5, 0.1)
+  marker.renderOrder = 10002
+  return marker
+}
+
+/** 作用：把图钉保持为屏幕空间固定像素大小 */
+function scaleMeasurementPin(marker: THREE.Sprite, targetPixels = 16) {
+  const camera = getViewerCamera() as THREE.PerspectiveCamera | null
+  const dom = getViewerRendererDom()
+  if (!camera || !dom || !marker.visible) return
+  const rect = dom.getBoundingClientRect()
+  const viewportHeight = Math.max(rect.height, 1)
+  const distance = camera.position.distanceTo(marker.position)
+  const fov = THREE.MathUtils.degToRad(camera.fov || 50)
+  const worldUnitsPerPixel =
+    (2 * distance * Math.tan(fov * 0.5)) / viewportHeight
+  const size = Math.max(worldUnitsPerPixel * targetPixels, 1e-6)
+  marker.scale.set(size, size, 1)
+}
+
+function addMeasurementPin(
+  point: THREE.Vector3,
+  color = '#ff4040',
+  opacity = 1,
+  group?: THREE.Group | null,
+) {
+  const target = group ?? ensureMeasureGroup()
+  if (!target) return
+  const pin = createMeasurementPinSprite(color, opacity)
+  pin.position.copy(point)
+  target.add(pin)
+  scaleMeasurementPin(pin)
+}
+
+/** 作用：创建测距/轮廓线（粗虚线，与参考页一致） */
+function createMeasureLine(
+  points: THREE.Vector3[],
+  color = '#d63d3d',
+  dashed = true,
+) {
+  const geometry = new LineGeometry()
+  geometry.setPositions(points.flatMap((p) => [p.x, p.y, p.z]))
+  const material = new LineMaterial({
+    color,
+    linewidth: 2.8,
+    dashed,
+    dashSize: 0.9,
+    gapSize: 0.48,
+    worldUnits: false,
+    transparent: true,
+    opacity: 0.96,
+    depthTest: false,
+    depthWrite: false,
+  })
+  const line = new Line2(geometry, material)
+  line.computeLineDistances()
+  line.renderOrder = 10001
+  return line
+}
+
+function removeAreaPreview() {
+  if (!areaPreviewGroup) return
+  areaPreviewGroup.parent?.remove(areaPreviewGroup)
+  areaPreviewGroup.traverse((obj: any) => {
+    obj.geometry?.dispose?.()
+    const mat = obj.material
+    if (Array.isArray(mat)) mat.forEach((m: any) => m?.dispose?.())
+    else mat?.dispose?.()
+  })
+  areaPreviewGroup = null
+}
+
+function addMeasureBadge(
+  badge: Omit<MeasureBadge, 'x' | 'y' | 'visible' | 'offset'>,
+) {
+  measureBadges.value = [
+    ...measureBadges.value,
+    { ...badge, offset: { x: 0, y: 0 }, x: 0, y: 0, visible: false },
+  ]
+}
+
+function updateMeasureBadges() {
+  const camera = getViewerCamera()
+  const dom = getViewerRendererDom()
+  if (!camera || !dom || !measureBadges.value.length) return
+  const rect = dom.getBoundingClientRect()
+  const projected = new THREE.Vector3()
+  measureBadges.value = measureBadges.value.map((badge) => {
+    projected.copy(badge.anchor).project(camera as THREE.PerspectiveCamera)
+    return {
+      ...badge,
+      x: (projected.x * 0.5 + 0.5) * rect.width + 14 + badge.offset.x,
+      y: (-projected.y * 0.5 + 0.5) * rect.height - 18 + badge.offset.y,
+      visible: projected.z < 1,
+    }
+  })
+}
+
+/** 作用：拖动测量徽章（与参考页一致）；未拖动的点击仍按测量处理 */
+function startBadgeDrag(badge: MeasureBadge, event: PointerEvent) {
+  event.stopPropagation()
+  event.preventDefault()
+  badgeDrag = {
+    id: badge.id,
+    startX: event.clientX,
+    startY: event.clientY,
+    originX: badge.offset.x,
+    originY: badge.offset.y,
+    moved: false,
+  }
+  window.addEventListener('pointermove', onBadgeDragMove)
+  window.addEventListener('pointerup', endBadgeDrag)
+}
+
+function onBadgeDragMove(event: PointerEvent) {
+  if (!badgeDrag) return
+  const drag = badgeDrag
+  const dx = event.clientX - drag.startX
+  const dy = event.clientY - drag.startY
+  if (!drag.moved && Math.hypot(dx, dy) <= 4) return
+  drag.moved = true
+  measureBadges.value = measureBadges.value.map((badge) =>
+    badge.id === drag.id
+      ? { ...badge, offset: { x: drag.originX + dx, y: drag.originY + dy } }
+      : badge,
+  )
+}
+
+function endBadgeDrag(event: PointerEvent) {
+  const drag = badgeDrag
+  badgeDrag = null
+  window.removeEventListener('pointermove', onBadgeDragMove)
+  window.removeEventListener('pointerup', endBadgeDrag)
+  // 点在徽章手柄上但没有拖动：仍视为一次测量点击
+  if (drag && !drag.moved && analysisMode.value !== 'none') {
+    const point = pickScanPoint(event.clientX, event.clientY)
+    if (point) handleMeasurePoint(point)
+  }
+}
+
+/** 作用：同步图钉大小与粗线分辨率（跟随相机/视口） */
+function syncMeasureVisuals() {
+  const dom = getViewerRendererDom()
+  const width = dom?.clientWidth || 1
+  const height = dom?.clientHeight || 1
+  measureGroup?.traverse((child: any) => {
+    if (child instanceof THREE.Sprite) scaleMeasurementPin(child)
+    if (child instanceof Line2) {
+      child.material.resolution?.set?.(width, height)
+    }
+  })
+}
+
+function formatLength(value: number) {
+  return `${value.toFixed(3)} m`
+}
+
+/** 作用：计算多边形在最佳拟合平面上的面积/周长/质心/投影点 */
+function createPolygonMetrics(points: THREE.Vector3[]) {
+  if (points.length < 3) return null
+  const normal = new THREE.Vector3()
+  points.forEach((point, index) => {
+    const next = points[(index + 1) % points.length]
+    normal.x += (point.y - next.y) * (point.z + next.z)
+    normal.y += (point.z - next.z) * (point.x + next.x)
+    normal.z += (point.x - next.x) * (point.y + next.y)
+  })
+  if (normal.lengthSq() < 1e-10) return null
+  normal.normalize()
+  const origin = points[0].clone()
+  const axisU = points[1].clone().sub(origin)
+  if (axisU.lengthSq() < 1e-10) return null
+  axisU.normalize()
+  const axisV = normal.clone().cross(axisU).normalize()
+  const projected = points.map((point) => {
+    const relative = point.clone().sub(origin)
+    return new THREE.Vector2(relative.dot(axisU), relative.dot(axisV))
+  })
+  let twiceArea = 0
+  let centroidX = 0
+  let centroidY = 0
+  projected.forEach((point, index) => {
+    const next = projected[(index + 1) % projected.length]
+    const cross = point.x * next.y - next.x * point.y
+    twiceArea += cross
+    centroidX += (point.x + next.x) * cross
+    centroidY += (point.y + next.y) * cross
+  })
+  const area = Math.abs(twiceArea) * 0.5
+  if (area <= 1e-8) return null
+  let perimeter = 0
+  points.forEach((point, index) => {
+    perimeter += point.distanceTo(points[(index + 1) % points.length])
+  })
+  const centroid = origin
+    .clone()
+    .addScaledVector(axisU, centroidX / (3 * twiceArea))
+    .addScaledVector(axisV, centroidY / (3 * twiceArea))
+  return { projected, area, perimeter, centroid }
+}
+
+function polygonArea(points: THREE.Vector3[]) {
+  return createPolygonMetrics(points)?.area ?? 0
+}
+
+function pickScanPoint(clientX: number, clientY: number): THREE.Vector3 | null {
+  const camera = getViewerCamera() as THREE.PerspectiveCamera | null
+  const scene = getViewerScene()
+  const dom = getViewerRendererDom()
+  if (!camera || !scene || !dom) return null
+  const rect = dom.getBoundingClientRect()
+  if (rect.width < 1 || rect.height < 1) return null
+
+  // 只对点云本身做拾取，避免命中网格/测量图钉
+  const targets: THREE.Object3D[] = []
+  scene.traverse((obj) => {
+    if ((obj as any).isPoints) targets.push(obj)
+  })
+  if (!targets.length) return null
+
+  const ndc = new THREE.Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -(((clientY - rect.top) / rect.height) * 2 - 1),
+  )
+  const controls = getViewerThreeContext()?.controls as any
+  const target = controls?.target as THREE.Vector3 | undefined
+  const distance = target
+    ? camera.position.distanceTo(target)
+    : Math.max(scanMaxDim, 1)
+  const fov = THREE.MathUtils.degToRad(camera.fov || 50)
+  const worldPerPixel =
+    (2 * Math.max(distance, 0.001) * Math.tan(fov * 0.5)) /
+    Math.max(rect.height, 1)
+
+  const ray = new THREE.Raycaster()
+  ray.setFromCamera(ndc, camera)
+  // 屏幕空间容差：约 18px，先近后远；再放大到 48px 兜底
+  for (const pixels of [18, 48]) {
+    ray.params.Points = {
+      threshold: Math.max(worldPerPixel * pixels, scanMaxDim * 0.01, 0.02),
+    }
+    const hit = ray.intersectObjects(targets, false)[0]
+    if (hit) return snapMeasurePoint(hit.point.clone(), clientX, clientY)
+  }
+  return null
+}
+
+/** 作用：吸附到已有测量点（18px 内），用于闭合区域/接续测量 */
+function snapMeasurePoint(
+  point: THREE.Vector3,
+  clientX: number,
+  clientY: number,
+): THREE.Vector3 {
+  const camera = getViewerCamera()
+  const dom = getViewerRendererDom()
+  if (!camera || !dom) return point
+  const candidates: THREE.Vector3[] = [...areaPoints]
+  if (distanceStart) candidates.push(distanceStart)
+  measureBadges.value.forEach((badge) => candidates.push(badge.anchor))
+  if (!candidates.length) return point
+
+  const rect = dom.getBoundingClientRect()
+  const screenX = clientX - rect.left
+  const screenY = clientY - rect.top
+  const projected = new THREE.Vector3()
+  let best: THREE.Vector3 | null = null
+  let bestDistance = 18
+  for (const candidate of candidates) {
+    projected.copy(candidate).project(camera as THREE.PerspectiveCamera)
+    if (projected.z < -1 || projected.z > 1) continue
+    const x = (projected.x * 0.5 + 0.5) * rect.width
+    const y = (-projected.y * 0.5 + 0.5) * rect.height
+    const distance = Math.hypot(x - screenX, y - screenY)
+    if (distance <= bestDistance) {
+      bestDistance = distance
+      best = candidate
+    }
+  }
+  return best ? best.clone() : point
+}
+
+function handleMeasurePoint(point: THREE.Vector3) {
+  if (analysisMode.value === 'locate') {
+    addMeasurementPin(point, '#22d3ee')
+    addMeasureBadge({
+      id: `measure-${++measureIdSeq}`,
+      title: `定位 #${++measureCounts.point}`,
+      mainLabel: '坐标',
+      mainValue: '',
+      rows: [
+        { label: 'X', value: formatLength(point.x) },
+        { label: 'Y', value: formatLength(point.z) },
+        { label: 'Z', value: formatLength(point.y) },
+      ],
+      anchor: point,
+    })
+  } else if (analysisMode.value === 'distance') {
+    if (!distanceStart) {
+      distanceStart = point
+      addMeasurementPin(point, '#ff4040')
+    } else {
+      const start = distanceStart
+      const group = ensureMeasureGroup()
+      group?.add(createMeasureLine([start, point]))
+      addMeasurementPin(point, '#ff5a5a', 0.96)
+      const dx = point.x - start.x
+      const dy = point.y - start.y
+      const dz = point.z - start.z
+      const horizontal = Math.hypot(dx, dz)
+      const vertical = Math.abs(dy)
+      const slope =
+        horizontal <= 1e-8
+          ? vertical <= 1e-8
+            ? 0
+            : 90
+          : (Math.atan2(vertical, horizontal) * 180) / Math.PI
+      addMeasureBadge({
+        id: `measure-${++measureIdSeq}`,
+        title: `测距 #${++measureCounts.distance}`,
+        mainLabel: '直线距离',
+        mainValue: formatLength(start.distanceTo(point)),
+        rows: [
+          { label: '水平距离', value: formatLength(horizontal) },
+          { label: '垂直距离', value: formatLength(vertical) },
+          { label: '坡度', value: `${slope.toFixed(2)}°` },
+        ],
+        anchor: start.clone().add(point).multiplyScalar(0.5),
+      })
+      distanceStart = null
+    }
+  } else if (analysisMode.value === 'area') {
+    const camera = getViewerCamera() as THREE.PerspectiveCamera | null
+    const closeThreshold = Math.max(
+      0.15,
+      (camera?.position.distanceTo(point) ?? 1) * 0.025,
+    )
+    // 与参考页一致：点击首个点附近即闭合区域
+    if (
+      areaPoints.length >= 3 &&
+      point.distanceTo(areaPoints[0]) < closeThreshold
+    ) {
+      closeAreaMeasurement()
+      requestScanRender()
+      return
+    }
+    areaPoints.push(point)
+    if (!areaPreviewGroup) {
+      areaPreviewGroup = new THREE.Group()
+      areaPreviewGroup.renderOrder = 10000
+      ensureMeasureGroup()?.add(areaPreviewGroup)
+    }
+    addMeasurementPin(point, '#ff4040', 1, areaPreviewGroup)
+    updateAreaPreview()
+  }
+  requestScanRender()
+}
+
+function removeAreaPreviewLines() {
+  if (!areaPreviewGroup) return
+  for (const child of [...areaPreviewGroup.children]) {
+    if ((child as any).isSprite) continue
+    areaPreviewGroup.remove(child)
+    ;(child as any).geometry?.dispose?.()
+    ;(child as any).material?.dispose?.()
+  }
+}
+
+/** 作用：刷新面积预览（≥3 点时自动闭合并填充，与参考页一致） */
+function updateAreaPreview() {
+  removeAreaPreviewLines()
+  if (!areaPreviewGroup || areaPoints.length < 2) return
+  const closed = areaPoints.length >= 3
+  const outline = closed ? [...areaPoints, areaPoints[0]] : [...areaPoints]
+  areaPreviewGroup.add(createMeasureLine(outline, '#ff5a5a'))
+  if (!closed) return
+  const metrics = createPolygonMetrics(areaPoints)
+  if (!metrics) return
+  const triangles = THREE.ShapeUtils.triangulateShape(metrics.projected, [])
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(
+      areaPoints.flatMap((p) => [p.x, p.y, p.z]),
+      3,
+    ),
+  )
+  geometry.setIndex(triangles.flat())
+  geometry.computeVertexNormals()
+  const fill = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({
+      color: 0xff5a5a,
+      transparent: true,
+      opacity: 0.16,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  fill.renderOrder = 10000
+  areaPreviewGroup.add(fill)
+}
+
+function closeAreaMeasurement() {
+  if (analysisMode.value !== 'area' || areaPoints.length < 3) return
+  const points = [...areaPoints]
+  const metrics = createPolygonMetrics(points)
+  removeAreaPreviewLines()
+  const group = ensureMeasureGroup()
+  if (group) {
+    group.add(createMeasureLine([...points, points[0]], '#ff5a5a'))
+    if (metrics) {
+      const triangles = THREE.ShapeUtils.triangulateShape(metrics.projected, [])
+      const geometry = new THREE.BufferGeometry()
+      geometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(
+          points.flatMap((point) => [point.x, point.y, point.z]),
+          3,
+        ),
+      )
+      geometry.setIndex(triangles.flat())
+      geometry.computeVertexNormals()
+      const fill = new THREE.Mesh(
+        geometry,
+        new THREE.MeshBasicMaterial({
+          color: 0xff5a5a,
+          transparent: true,
+          opacity: 0.16,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        }),
+      )
+      fill.renderOrder = 10000
+      group.add(fill)
+    }
+  }
+  const centroid =
+    metrics?.centroid ??
+    points
+      .reduce((sum, p) => sum.add(p), new THREE.Vector3())
+      .multiplyScalar(1 / points.length)
+  addMeasureBadge({
+    id: `measure-${++measureIdSeq}`,
+    title: `面积 #${++measureCounts.area}`,
+    mainLabel: '面积',
+    mainValue: `${polygonArea(points).toFixed(2)} m²`,
+    rows: metrics
+      ? [{ label: '周长', value: `${metrics.perimeter.toFixed(2)} m` }]
+      : [],
+    anchor: centroid,
+  })
+  areaPoints = []
+  areaPreviewGroup = null
+  requestScanRender()
+}
+
+function selectAnalysisMode(mode: AnalysisMode) {
+  analysisMode.value = analysisMode.value === mode ? 'none' : mode
+  distanceStart = null
+  areaPoints = []
+  removeAreaPreview()
+}
+
+function clearAnalysis() {
+  analysisMode.value = 'none'
+  distanceStart = null
+  areaPoints = []
+  areaPreviewGroup = null
+  measureBadges.value = []
+  measureCounts.point = 0
+  measureCounts.distance = 0
+  measureCounts.area = 0
+  if (measureGroup) {
+    measureGroup.parent?.remove(measureGroup)
+    measureGroup.traverse((obj: any) => {
+      obj.geometry?.dispose?.()
+      const mat = obj.material
+      if (Array.isArray(mat)) mat.forEach((m: any) => m?.dispose?.())
+      else {
+        mat?.map?.dispose?.()
+        mat?.dispose?.()
+      }
+    })
+    measureGroup = null
+  }
+  requestScanRender()
+}
+
+function onStagePointerDown(event: PointerEvent) {
+  if (analysisMode.value === 'none') return
+  measurePointerDown = { x: event.clientX, y: event.clientY }
+}
+
+function onStagePointerUp(event: PointerEvent) {
+  if (analysisMode.value === 'none' || !measurePointerDown) return
+  const dx = event.clientX - measurePointerDown.x
+  const dy = event.clientY - measurePointerDown.y
+  measurePointerDown = null
+  if (dx * dx + dy * dy > 25) return
+  const point = pickScanPoint(event.clientX, event.clientY)
+  if (point) handleMeasurePoint(point)
+}
+
+function onStageDblClick() {
+  closeAreaMeasurement()
+}
+
+function onMeasureKeyDown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && analysisMode.value !== 'none') {
+    clearAnalysis()
+    return
+  }
+  if (event.key === 'Enter' && analysisMode.value === 'area') {
+    closeAreaMeasurement()
+  }
+}
+
+const analysisTitle = computed(() =>
+  analysisMode.value === 'distance'
+    ? '全局测距'
+    : analysisMode.value === 'area'
+      ? '面积测量'
+      : '全局定位',
+)
+const analysisHint = computed(() => {
+  if (analysisMode.value === 'distance') return '依次点击两点完成一段测距'
+  if (analysisMode.value === 'area') return '连续点击至少三个点，双击闭合区域'
+  return '点击任意位置拾取坐标'
+})
+const analysisSummary = computed(() => {
+  const latest = measureBadges.value.at(-1)
+  return latest ? `${latest.mainLabel} ${latest.mainValue}` : ''
+})
+
+function applyBackgroundTheme() {
+  const ctx = getViewerThreeContext()
+  const scene = ctx?.scene
+  const renderer = ctx?.renderer as any
+  const colorMap: Record<PreviewBackgroundTheme, string> = {
+    deep: '#0c1224',
+    light: '#e8eef6',
+    black: '#000000',
+    gradient: '#10213b',
+  }
+  const color = new THREE.Color(colorMap[backgroundTheme.value])
+  if (scene) scene.background = color
+  if (renderer?.setClearColor) renderer.setClearColor(color, 1)
+  requestScanRender()
+}
+
+function setViewDirection(direction: [number, number, number]) {
+  const camera = getViewerCamera()
+  const controls = getViewerThreeContext()?.controls as any
+  if (!camera || !controls?.target) return
+  const target = (controls.target as THREE.Vector3).clone()
+  const dir = new THREE.Vector3(...direction).normalize()
+  const distance = Math.max(camera.position.distanceTo(target), scanMaxDim, 1)
+  camera.up.set(0, 1, 0)
+  if (Math.abs(dir.y) > 0.99) {
+    camera.up.set(0, 0, dir.y > 0 ? -1 : 1)
+  }
+  camera.position.copy(target.clone().add(dir.multiplyScalar(distance)))
+  camera.lookAt(target)
+  controls.update?.()
+  requestScanRender()
+}
+
+function orbitView(delta: { lon: number; lat: number }) {
+  const camera = getViewerCamera()
+  const controls = getViewerThreeContext()?.controls as any
+  if (!camera || !controls?.target) return
+  const target = (controls.target as THREE.Vector3).clone()
+  const offset = camera.position.clone().sub(target)
+  const spherical = new THREE.Spherical().setFromVector3(offset)
+  spherical.theta -= THREE.MathUtils.degToRad(delta.lon)
+  spherical.phi -= THREE.MathUtils.degToRad(delta.lat)
+  spherical.phi = THREE.MathUtils.clamp(spherical.phi, 0.001, Math.PI - 0.001)
+  offset.setFromSpherical(spherical)
+  camera.position.copy(target.clone().add(offset))
+  camera.up.set(0, 1, 0)
+  camera.lookAt(target)
+  controls.update?.()
+  requestScanRender()
+}
+
+function rollView(direction: -1 | 1) {
+  const camera = getViewerCamera()
+  const controls = getViewerThreeContext()?.controls as any
+  if (!camera) return
+  const forward = new THREE.Vector3()
+  camera.getWorldDirection(forward)
+  camera.up.applyAxisAngle(forward, direction * (Math.PI / 2))
+  if (controls?.target) camera.lookAt(controls.target as THREE.Vector3)
+  controls?.update?.()
+  requestScanRender()
+}
 
 let clipBoxState: ClipBoxState | null = null
 let clipBoxHelper: THREE.Box3Helper | null = null
@@ -227,8 +1093,16 @@ function clampClipOffsets(state: ClipBoxState) {
     const minKey = `${axis}Min` as keyof ClipBoxOffsets
     const maxKey = `${axis}Max` as keyof ClipBoxOffsets
     const span = Math.max(0, state.baseBox.max[axis] - state.baseBox.min[axis])
-    state.offsets[minKey] = THREE.MathUtils.clamp(state.offsets[minKey], 0, span)
-    state.offsets[maxKey] = THREE.MathUtils.clamp(state.offsets[maxKey], 0, span)
+    state.offsets[minKey] = THREE.MathUtils.clamp(
+      state.offsets[minKey],
+      0,
+      span,
+    )
+    state.offsets[maxKey] = THREE.MathUtils.clamp(
+      state.offsets[maxKey],
+      0,
+      span,
+    )
     if (state.offsets[minKey] + state.offsets[maxKey] > span) {
       state.offsets[maxKey] = Math.max(0, span - state.offsets[minKey])
     }
@@ -289,7 +1163,11 @@ function getClipFaceRange(axis: ClipAxisKey, invert: boolean) {
     : { min: state.baseBox.min[axis], max: box.max[axis] }
 }
 
-function setClipFacePosition(axis: ClipAxisKey, invert: boolean, value: number) {
+function setClipFacePosition(
+  axis: ClipAxisKey,
+  invert: boolean,
+  value: number,
+) {
   const state = ensureClipState()
   if (!state) return
   const currentBox = getClipBoxFromState(state)
@@ -444,7 +1322,9 @@ function buildClipHandles(box: THREE.Box3) {
     handle.add(shaft)
     handle.add(cone)
     handle.add(hitArea)
-    handle.position.copy(face.anchor).add(face.normal.clone().multiplyScalar(offset))
+    handle.position
+      .copy(face.anchor)
+      .add(face.normal.clone().multiplyScalar(offset))
     handle.quaternion.setFromUnitVectors(baseAxis, face.arrowDir)
     handle.renderOrder = 10000
     handle.traverse?.((obj: any) => {
@@ -472,7 +1352,10 @@ function updateBoundsHelpers() {
     return
   }
 
-  clipBoxHelper = new THREE.Box3Helper(helperBox.clone(), new THREE.Color('#ffcf4a'))
+  clipBoxHelper = new THREE.Box3Helper(
+    helperBox.clone(),
+    new THREE.Color('#ffcf4a'),
+  )
   clipBoxHelper.renderOrder = 9999
   ;(clipBoxHelper.material as any).depthTest = false
   clipBoxHelper.userData = {
@@ -542,7 +1425,9 @@ function consumePointerEvent(ev: PointerEvent) {
   ;(ev as any).stopImmediatePropagation?.()
 }
 
-function pickClipOverlay(ev: PointerEvent):
+function pickClipOverlay(
+  ev: PointerEvent,
+):
   | null
   | { kind: 'handle'; axis: ClipAxisKey; invert: boolean }
   | { kind: 'bounds' } {
@@ -592,7 +1477,10 @@ function buildClipDragPlane(axisKey: ClipAxisKey, anchor: THREE.Vector3) {
   return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor)
 }
 
-function beginClipDrag(ev: PointerEvent, options: { axis: ClipAxisKey; invert: boolean }) {
+function beginClipDrag(
+  ev: PointerEvent,
+  options: { axis: ClipAxisKey; invert: boolean },
+) {
   const camera = getViewerCamera()
   const dom = getViewerRendererDom()
   if (!camera || !dom) return
@@ -755,6 +1643,18 @@ function handlePointcloudWorldReady() {
   pointcloudWorldReady.value = true
   invalidateClipBounds()
   syncScanThreeControls()
+  viewerCamera.value = getViewerCamera()
+  const box = getContentWorldBox()
+  if (box) {
+    const size = box.getSize(new THREE.Vector3())
+    scanMaxDim = Math.max(size.x, size.y, size.z) || 10
+  }
+  applyBackgroundTheme()
+  pointcloudViewerRef.value?.setPointSize?.(pointSize.value)
+  pointcloudViewerRef.value?.setShowGrid?.(showGrid.value)
+  pointcloudViewerRef.value?.setEdlEnabled?.(edlEnabled.value)
+  // 与参考页一致：点云 LOD errorTarget = 32
+  pointcloudViewerRef.value?.setTilesErrorTargetOverride?.(32)
 }
 
 const waitForViewerReady = async () => {
@@ -839,12 +1739,46 @@ watch(
   },
 )
 
+watch(backgroundTheme, () => applyBackgroundTheme())
+watch(showGrid, (value) => pointcloudViewerRef.value?.setShowGrid?.(value))
+watch(pointSize, (value) => pointcloudViewerRef.value?.setPointSize?.(value))
+watch(edlEnabled, (value) => pointcloudViewerRef.value?.setEdlEnabled?.(value))
+watch(analysisMode, (mode) => {
+  const dom = getViewerRendererDom()
+  if (dom) dom.style.cursor = mode === 'none' ? '' : 'crosshair'
+})
+
+function syncFullscreenState() {
+  isFullscreen.value = !!document.fullscreenElement
+}
+
 onMounted(() => {
   void loadPreview()
+  const stage = stageRef.value
+  stage?.addEventListener('pointerdown', onStagePointerDown)
+  stage?.addEventListener('pointerup', onStagePointerUp)
+  stage?.addEventListener('dblclick', onStageDblClick)
+  document.addEventListener('fullscreenchange', syncFullscreenState)
+  document.addEventListener('keydown', onMeasureKeyDown)
+
+  const loop = () => {
+    labelRaf = requestAnimationFrame(loop)
+    if (measureBadges.value.length) updateMeasureBadges()
+    if (measureGroup) syncMeasureVisuals()
+  }
+  loop()
 })
 
 onBeforeUnmount(() => {
   loadToken.value += 1
+  cancelAnimationFrame(labelRaf)
+  const stage = stageRef.value
+  stage?.removeEventListener('pointerdown', onStagePointerDown)
+  stage?.removeEventListener('pointerup', onStagePointerUp)
+  stage?.removeEventListener('dblclick', onStageDblClick)
+  document.removeEventListener('fullscreenchange', syncFullscreenState)
+  document.removeEventListener('keydown', onMeasureKeyDown)
+  clearAnalysis()
   unbindClipInteractions()
   clearBoundsHelpers()
   pointcloudViewerRef.value?.setClipBox?.(null)
@@ -940,7 +1874,8 @@ onBeforeUnmount(() => {
   border-color: rgba(64, 158, 255, 0.98);
 }
 
-.scan-preview-toolbar :deep(.el-button.toolbar-tool-btn.is-disabled:not(.is-on)) {
+.scan-preview-toolbar
+  :deep(.el-button.toolbar-tool-btn.is-disabled:not(.is-on)) {
   opacity: 0.55;
 }
 
@@ -1055,6 +1990,518 @@ onBeforeUnmount(() => {
   .file-title {
     max-width: none;
     flex: 1;
+  }
+}
+</style>
+
+<style lang="scss" scoped>
+/* ==================== CloudBIM 风格点云预览布局 ==================== */
+.pointcloud-preview-page {
+  --viewer-stage: #0c1224;
+  --viewer-chrome: rgb(12 18 36 / 88%);
+  --viewer-ink: #e8ecf8;
+  --viewer-muted: #9aa8c7;
+  --viewer-accent: #9ec1ff;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--viewer-stage);
+}
+
+.pc-header {
+  position: relative;
+  z-index: 100;
+  display: flex;
+  flex: 0 0 64px;
+  gap: var(--spacing-md);
+  align-items: center;
+  padding: 8px 64px 8px 20px;
+  background: #e6ebf5;
+  border-bottom: 1px solid #cfd7e8;
+}
+
+.pc-heading {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pc-heading strong,
+.pc-heading small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-heading strong {
+  font-size: var(--font-size-sm);
+  color: #1a1d24;
+}
+
+.pc-heading small {
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  color: #6b7280;
+}
+
+.pc-header-controls {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.pc-header-label {
+  font-size: var(--font-size-xs);
+  color: #6b7280;
+}
+
+.pc-close {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #6b7280;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+}
+
+.pc-close:hover {
+  color: #4e66cc;
+  background: rgb(255 255 255 / 60%);
+}
+
+.pc-stage {
+  position: relative;
+  flex: 1;
+  min-height: 320px;
+  overflow: hidden;
+  background: var(--viewer-stage);
+}
+
+.pc-stage.theme-deep {
+  background: #0c1224;
+}
+
+.pc-stage.theme-black {
+  background: #000;
+}
+
+.pc-stage.theme-light {
+  background: #e8eef6;
+}
+
+.pc-stage.theme-gradient {
+  background: #10213b;
+}
+
+.pc-viewer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.pc-viewer :deep(.pointcloud-view-panel),
+.pc-viewer :deep(.pointcloud-viewport) {
+  width: 100%;
+  height: 100%;
+}
+
+.pc-viewport-toolbar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  max-width: calc(100% - 140px);
+  pointer-events: none;
+}
+
+.pc-toolbar-cluster {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  pointer-events: auto;
+}
+
+.pc-toolbar-cluster button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--viewer-ink);
+  cursor: pointer;
+  background: var(--viewer-chrome);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: var(--radius-xs);
+}
+
+.pc-toolbar-cluster button:hover,
+.pc-toolbar-cluster button.is-active {
+  color: var(--viewer-accent);
+  background: rgb(24 42 72 / 88%);
+  border-color: rgb(115 162 243 / 55%);
+}
+
+.pc-display-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: max-content;
+  max-width: min(720px, calc(100vw - 140px));
+  padding: 8px 10px;
+  background: rgb(26 29 36 / 90%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+
+.pc-display-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.pc-segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  background: rgb(255 255 255 / 10%);
+  border-radius: var(--radius-sm);
+}
+
+.pc-segmented button {
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: var(--font-size-sm);
+  line-height: 20px;
+  color: rgb(255 255 255 / 72%);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+}
+
+.pc-segmented button:hover:not(:disabled) {
+  color: var(--viewer-ink);
+}
+
+.pc-segmented button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pc-segmented button.on {
+  color: var(--viewer-accent);
+  background: rgb(255 255 255 / 14%);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 12%);
+}
+
+.pc-header-controls .pc-segmented {
+  background: rgb(255 255 255 / 55%);
+}
+
+.pc-header-controls .pc-segmented button {
+  padding: 6px 12px;
+  font-size: var(--font-size-xs);
+  color: #3d4450;
+}
+
+.pc-header-controls .pc-segmented button.on {
+  font-weight: 600;
+  color: #4e66cc;
+  background: #fff;
+  box-shadow: 0 0 0 1px #cfd7e8;
+}
+
+.pc-size-control {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-width: 164px;
+  height: 34px;
+  padding: 3px 7px;
+  font-size: var(--font-size-xs);
+  color: rgb(255 255 255 / 72%);
+  background: rgb(255 255 255 / 10%);
+  border-radius: var(--radius-sm);
+}
+
+.pc-size-control input {
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 4px;
+  accent-color: var(--viewer-accent);
+  cursor: pointer;
+}
+
+.pc-size-control output {
+  min-width: 24px;
+  color: var(--viewer-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-axes-triad {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  z-index: 25;
+  pointer-events: none;
+}
+
+.pc-view-cube {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 60;
+}
+
+.pc-analysis-toolbar {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  z-index: 82;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 42px;
+  max-width: calc(100% - 32px);
+  padding: 8px 10px 8px 14px;
+  color: #f8fafc;
+  white-space: nowrap;
+  background: rgb(8 17 29 / 86%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 24%);
+  backdrop-filter: blur(14px);
+  transform: translateX(-50%);
+}
+
+.pc-analysis-toolbar strong {
+  font-size: var(--font-size-sm);
+}
+
+.pc-analysis-hint,
+.pc-analysis-exit {
+  font-size: var(--font-size-xs);
+  color: rgb(226 232 240 / 78%);
+}
+
+.pc-analysis-value {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: #fca5a5;
+}
+
+.pc-analysis-toolbar button {
+  padding: 4px 9px;
+  font-size: var(--font-size-xs);
+  color: #fecaca;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgb(248 113 113 / 40%);
+  border-radius: var(--radius-xs);
+}
+
+.pc-analysis-toolbar button:hover {
+  background: rgb(248 113 113 / 16%);
+}
+
+.pc-measure-badges {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.pc-measure-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 168px;
+  max-width: 220px;
+  padding: 10px 12px 8px;
+  color: rgb(255 255 255 / 90%);
+  pointer-events: none;
+  user-select: none;
+  background: rgb(8 18 42 / 78%);
+  border: 1px solid rgb(115 162 243 / 22%);
+  border-radius: var(--radius-sm);
+  box-shadow:
+    0 12px 28px rgb(4 10 34 / 30%),
+    inset 0 1px 0 rgb(255 255 255 / 6%);
+  backdrop-filter: blur(14px) saturate(120%);
+}
+
+.pc-measure-badge header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 18px;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.pc-measure-badge header:active {
+  cursor: grabbing;
+}
+
+.pc-measure-badge__dots {
+  width: 16px;
+  height: 10px;
+  background-image: radial-gradient(
+    circle,
+    rgb(151 186 255 / 78%) 1px,
+    transparent 1.5px
+  );
+  background-size: 5px 5px;
+  opacity: 0.62;
+}
+
+.pc-measure-badge__title {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: rgb(255 255 255 / 68%);
+}
+
+.pc-measure-badge__main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pc-measure-badge__main span {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgb(145 181 255 / 94%);
+}
+
+.pc-measure-badge__main strong {
+  font-size: 18px;
+  line-height: 1.15;
+  color: #fff;
+  text-shadow: 0 0 14px rgb(78 102 204 / 28%);
+}
+
+.pc-measure-badge__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pc-measure-badge__rows > div {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.pc-measure-badge__rows span:first-child {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: rgb(161 191 250 / 88%);
+}
+
+.pc-measure-badge__rows span:last-child {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: rgb(255 255 255 / 94%);
+  text-align: right;
+}
+
+.pc-status {
+  position: absolute;
+  bottom: 118px;
+  left: 14px;
+  z-index: 25;
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  font-size: var(--font-size-xs);
+  color: var(--viewer-muted);
+  pointer-events: none;
+}
+
+.pc-status > i {
+  width: 7px;
+  height: 7px;
+  background: #22d3ee;
+  border-radius: 50%;
+}
+
+.pc-status > i.loading {
+  background: #f59e0b;
+}
+
+.pc-measurement-dock {
+  position: absolute;
+  top: 120px;
+  right: 20px;
+  z-index: 80;
+}
+
+.pc-error-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: rgb(8 17 29 / 72%);
+}
+
+.pc-error-card {
+  max-width: 400px;
+  padding: 32px;
+  text-align: center;
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+}
+
+.pc-error-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.pc-error-message {
+  margin: 12px 0 20px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+@media (width <= 900px) {
+  .pc-header {
+    padding-left: 14px;
+  }
+
+  .pc-header-label {
+    display: none;
+  }
+
+  .pc-measurement-dock {
+    top: auto;
+    right: 12px;
+    bottom: 14px;
   }
 }
 </style>

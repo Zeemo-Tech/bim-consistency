@@ -7,6 +7,6 @@ export default {
     icon: 'ep/view',
     showLink: false,
     hideMenu: true,
-    layout: false,
+    fullPage: true,
   },
 }

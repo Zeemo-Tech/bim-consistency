@@ -1,5 +1,5 @@
 <template>
-  <div class="app-main">
+  <div class="app-main" :class="{ 'is-full-page': isFullPage }">
     <router-view v-slot="{ Component, route }">
       <transition name="fade-transform" mode="out-in">
         <keep-alive v-if="!route.meta?.fullPage">
@@ -12,11 +12,15 @@
 </template>
 
 <script setup lang="ts">
-import { defineComponent } from 'vue'
+import { computed, defineComponent } from 'vue'
+import { useRoute } from 'vue-router'
 
 defineComponent({
   name: 'AppMain',
 })
+
+const route = useRoute()
+const isFullPage = computed(() => route.meta?.fullPage === true)
 </script>
 
 <style lang="scss" scoped>
@@ -29,6 +33,12 @@ defineComponent({
   background-color: var(--el-bg-color-page);
   padding: 20px;
   box-sizing: border-box;
+
+  /* 全屏页面不额外留白，避免内容被截断 */
+  &.is-full-page {
+    padding: 0;
+    overflow: hidden;
+  }
 
   /* 滚动条样式 */
   &::-webkit-scrollbar {

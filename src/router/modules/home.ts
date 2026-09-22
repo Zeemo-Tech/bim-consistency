@@ -11,7 +11,7 @@ export default {
   path: '/',
   name: 'Home',
   component: Layout,
-  redirect: '/welcome',
+  redirect: '/projects',
   meta: {
     // 页面标题
     title: 'menus.pureHome',

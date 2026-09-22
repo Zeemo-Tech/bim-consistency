@@ -3,6 +3,9 @@ import pinia from '@/store'
 import { getMyOrganizations, getOrganizations, type MyOrganizationMember } from '@/api/organization'
 import { getOrganizationId, setOrganizationId } from '@/utils/auth'
 
+// 同一时刻只允许一个组织列表请求在途，避免多处调用重复请求后端
+let organizationsRequest: Promise<void> | null = null
+
 export const useOrganizationStore = defineStore('organization', {
   state: () => ({
     // 组织列表
@@ -66,8 +69,24 @@ export const useOrganizationStore = defineStore('organization', {
   },
 
   actions: {
-    // 获取组织列表
+    // 获取组织列表（同一时刻只发一次，多个调用方共享结果）
     async fetchOrganizations() {
+      if (organizationsRequest) return organizationsRequest
+      organizationsRequest = this.loadOrganizations().finally(() => {
+        organizationsRequest = null
+      })
+      return organizationsRequest
+    },
+
+    // 确保组织列表已加载（已加载则跳过），用于顶栏等常驻组件的初始化
+    async ensureOrganizations() {
+      if (this.organizations.length > 0 || organizationsRequest) {
+        return organizationsRequest ?? undefined
+      }
+      return this.fetchOrganizations()
+    },
+
+    async loadOrganizations() {
       try {
         this.loading = true
         this.error = null

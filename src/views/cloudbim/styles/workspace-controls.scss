@@ -1,0 +1,241 @@
+// 从 CloudBIM 参考项目移植的工作区控件样式契约。
+// 与 @zeemo-tech/viewer-core/styles/workspace-controls.scss 保持一致，
+// 仅改为在本项目内以 scoped 组件样式引入。
+
+@mixin action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 var(--spacing-compact);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+
+  &:hover:not(:disabled) {
+    color: var(--color-primary);
+    background: var(--color-primary-soft);
+    border-color: var(--color-primary);
+    transform: none;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    color: var(--text-disabled);
+    cursor: not-allowed;
+    background: var(--bg-muted);
+    border-color: var(--border-color-light);
+    box-shadow: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@mixin primary {
+  color: var(--bg-card);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+
+  &:hover:not(:disabled) {
+    color: var(--bg-card);
+    background: var(--color-primary-hover);
+    border-color: var(--color-primary-hover);
+  }
+
+  &:active:not(:disabled) {
+    background: var(--color-primary-active);
+  }
+}
+
+@mixin filters {
+  :deep(.el-input .el-input__wrapper),
+  :deep(.el-select .el-select__wrapper),
+  :deep(.el-date-editor.el-input__wrapper),
+  :deep(.date-range-field.el-date-editor.el-input__wrapper) {
+    height: var(--control-height);
+    min-height: var(--control-height);
+    background: var(--bg-card);
+    border: 0;
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-filter-control) !important;
+
+    &.is-focus,
+    &.is-focused,
+    &:focus-within {
+      box-shadow: inset 0 0 0 2px var(--color-primary) !important;
+    }
+  }
+
+  :deep(.el-input__inner),
+  :deep(.el-select__selected-item),
+  :deep(.el-range-input),
+  :deep(.el-range-separator) {
+    font-size: var(--font-size-sm);
+    font-weight: 400;
+    color: var(--text-secondary);
+  }
+}
+
+// CAD、设计模型与扫描点云列表共用同一套几何契约。
+@mixin list-surface {
+  min-width: 0;
+  container-type: inline-size;
+
+  .project-header {
+    margin: 0;
+  }
+
+  .workspace-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: start;
+    margin-bottom: 16px;
+  }
+
+  .workspace-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .workspace-actions {
+    display: flex;
+    gap: 8px;
+    margin: 0;
+  }
+
+  .workspace-search {
+    flex: 1 1 220px;
+    min-width: 180px;
+    max-width: 280px;
+  }
+
+  .workspace-select {
+    flex: 0 0 112px;
+    width: 112px;
+  }
+
+  :deep(.workspace-date.el-date-editor) {
+    flex: 0 0 220px;
+    width: 220px;
+    min-width: 220px;
+    max-width: 220px;
+  }
+
+  .workspace-table-card {
+    min-width: 0;
+    padding: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color-light);
+    border-radius: var(--radius-md);
+    box-shadow: none;
+  }
+
+  .bim-table-heading {
+    margin: 0;
+  }
+
+  .workspace-table-card h2 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .workspace-table {
+    width: 100%;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+
+    :deep(.el-table__empty-text) {
+      width: 100%;
+      line-height: 1.5;
+    }
+
+    :deep(.el-table__inner-wrapper::before) {
+      display: none;
+    }
+
+    :deep(th.el-table__cell) {
+      height: 40px;
+      padding: 6px 0;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: var(--bg-control);
+    }
+
+    :deep(td.el-table__cell) {
+      height: 64px;
+      padding: 8px 0;
+      font-size: var(--font-size-sm);
+      border-top: 0;
+    }
+
+    :deep(.el-table__cell .cell) {
+      padding: 0 8px;
+      line-height: 22px;
+      text-align: left;
+    }
+
+    :deep(th.bim-operation-column .cell),
+    :deep(th.asset-operation-column .cell) {
+      text-align: right;
+    }
+
+    :deep(.el-table__row:hover > td.el-table__cell) {
+      background: var(--color-primary-soft);
+    }
+
+    :deep(.el-scrollbar__bar.is-horizontal) {
+      height: 8px;
+    }
+  }
+
+  .workspace-row-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  @container (max-width: 960px) {
+    .workspace-toolbar {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+    }
+
+    .workspace-actions {
+      justify-self: end;
+    }
+  }
+
+  @container (max-width: 600px) {
+    .workspace-search {
+      flex-basis: 100%;
+      max-width: none;
+    }
+
+    .workspace-select {
+      flex: 1 1 112px;
+    }
+  }
+}
