@@ -4755,25 +4755,26 @@ const togglePointCloudVisibility = () => {
 }
 
 /** 作用：把点大小应用到已加载点云（点材质 size，与预览页一致）。 */
-function applyPointcloudPointSize(size: number) {
+/** 作用：把点大小应用到某个对象子树（仅遍历该子树，避免整棵 tileset 反复遍历）。 */
+function applyPointSizeToRoot(root: any, size: number) {
   const nextSize = Math.max(1, Math.min(5, Number(size) || 2.5))
-  const applyToRoot = (root: any) => {
-    root?.traverse?.((child: any) => {
-      if (!child?.isPoints || !child.material) return
-      const materials = Array.isArray(child.material)
-        ? child.material
-        : [child.material]
-      for (const material of materials) {
-        if (!material) continue
-        if ('size' in material) material.size = nextSize
-        // 与预览页一致：屏幕空间固定像素点，不随距离缩放；开启深度写入。
-        if ('sizeAttenuation' in material) material.sizeAttenuation = false
-        if ('depthWrite' in material) material.depthWrite = true
-        material.needsUpdate = true
-      }
-    })
-  }
-  for (const entry of loadedTilesets) applyToRoot(entry.wrapper)
+  root?.traverse?.((child: any) => {
+    if (!child?.isPoints || !child.material) return
+    const materials = Array.isArray(child.material)
+      ? child.material
+      : [child.material]
+    for (const material of materials) {
+      if (!material) continue
+      // 仅调整点大小；sizeAttenuation / depthWrite 保持材质自身默认，
+      // 避免点云看起来变薄、变平（与原始配准页表现不一致）。
+      if ('size' in material) material.size = nextSize
+      material.needsUpdate = true
+    }
+  })
+}
+
+function applyPointcloudPointSize(size: number) {
+  for (const entry of loadedTilesets) applyPointSizeToRoot(entry.wrapper, size)
   requestRender()
 }
 
@@ -6147,7 +6148,8 @@ async function loadTileset(url: string) {
     const { fixedAttributes, oversizedGeometries } =
       sanitizeObjectForWebGPU(tileScene)
     applyMaterialMode(tileScene, materialMode.value)
-    applyPointcloudPointSize(pointcloudPointSize.value)
+    // 只处理本次新加载的瓦片，避免每个瓦片加载时都全量遍历整棵 tileset。
+    applyPointSizeToRoot(tileScene, pointcloudPointSize.value)
     void computedPointBounds
     if (oversizedGeometries > 0) {
       statusText.value = `Tile too large for WebGPU (>${256}MB). Consider increasing SSE or re-tiling.`
