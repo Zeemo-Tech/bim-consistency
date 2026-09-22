@@ -1,106 +1,86 @@
 <template>
   <div class="report-preview-page" :class="{ 'is-embedded': props.embedded }">
-    <div class="preview-toolbar">
-      <div class="toolbar-left">
-        <button
-          v-if="!props.embedded"
-          class="toolbar-back-btn"
-          type="button"
-          @click="goCenter"
-        >
-          <el-icon><ArrowLeftBold /></el-icon>
-          <span>返回报告中心</span>
-        </button>
-        <div class="toolbar-title-block">
-          <div class="toolbar-title-row">
-            <h1 class="toolbar-title">{{ toolbarReportTitle }}</h1>
-            <el-tag
-              v-if="report"
-              :type="statusTagType(report.status)"
-              effect="light"
-              class="toolbar-status-tag"
-            >
-              {{ statusLabel(report.status) }}
-            </el-tag>
-          </div>
-          <div v-if="report" class="toolbar-meta">
-            <span>{{ report.reportNo || '未生成编号' }}</span>
-            <span>更新于 {{ formatDateTime(report.updatedAt) }}</span>
-          </div>
-        </div>
-      </div>
-      <div class="toolbar-center">
-        <div class="toolbar-zoom-shell">
-          <span class="toolbar-center-label">缩放</span>
-          <div class="zoom-controls">
-            <button
-              class="zoom-icon-btn"
-              type="button"
-              :disabled="previewScale <= minPreviewScale"
-              @click="adjustPreviewScale(-10)"
-            >
-              <el-icon><Minus /></el-icon>
-            </button>
-            <el-dropdown
-              class="zoom-dropdown"
-              trigger="click"
-              @command="handlePreviewScaleChange"
-            >
-              <button class="zoom-current zoom-current--trigger" type="button">
-                <span>{{ previewScaleDisplay }}</span>
-                <el-icon class="zoom-current-arrow"><CaretBottom /></el-icon>
-              </button>
-              <template #dropdown>
-                <el-dropdown-menu class="zoom-dropdown-menu">
-                  <el-dropdown-item
-                    v-for="item in previewScaleOptionList"
-                    :key="item"
-                    :command="item"
-                  >
-                    {{ item }}%
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-            <el-slider
-              :model-value="previewScale"
-              class="zoom-slider"
-              :min="minPreviewScale"
-              :max="maxPreviewScale"
-              :step="5"
-              :show-tooltip="false"
-              @input="handlePreviewScaleSliderInput"
-              @change="handlePreviewScaleSliderChange"
-            />
-            <button
-              class="zoom-icon-btn"
-              type="button"
-              :disabled="previewScale >= maxPreviewScale"
-              @click="adjustPreviewScale(10)"
-            >
-              <el-icon><Plus /></el-icon>
-            </button>
-          </div>
-        </div>
-      </div>
-      <div class="toolbar-actions">
-        <el-button
-          class="toolbar-action-btn toolbar-action-btn--secondary"
-          plain
-          :loading="saving"
-          @click="handleSaveReview"
-        >
-          保存
-        </el-button>
-        <ReportExportButton
-          :disabled="!canExport || !report"
-          :filename="exportFilename"
-          page-selector=".report-print-root .a4-page"
-          :report-generated-date="reviewForm.reportGeneratedDate"
-          :watermark-text="exportWatermarkText"
-        />
-      </div>
+    <!-- 报告预览工具栏（对齐 cloudBIM-viewer 的 report-reader-toolbar） -->
+    <div
+      v-if="!reportToolbarCollapsed"
+      class="report-reader-toolbar"
+      aria-label="报告预览工具栏"
+    >
+      <button
+        type="button"
+        title="缩小"
+        aria-label="缩小"
+        :disabled="previewScale <= minPreviewScale"
+        @click="adjustPreviewScale(-10)"
+      >
+        <el-icon><Minus /></el-icon>
+      </button>
+      <strong>{{ previewScaleDisplay }}</strong>
+      <button
+        type="button"
+        title="放大"
+        aria-label="放大"
+        :disabled="previewScale >= maxPreviewScale"
+        @click="adjustPreviewScale(10)"
+      >
+        <el-icon><Plus /></el-icon>
+      </button>
+      <span class="report-reader-format" title="当前导出格式">PDF</span>
+      <button
+        type="button"
+        title="适应页面"
+        aria-label="适应页面"
+        @click="fitReportPage"
+      >
+        <el-icon><View /></el-icon>
+      </button>
+      <span class="report-reader-divider" />
+      <button
+        type="button"
+        title="保存预览内容"
+        aria-label="保存预览内容"
+        :disabled="saving"
+        @click="handleSaveReview"
+      >
+        <el-icon><Check /></el-icon>
+      </button>
+      <button
+        type="button"
+        :title="reportFullscreen ? '退出全屏预览' : '全屏预览'"
+        :aria-label="reportFullscreen ? '退出全屏预览' : '全屏预览'"
+        :aria-pressed="reportFullscreen"
+        :class="{ active: reportFullscreen }"
+        @click="toggleReportFullscreen"
+      >
+        <el-icon><FullScreen /></el-icon>
+      </button>
+      <ReportExportButton
+        class="report-reader-export"
+        :disabled="!canExport || !report"
+        :filename="exportFilename"
+        page-selector=".report-print-root .a4-page"
+        :report-generated-date="reviewForm.reportGeneratedDate"
+        :watermark-text="exportWatermarkText"
+      />
+      <button
+        type="button"
+        title="收起工具栏"
+        aria-label="收起工具栏"
+        @click="reportToolbarCollapsed = true"
+      >
+        <el-icon><ArrowUp /></el-icon>
+      </button>
     </div>
+    <button
+      v-else
+      type="button"
+      class="report-reader-toolbar-reopen"
+      title="展开报告工具栏"
+      aria-label="展开报告工具栏"
+      @click="reportToolbarCollapsed = false"
+    >
+      <el-icon><ArrowDown /></el-icon>
+    </button>
 
     <div
       ref="previewCanvasRef"
@@ -692,10 +672,15 @@ import {
   watch,
 } from 'vue'
 import {
+  ArrowDown,
   ArrowLeftBold,
+  ArrowUp,
   CaretBottom,
+  Check,
+  FullScreen,
   Minus,
   Plus,
+  View,
 } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -808,6 +793,9 @@ const reviewForm = reactive<{
   issues: [],
 })
 
+// 供内嵌到分析流程时，右侧「出报告」面板读取/编辑报告字段
+defineExpose({ reviewForm })
+
 const reportId = computed(() => {
   const raw = props.reportId ?? route.params.reportId
   const value = Number(raw)
@@ -833,6 +821,40 @@ const previewScaleOptionList = computed(() =>
   ),
 )
 const previewScaleDisplay = computed(() => `${previewScale.value}%`)
+/** 报告工具栏是否收起（对齐参考项目 report-reader-toolbar） */
+const reportToolbarCollapsed = ref(false)
+/** 报告预览是否全屏 */
+const reportFullscreen = ref(false)
+
+/** 作用：按当前画布高度自适应页面缩放。 */
+const fitReportPage = () => {
+  const canvas = previewCanvasRef.value
+  if (!canvas) return
+  const available = canvas.clientHeight - 56
+  const pageHeight = 1123
+  if (available <= 0) return
+  const next = Math.floor((available / pageHeight) * 100)
+  previewScale.value = Math.min(
+    maxPreviewScale,
+    Math.max(minPreviewScale, next),
+  )
+}
+
+/** 作用：切换报告预览全屏。 */
+const toggleReportFullscreen = async () => {
+  const root = document.documentElement
+  try {
+    if (!document.fullscreenElement) {
+      await root.requestFullscreen?.()
+      reportFullscreen.value = true
+    } else {
+      await document.exitFullscreen?.()
+      reportFullscreen.value = false
+    }
+  } catch {
+    reportFullscreen.value = !reportFullscreen.value
+  }
+}
 const exportWatermarkText = computed(() => '中建八局')
 const exportFilename = computed(() => {
   const projectName =
@@ -1943,10 +1965,119 @@ onBeforeUnmount(() => {
   background: #eceff3;
 }
 
-/* 内嵌到分析流程第三步时：填满容器，不按视口高度撑开 */
+/* 内嵌到分析流程时：填满容器，不按视口高度撑开 */
 .report-preview-page.is-embedded {
+  position: relative;
   height: 100%;
   min-height: 0;
+}
+
+/* 报告预览工具栏：顶部居中悬浮胶囊（对齐 cloudBIM-viewer report-reader-toolbar） */
+.report-reader-toolbar {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 32px);
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 12px 30px rgb(15 23 42 / 12%);
+  backdrop-filter: blur(14px);
+  transform: translateX(-50%);
+}
+
+.report-reader-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #415572;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.report-reader-toolbar button:hover:not(:disabled) {
+  color: #4e66cc;
+  background: #eef1fb;
+}
+
+.report-reader-toolbar button.active {
+  color: #4e66cc;
+  background: #eef1fb;
+}
+
+.report-reader-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.report-reader-toolbar strong {
+  min-width: 44px;
+  color: #1b2f4a;
+  font-family: var(--font-family-number, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.report-reader-format {
+  padding: 3px 9px;
+  border-radius: 6px;
+  color: #3e52ad;
+  background: #eef1fb;
+  font-family: var(--font-family-number, monospace);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.report-reader-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: #e3ebf6;
+}
+
+.report-reader-toolbar :deep(.report-reader-export.el-button) {
+  height: 32px;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.report-reader-toolbar-reopen {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  z-index: 30;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  color: #415572;
+  background: rgb(255 255 255 / 94%);
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 12px 30px rgb(15 23 42 / 12%);
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.report-reader-toolbar-reopen:hover {
+  color: #4e66cc;
 }
 
 .preview-toolbar {
@@ -1988,7 +2119,8 @@ onBeforeUnmount(() => {
 
 .preview-canvas {
   --page-scale: 1;
-  --page-base-width: min(920px, calc(100vw - 72px));
+  /* A4 @96dpi，与 cloudBIM-viewer 出报告保持一致（因此同样 70% 视觉大小相同） */
+  --page-base-width: min(794px, calc(100vw - 72px));
   flex: 1;
   overflow-y: auto;
   padding: 22px 0 34px;

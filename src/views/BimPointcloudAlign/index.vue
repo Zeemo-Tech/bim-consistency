@@ -94,6 +94,7 @@
         :scan-file-id="scanFileId"
         :project-name="projectNameForDisplay"
         :scan-file-name="pointCloudNameForDisplay"
+        @prev-step="openWorkflowStep(3)"
       />
 
       <CadCalibrationView
