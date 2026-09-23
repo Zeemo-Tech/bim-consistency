@@ -6028,6 +6028,7 @@ async function loadGlbBlob(blob: Blob, label: string) {
   loader.load(
     url,
     (gltf: any) => {
+      try {
       const root = gltf?.scene ?? gltf?.scenes?.[0]
       if (!root) {
         statusText.value = 'Load failed: empty glTF scene.'
@@ -6040,7 +6041,14 @@ async function loadGlbBlob(blob: Blob, label: string) {
       statusText.value = `Optimizing: ${label}`
       clearPickedElement()
       buildWireframeForRoot(root)
-      const { batchedCount } = optimizeRoot(root)
+      let batchedCount = 0
+      try {
+        // WebGPU 合批失败时降级为原始模型，避免整个模型加载中断导致无操作杆。
+        batchedCount = optimizeRoot(root).batchedCount
+      } catch (batchError) {
+        console.warn('[BimPointcloudAlign] 模型合批失败，已降级为原始模型:', batchError)
+        batchedCount = 0
+      }
       const pivot = createCenteredPivot(root, label)
       loadedRoots.push(pivot)
       const host = ensureClipHostForObject(pivot)
@@ -6061,6 +6069,10 @@ async function loadGlbBlob(blob: Blob, label: string) {
       tryRestoreSavedBimAlignment()
       requestRender()
       requestAnimationFrame(() => requestRender())
+      } catch (err) {
+        console.error('[BimPointcloudAlign] BIM 加载后处理失败:', err)
+        statusText.value = `Load failed: ${label}`
+      }
     },
     (e: any) => {
       if (!e?.total) return
