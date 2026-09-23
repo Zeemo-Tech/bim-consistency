@@ -77,7 +77,7 @@
               :no-data-text="
                 designLoading
                   ? '加载中…'
-                  : '当前项目暂无已就绪且归档完整的 IFC 模型'
+                  : '当前项目暂无已就绪的设计模型（BIM）'
               "
               placeholder="楼栋"
               @change="handleBuildingChange"
@@ -92,24 +92,7 @@
           </div>
           <div class="archive-field">
             <span>楼层</span>
-            <el-select
-              v-model="form.floorName"
-              filterable
-              allow-create
-              default-first-option
-              clearable
-              :loading="designLoading"
-              no-data-text="请先选择楼栋"
-              placeholder="楼层"
-              @change="handleFloorChange"
-            >
-              <el-option
-                v-for="item in floors"
-                :key="item"
-                :label="item"
-                :value="item"
-              />
-            </el-select>
+            <el-input v-model="form.floorName" placeholder="如 16F" clearable />
           </div>
           <div class="archive-field">
             <span>楼板类型</span>
@@ -119,39 +102,23 @@
               allow-create
               default-first-option
               clearable
-              :loading="designLoading"
-              no-data-text="请先选择楼栋和楼层"
               placeholder="选择类型"
-              @change="handleComponentTypeChange"
             >
               <el-option
-                v-for="item in componentTypes"
-                :key="item"
-                :label="archiveComponentTypeLabel(item)"
-                :value="item"
+                v-for="item in ARCHIVE_COMPONENT_TYPES"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
               />
             </el-select>
           </div>
           <div class="archive-field">
             <span>归档序号</span>
-            <el-select
+            <el-input
               v-model="form.archiveSerial"
-              filterable
-              allow-create
-              default-first-option
+              placeholder="如 21"
               clearable
-              :loading="designLoading"
-              no-data-text="请先选择楼栋、楼层和楼板类型"
-              placeholder="选择序号"
-              @change="handleArchiveSerialChange"
-            >
-              <el-option
-                v-for="item in serials"
-                :key="item"
-                :label="item"
-                :value="item"
-              />
-            </el-select>
+            />
           </div>
           <div class="archive-field">
             <span>扫描日期</span>
@@ -167,8 +134,8 @@
         <div class="match-status" :class="{ matched: Boolean(matchingDesign) }">
           {{
             matchingDesign
-              ? `已匹配 IFC：${matchingDesign.originalName}`
-              : '请选择完整归档信息以匹配 IFC 模型'
+              ? `已匹配设计模型（BIM）：${matchingDesign.originalName}`
+              : '请选择楼栋以匹配设计模型（BIM）'
           }}
         </div>
       </section>
@@ -218,7 +185,7 @@ import { computed, reactive, ref } from 'vue'
 import { Close, Document, Loading, Upload } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import {
-  archiveComponentTypeLabel,
+  ARCHIVE_COMPONENT_TYPES,
   buildArchiveCode,
   getProjectFilesByProjectId,
   type ProjectFileInfo,
@@ -270,59 +237,16 @@ function uniqueSorted(values: Array<string | undefined>) {
 }
 
 const normalizedBuildingName = computed(() => archivePart(form.buildingName))
+// 点云↔BIM 按「幢」匹配：候选幢来自项目内已就绪的 BIM。
 const buildings = computed(() =>
   uniqueSorted(
     designModels.value.map((item) => archivePart(item.buildingName)),
   ),
 )
-const floors = computed(() =>
-  uniqueSorted(
-    designModels.value
-      .filter(
-        (item) =>
-          !normalizedBuildingName.value ||
-          archivePart(item.buildingName) === normalizedBuildingName.value,
-      )
-      .map((item) => archivePart(item.floorName)),
-  ),
-)
-const componentTypes = computed(() =>
-  uniqueSorted(
-    designModels.value
-      .filter(
-        (item) =>
-          (!normalizedBuildingName.value ||
-            archivePart(item.buildingName) === normalizedBuildingName.value) &&
-          (!form.floorName ||
-            archivePart(item.floorName) === archivePart(form.floorName)),
-      )
-      .map((item) => archivePart(item.componentType)),
-  ),
-)
-const serials = computed(() =>
-  uniqueSorted(
-    designModels.value
-      .filter(
-        (item) =>
-          (!normalizedBuildingName.value ||
-            archivePart(item.buildingName) === normalizedBuildingName.value) &&
-          (!form.floorName ||
-            archivePart(item.floorName) === archivePart(form.floorName)) &&
-          (!form.componentType ||
-            archivePart(item.componentType) ===
-              archivePart(form.componentType)),
-      )
-      .map((item) => archivePart(item.archiveSerial)),
-  ),
-)
 const matchingDesign = computed(
   () =>
     designModels.value.find(
-      (item) =>
-        archivePart(item.buildingName) === normalizedBuildingName.value &&
-        archivePart(item.floorName) === archivePart(form.floorName) &&
-        archivePart(item.componentType) === archivePart(form.componentType) &&
-        archivePart(item.archiveSerial) === archivePart(form.archiveSerial),
+      (item) => archivePart(item.buildingName) === normalizedBuildingName.value,
     ) || null,
 )
 const archiveCode = computed(() =>
@@ -343,12 +267,7 @@ async function loadDesignModels(projectId: number) {
     const groups = response.data || []
     const bims = groups.find((group) => group.type === 'bim')?.files || []
     designModels.value = bims.filter(
-      (file) =>
-        file.status === 'stored' &&
-        archivePart(file.buildingName) &&
-        archivePart(file.floorName) &&
-        archivePart(file.componentType) &&
-        archivePart(file.archiveSerial),
+      (file) => file.status === 'stored' && archivePart(file.buildingName),
     )
   } catch {
     designModels.value = []
@@ -392,26 +311,6 @@ function handleBuildingChange(value: string) {
   form.floorName = ''
   form.componentType = ''
   form.archiveSerial = ''
-  const design = designModels.value.find(
-    (item) => archivePart(item.buildingName) === normalizedBuildingName.value,
-  )
-  if (design) {
-    form.floorName = design.floorName || ''
-    form.componentType = design.componentType || ''
-    form.archiveSerial = design.archiveSerial || ''
-  }
-}
-function handleFloorChange(value: string) {
-  form.floorName = value?.trim() ?? ''
-  form.componentType = ''
-  form.archiveSerial = ''
-}
-function handleComponentTypeChange(value: string) {
-  form.componentType = value ?? ''
-  form.archiveSerial = ''
-}
-function handleArchiveSerialChange(value: string) {
-  form.archiveSerial = value ?? ''
 }
 
 async function submit() {
@@ -434,9 +333,7 @@ async function submit() {
     return
   }
   if (!matchingDesign.value) {
-    ElMessage.warning(
-      '当前归档编号没有匹配的 IFC 设计模型，请先上传对应归档的设计模型',
-    )
+    ElMessage.warning('当前幢没有匹配的设计模型（BIM），请先上传该幢的设计模型')
     return
   }
 

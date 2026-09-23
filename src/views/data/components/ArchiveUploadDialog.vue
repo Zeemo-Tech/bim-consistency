@@ -64,7 +64,7 @@
           </div>
           <code :title="archiveCode">{{ archiveCode || '待生成' }}</code>
         </div>
-        <div class="archive-fields">
+        <div class="archive-fields" :class="{ 'is-three': !showFloor }">
           <div class="archive-field">
             <span>楼栋</span>
             <el-input
@@ -73,7 +73,7 @@
               clearable
             />
           </div>
-          <div class="archive-field">
+          <div v-if="showFloor" class="archive-field">
             <span>楼层</span>
             <el-input v-model="form.floorName" placeholder="如 16F" clearable />
           </div>
@@ -254,8 +254,15 @@ const form = reactive({
 })
 
 const archiveCode = computed(() =>
-  buildArchiveCode(form.floorName, form.componentType, form.archiveSerial),
+  buildArchiveCode(
+    showFloor.value ? form.floorName : form.buildingName,
+    form.componentType,
+    form.archiveSerial,
+  ),
 )
+
+/** BIM 只有幢、没有层。 */
+const showFloor = computed(() => props.fileType !== 'bim')
 
 function handleOpened() {
   resetForm()
@@ -305,11 +312,15 @@ async function submit() {
   }
   if (
     !form.buildingName.trim() ||
-    !form.floorName.trim() ||
+    (showFloor.value && !form.floorName.trim()) ||
     !form.componentType ||
     !form.archiveSerial.trim()
   ) {
-    ElMessage.warning('请完整填写楼栋、楼层、楼板类型和归档序号')
+    ElMessage.warning(
+      showFloor.value
+        ? '请完整填写楼栋、楼层、楼板类型和归档序号'
+        : '请完整填写楼栋、楼板类型和归档序号',
+    )
     return
   }
 
@@ -322,7 +333,7 @@ async function submit() {
       type: props.fileType,
       file: selectedFile.value,
       buildingName: form.buildingName.trim(),
-      floorName: form.floorName.trim(),
+      floorName: showFloor.value ? form.floorName.trim() : undefined,
       componentType: form.componentType,
       archiveSerial: form.archiveSerial.trim(),
       archiveCode: archiveCode.value,
@@ -496,6 +507,10 @@ function formatFileSize(size: number) {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+
+  &.is-three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .archive-field {
