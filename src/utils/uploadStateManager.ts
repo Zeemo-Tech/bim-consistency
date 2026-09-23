@@ -1,4 +1,4 @@
-import type { FileType } from '@/api/fileManage'
+import type { FileType, ScanIngestMode } from '@/api/fileManage'
 
 /**
  * 上传状态信息
@@ -20,6 +20,14 @@ export interface UploadState {
   progress: number
   timestamp: number // 保存时间戳
   description?: string // 文件描述
+  /** 点云入库方式（仅 type=scan）。 */
+  ingestMode?: ScanIngestMode
+  /** 后处理点云关联的轨迹上传会话 ID。 */
+  trajectoryUploadId?: number
+  /** 归档信息。 */
+  componentType?: string
+  archiveSerial?: string
+  archiveCode?: string
 }
 
 /** localStorage 存储键 */

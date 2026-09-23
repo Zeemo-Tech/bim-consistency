@@ -228,7 +228,20 @@
       :aria-label="`${props.title}分页`"
     />
 
+    <DataUploadDialog
+      v-if="isScanList"
+      v-model="uploadDialogVisible"
+      :project-id="projectId || null"
+      @complete="handleScanComplete"
+    />
+    <DesignModelUploadDialog
+      v-else-if="isBimList"
+      v-model="uploadDialogVisible"
+      :project-id="projectId || null"
+      @complete="handleScanComplete"
+    />
     <UploadDialog
+      v-else
       ref="uploadDialogRef"
       v-model="uploadDialogVisible"
       @confirm="handleUploadConfirm"
@@ -251,6 +264,8 @@ import {
 } from '@element-plus/icons-vue'
 import type { FileType, ProjectFileInfo } from '@/api/fileManage'
 import UploadDialog from '@/views/data/history-model/components/UploadDialog.vue'
+import DataUploadDialog from '@/views/data/components/DataUploadDialog.vue'
+import DesignModelUploadDialog from '@/views/data/components/DesignModelUploadDialog.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import NeumorphicPagination from './NeumorphicPagination.vue'
 import { useProjectFileList } from '../composables/useProjectFileList'
@@ -272,6 +287,7 @@ const props = defineProps<{
 }>()
 
 const {
+  projectId,
   files,
   loading,
   buildingOptions,
@@ -285,6 +301,7 @@ const {
 } = useProjectFileList(props.kinds)
 
 const isScanList = computed(() => props.kinds.includes('scan'))
+const isBimList = computed(() => props.kinds.includes('bim'))
 
 /** 作用：扫描点云关联的设计模型（BIM）名称，用于列表展示与进入分析校验。 */
 function linkedBimName(file: ProjectFileInfo) {
@@ -309,6 +326,12 @@ const {
     void loadBuildings()
   },
 })
+
+/** 点云上传完成：刷新列表与幢层选项。 */
+function handleScanComplete() {
+  void loadFiles()
+  void loadBuildings()
+}
 
 const showRemesh = computed(() => props.kinds.includes('bim'))
 

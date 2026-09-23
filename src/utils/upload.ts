@@ -3,6 +3,8 @@ import type {
   UploadStatus,
   InitUploadParams,
   ProjectFile,
+  CompleteUploadParams,
+  ScanIngestMode,
 } from '@/api/fileManage'
 import {
   initFileUpload,
@@ -50,6 +52,14 @@ export interface UploadFileParams {
   resumeFromState?: boolean // 是否从保存的状态恢复
   existingUploadId?: number // 已存在的 uploadId（用于暂停后的继续上传）
   existingFileHash?: string
+  /** 点云入库方式（仅 type=scan）。 */
+  ingestMode?: ScanIngestMode
+  /** 后处理点云完成时关联的轨迹上传会话 ID。 */
+  trajectoryUploadId?: number
+  /** 归档信息。 */
+  componentType?: string
+  archiveSerial?: string
+  archiveCode?: string
 }
 
 export interface ChunkProgressState {
@@ -205,6 +215,10 @@ interface InitializeUploadParams {
   type: FileType
   producedAt?: string
   existingUploadId?: number
+  ingestMode?: ScanIngestMode
+  componentType?: string
+  archiveSerial?: string
+  archiveCode?: string
 }
 
 /**
@@ -230,6 +244,10 @@ const initializeUpload = async (
     type,
     producedAt,
     existingUploadId,
+    ingestMode,
+    componentType,
+    archiveSerial,
+    archiveCode,
   } = params
 
   // 如果有已存在的 uploadId（暂停后继续上传），直接使用它
@@ -252,6 +270,10 @@ const initializeUpload = async (
     floorName,
     type,
     producedAt,
+    ingestMode,
+    componentType,
+    archiveSerial,
+    archiveCode,
   }
 
   try {
@@ -304,6 +326,11 @@ const saveUploadProgress = (
   producedAt?: string,
   description?: string,
   floorName?: string,
+  ingestMode?: ScanIngestMode,
+  trajectoryUploadId?: number,
+  componentType?: string,
+  archiveSerial?: string,
+  archiveCode?: string,
 ): void => {
   const progress = uploadStatus.uploadedChunks?.length
     ? Math.round(
@@ -328,6 +355,11 @@ const saveUploadProgress = (
     progress,
     timestamp: Date.now(),
     description,
+    ingestMode,
+    trajectoryUploadId,
+    componentType,
+    archiveSerial,
+    archiveCode,
   })
 }
 
@@ -345,9 +377,13 @@ const completeFileUpload = async (
   uploadId: number,
   fileHash: string,
   onProgress?: (progress: number) => void,
+  extra?: CompleteUploadParams,
 ): Promise<ProjectFile> => {
   onProgress?.(90)
-  const completeResult = await completeUpload(uploadId, fileHash)
+  const completeResult = await completeUpload(uploadId, {
+    fileHash,
+    ...(extra || {}),
+  })
   if (!isSuccessResponse(completeResult.code)) {
     throw new Error(completeResult.msg || '完成上传失败')
   }
@@ -429,6 +465,11 @@ export const uploadFile = async (
     resumeFromState,
     existingUploadId,
     existingFileHash,
+    ingestMode,
+    trajectoryUploadId,
+    componentType,
+    archiveSerial,
+    archiveCode,
   } = params
 
   try {
@@ -498,6 +539,10 @@ export const uploadFile = async (
       type,
       producedAt: resolvedProducedAt,
       existingUploadId: resolvedUploadId,
+      ingestMode,
+      componentType,
+      archiveSerial,
+      archiveCode,
     })
 
     logger.info(
@@ -519,13 +564,20 @@ export const uploadFile = async (
       resolvedProducedAt,
       description,
       resolvedFloorName ?? uploadStatus.floorName ?? undefined,
+      ingestMode,
+      trajectoryUploadId,
+      componentType,
+      archiveSerial,
+      archiveCode,
     )
 
     // 3. 检查是否为秒传
     if (isInstantUpload(uploadStatus)) {
       logger.info('检测到秒传，直接完成上传')
       onPhaseChange?.('merging')
-      return await completeFileUpload(uploadId, fileHash, onProgress)
+      return await completeFileUpload(uploadId, fileHash, onProgress, {
+        trajectoryUploadId,
+      })
     }
 
     // 4. 上传分片（断点续传）
@@ -543,6 +595,7 @@ export const uploadFile = async (
       type,
       description,
       onPhaseChange,
+      trajectoryUploadId,
     })
   } catch (error: any) {
     throw handleUploadError(error)
@@ -566,6 +619,7 @@ interface ResumeChunkUploadParams {
   type: FileType
   description?: string
   onPhaseChange?: (phase: UploadPhase) => void
+  trajectoryUploadId?: number
 }
 
 /**
@@ -585,6 +639,7 @@ const resumeChunkUpload = async (
     onChunkProgress,
     onCancelCheck,
     onPhaseChange,
+    trajectoryUploadId,
   } = params
 
   try {
@@ -684,7 +739,9 @@ const resumeChunkUpload = async (
     // 完成上传
     logger.info('所有分片上传完成，开始合并文件...')
     onPhaseChange?.('merging')
-    return await completeFileUpload(uploadId, fileHash, onProgress)
+    return await completeFileUpload(uploadId, fileHash, onProgress, {
+      trajectoryUploadId,
+    })
   } catch (error: any) {
     logger.error('分片上传失败:', error)
     // 保留状态以便用户重试
@@ -792,6 +849,14 @@ export interface FileUploaderOptions {
   onError?: (error: Error) => void
   description?: string
   resumeFromState?: boolean // 是否从保存的状态恢复
+  /** 点云入库方式（仅 type=scan）。 */
+  ingestMode?: ScanIngestMode
+  /** 后处理点云完成时关联的轨迹上传会话 ID。 */
+  trajectoryUploadId?: number
+  /** 归档信息。 */
+  componentType?: string
+  archiveSerial?: string
+  archiveCode?: string
 }
 
 /**
@@ -844,6 +909,11 @@ export class FileUploader {
         resumeFromState: this.options.resumeFromState,
         existingUploadId: this.options.existingUploadId,
         existingFileHash: this.fileHash,
+        ingestMode: this.options.ingestMode,
+        trajectoryUploadId: this.options.trajectoryUploadId,
+        componentType: this.options.componentType,
+        archiveSerial: this.options.archiveSerial,
+        archiveCode: this.options.archiveCode,
       })
 
       if (!this.shouldCancel) {
@@ -914,6 +984,7 @@ export class FileUploader {
         type: this.options.type,
         description: this.options.description,
         onPhaseChange: this.options.onPhaseChange,
+        trajectoryUploadId: this.options.trajectoryUploadId,
       })
 
       if (!this.shouldCancel) {

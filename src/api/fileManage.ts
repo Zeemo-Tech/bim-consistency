@@ -33,10 +33,60 @@ export type FileType =
 
 export type FileStatus =
   | 'stored'
+  | 'queued'
   | 'processing'
   | 'completed'
   | 'failed'
   | 'pending_chunks'
+
+/**
+ * 点云(scan)入库方式：
+ * - onboard_calculation 机上解算整包（含 REAL_SLAM 的 zip）
+ * - after_processing    后处理点云 LAS + 轨迹 txt
+ * - legacy              仅 LAS（兼容）
+ * - scan_trajectory     后处理轨迹 txt（作为点云附属文件上传）
+ * - ''                  空字符串等价于 legacy
+ */
+export type ScanIngestMode =
+  | ''
+  | 'onboard_calculation'
+  | 'after_processing'
+  | 'legacy'
+  | 'scan_trajectory'
+
+/** 归档：楼板/构件类型。 */
+export type ArchiveComponentType = 'YKT' | 'YTY' | 'PCLT' | 'DLB' | 'YB'
+
+export const ARCHIVE_COMPONENT_TYPES: Array<{
+  value: ArchiveComponentType
+  label: string
+}> = [
+  { value: 'YKT', label: '预制空调板 YKT' },
+  { value: 'YTY', label: '预制空调板 YTY' },
+  { value: 'PCLT', label: '预制楼梯 PCLT' },
+  { value: 'DLB', label: '叠合板 DLB' },
+  { value: 'YB', label: '叠合板 YB' },
+]
+
+export function archiveComponentTypeLabel(value?: string): string {
+  return (
+    ARCHIVE_COMPONENT_TYPES.find((item) => item.value === value)?.label ||
+    value ||
+    ''
+  )
+}
+
+/** 归档编号 = 楼层-楼板类型-归档序号（大写）。 */
+export function buildArchiveCode(
+  floor?: string,
+  componentType?: string,
+  archiveSerial?: string,
+): string {
+  const f = floor?.trim().toUpperCase() || ''
+  const c = componentType?.trim().toUpperCase() || ''
+  const s = archiveSerial?.trim().toUpperCase() || ''
+  return f && c && s ? `${f}-${c}-${s}` : ''
+}
 
 // 文件上传状态
 export interface UploadStatus {
@@ -51,6 +101,11 @@ export interface UploadStatus {
   type: FileType
   uploadId: number
   uploadedChunks: number[]
+  ingestMode?: ScanIngestMode
+  componentType?: string
+  archiveSerial?: string
+  archiveCode?: string
+  linkedBimFileId?: number | null
 }
 
 // 项目文件信息
@@ -66,6 +121,11 @@ export interface ProjectFile {
   storagePath: string
   externalKey: string
   createdAt: string
+  ingestMode?: ScanIngestMode
+  componentType?: string
+  archiveSerial?: string
+  archiveCode?: string
+  linkedBimFileId?: number | null
   meshRemesh?: MeshRemeshSummary
 }
 
@@ -80,6 +140,10 @@ export interface ProjectFileInfo {
   originalName: string
   status: FileStatus
   type: FileType
+  componentType?: string
+  archiveSerial?: string
+  archiveCode?: string
+  linkedBimFileId?: number | null
 }
 
 // 文件类型分组
@@ -124,6 +188,19 @@ export interface InitUploadParams {
   floorName?: string
   type: FileType
   producedAt?: string
+  /** 点云入库方式（仅 type=scan 生效）。 */
+  ingestMode?: ScanIngestMode
+  /** 归档信息：楼板类型 / 归档序号 / 归档编号。 */
+  componentType?: string
+  archiveSerial?: string
+  archiveCode?: string
+}
+
+// 完成上传请求参数
+export interface CompleteUploadParams {
+  fileHash?: string
+  /** 后处理点云入库时关联的轨迹上传会话 ID。 */
+  trajectoryUploadId?: number
 }
 
 // 文件上传参数
@@ -192,9 +269,16 @@ export const cancelUpload = (uploadId: number) => {
 
 /**
  * 完成文件上传（触发合并）
+ * @param fileHashOrParams 兼容旧的 fileHash 字符串，或完整参数对象
  */
-export const completeUpload = (uploadId: number, fileHash?: string) => {
-  const payload = fileHash ? { fileHash } : {}
+export const completeUpload = (
+  uploadId: number,
+  fileHashOrParams?: string | CompleteUploadParams,
+) => {
+  const payload: CompleteUploadParams =
+    typeof fileHashOrParams === 'string'
+      ? { fileHash: fileHashOrParams }
+      : { ...(fileHashOrParams || {}) }
 
   return http.request<Result<ProjectFile>>(
     'post',

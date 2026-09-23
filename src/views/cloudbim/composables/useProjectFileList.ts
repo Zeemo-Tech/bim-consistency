@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -34,31 +34,70 @@ export function useProjectFileList(kinds: FileType[]) {
   })
 
   const files = ref<ProjectFileInfo[]>([])
+  /** 未按类型过滤的全部文件，用于按归档编号解析点云关联的 BIM。 */
+  const allFiles = ref<ProjectFileInfo[]>([])
   const loading = ref(false)
   const buildingOptions = ref<string[]>([])
   /** 项目楼栋（含各自 BIM），用于「扫描点云 ↔ 设计模型」一一匹配。 */
   const buildings = ref<ProjectBuildingInfo[]>([])
 
-  async function loadFiles() {
+  /** 处理中状态的文件需要轮询刷新，避免上传后状态一直停留在「处理中」。 */
+  let pollTimer: ReturnType<typeof setTimeout> | undefined
+
+  function isPendingStatus(status: ProjectFileInfo['status']) {
+    return status === 'processing' || status === 'queued'
+  }
+
+  function schedulePoll() {
+    if (pollTimer) return
+    pollTimer = setTimeout(() => {
+      pollTimer = undefined
+      void loadFiles({ silent: true })
+    }, 5000)
+  }
+
+  function stopPoll() {
+    if (pollTimer) {
+      clearTimeout(pollTimer)
+      pollTimer = undefined
+    }
+  }
+
+  onBeforeUnmount(stopPoll)
+
+  async function loadFiles(options: { silent?: boolean } = {}) {
     if (!projectId.value) {
       files.value = []
       return
     }
 
-    loading.value = true
+    if (!options.silent) {
+      loading.value = true
+    }
     try {
       const response = await getProjectFilesByProjectId(projectId.value)
       const groups = response.data || []
+      allFiles.value = groups.flatMap((group) => group.files)
       files.value = groups
         .filter((group) => kinds.includes(group.type))
         .flatMap((group) => group.files)
+      if (files.value.some((file) => isPendingStatus(file.status))) {
+        schedulePoll()
+      } else {
+        stopPoll()
+      }
     } catch (error: any) {
-      files.value = []
-      ElMessage.error(
-        error?.response?.data?.msg || error?.message || '加载文件列表失败',
-      )
+      if (!options.silent) {
+        files.value = []
+        allFiles.value = []
+        ElMessage.error(
+          error?.response?.data?.msg || error?.message || '加载文件列表失败',
+        )
+      }
     } finally {
-      loading.value = false
+      if (!options.silent) {
+        loading.value = false
+      }
     }
   }
 
@@ -90,6 +129,14 @@ export function useProjectFileList(kinds: FileType[]) {
    * - 项目只有一个 BIM 时，直接匹配该 BIM（兜底）。
    */
   function linkedBimForFile(file: ProjectFileInfo): ProjectFileInfo | null {
+    // 1) 归档编号关联：直接按 linkedBimFileId 解析设计模型。
+    if (file.linkedBimFileId) {
+      const linked = allFiles.value.find(
+        (item) => item.type === 'bim' && item.id === file.linkedBimFileId,
+      )
+      if (linked) return linked
+    }
+    // 2) 兼容旧数据：按楼栋名匹配。
     const bims = buildings.value
       .map((item) => item.bimFile)
       .filter((bim): bim is ProjectFileInfo => Boolean(bim))
