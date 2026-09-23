@@ -217,6 +217,14 @@ class PureHttp {
         const $error = error;
         $error.isCancelRequest = Axios.isCancel($error);
 
+        // 切换后端或 token 失效时，清理本地登录态并回到登录页，避免页面卡在空白状态
+        if ($error.response?.status === 401) {
+          removeToken();
+          if (!window.location.hash.includes("/login")) {
+            window.location.hash = "#/login";
+          }
+        }
+
         // 后端在并发压力下会偶发返回 403/5xx（数据库瞬时错误），
         // 对幂等的 GET 请求做有限次退避重试，避免页面直接报错
         const retryConfig = $error.config as any;

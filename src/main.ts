@@ -9,6 +9,7 @@ import { useI18n } from '@/plugins/i18n'
 // 响应式本地存储
 import { injectResponsiveStorage } from '@/utils/responsive'
 import { useBrandStoreHook } from '@/store/modules/brand'
+import { getToken } from '@/utils/auth'
 
 // 引入重置样式
 import './style/reset.scss'
@@ -33,7 +34,10 @@ app.use(VueTippy)
 getPlatformConfig(app).then(async (config) => {
   app.use(router)
   app.use(pinia)
-  void useBrandStoreHook().fetchBrand()
+  // 仅在已登录时拉取品牌信息，避免登录前触发受保护接口导致 401
+  if (getToken()) {
+    void useBrandStoreHook().fetchBrand()
+  }
   injectResponsiveStorage(app, config)
   app.use(useI18n).use(useElementPlus).use(useVxeTable)
   app.mount('#app')
