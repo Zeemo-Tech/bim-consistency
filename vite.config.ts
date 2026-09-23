@@ -42,7 +42,7 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
           target: VITE_API_BASE_URL,
           changeOrigin: true,
           ws: true,
-          // rewrite: (path) => path.replace(/^\/api/, ''),
+          rewrite: (path) => path.replace(/^\/api/, ''),
           timeout: 1800000,
           proxyTimeout: 1800000,
         },
