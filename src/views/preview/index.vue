@@ -461,8 +461,8 @@ const sidebarCollapsed = ref(false)
 
 // 模型工具开关
 const bimControls = reactive({
-  showAxes: false,
-  showGrid: false,
+  showAxes: true,
+  showGrid: true,
   wireframe: false,
   sectionEnabled: false
 })
@@ -1802,21 +1802,19 @@ function applyHelpers() {
     ? new THREE.Box3().setFromObject(contentGroup)
     : null
   const validBox = box && !box.isEmpty() ? box : null
-  const size = validBox
-    ? validBox.getSize(new THREE.Vector3())
-    : new THREE.Vector3(10, 10, 10)
+  const modelSize = validBox ? validBox.getSize(new THREE.Vector3()) : null
+  const maxDim = modelSize
+    ? Math.max(modelSize.x, modelSize.y, modelSize.z, 0.001)
+    : 15
 
-  // 坐标轴：固定在模型底部中心，尺寸与参考页一致（15）
+  // 坐标轴：与 cloudBIM-viewer 预览模型页一致（AxesHelper、置于原点）；
+  // 长度按模型尺寸自适应，保证像参考页一样贯穿画面（基准长度 15）。
   if (!axesHelper) {
     axesHelper = new THREE.AxesHelper(15)
     scene.add(axesHelper)
   }
   axesHelper.visible = bimControls.showAxes
-  if (validBox) {
-    axesHelper.position.set(0, validBox.min.y, 0)
-  } else {
-    axesHelper.position.set(0, -Math.max(size.y, 1) / 2, 0)
-  }
+  axesHelper.scale.setScalar((maxDim * 1.5) / 15)
 
   // 参考网格：无限地面网格
   if (!gridHelper) {
