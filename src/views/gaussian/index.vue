@@ -2225,7 +2225,7 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 .gaussian-container {
   width: 100%;
-  height: calc(100vh - 120px);
+  height: 100vh;
   position: relative;
   overflow: hidden;
   background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
