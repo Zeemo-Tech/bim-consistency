@@ -198,8 +198,10 @@ export function useProjectFileList(kinds: FileType[]) {
       params: { id: file.id },
       query: {
         projectId: projectId.value,
+        fileId: file.id,
         fileName: file.originalName,
         fileType: file.type,
+        ...(file.type === 'gauss' ? { assetPath: 'meta.lcc' } : {}),
       },
     })
   }
