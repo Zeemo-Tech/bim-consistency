@@ -199,15 +199,18 @@
               :value="item.id"
             />
           </el-select>
-          <div v-if="selectedBimBuildingName" class="selection-tip">
-            当前 BIM 所属幢为“{{ selectedBimBuildingName }}”，下拉仅展示同幢 CAD
-            图纸供选择
+          <div
+            v-if="pointCloudBuildingName && pointCloudFloorName"
+            class="selection-tip"
+          >
+            当前点云所属幢层为“{{ pointCloudBuildingName }} ·
+            {{ pointCloudFloorName }}”，下拉仅展示同幢同层 CAD 图纸供选择
           </div>
           <div
             v-if="isCadStepEnabled && cadOptions.length === 0"
             class="selection-tip selection-tip--warning"
           >
-            当前 BIM 所属幢下暂无可用 CAD 图纸，请先上传同幢 CAD 文件
+            当前点云所属幢层下暂无可用 CAD 图纸，请先上传同幢同层 CAD 文件
           </div>
         </div>
 
@@ -433,10 +436,6 @@ const selectedBim = computed(
   () => bimList.value.find((item) => item.id === selectedBimId.value) || null,
 )
 
-const selectedBimBuildingName = computed(
-  () => selectedBim.value?.buildingName || '',
-)
-
 const bimSelectionMatchesAligned = computed(() => {
   if (!alignedBimId.value) return false
   return selectedBimId.value === alignedBimId.value
@@ -465,9 +464,16 @@ const cadCalibrationCompleted = computed(
 )
 
 const sameBuildingCadList = computed(() => {
-  const currentBuilding = selectedBimBuildingName.value
-  if (!currentBuilding) return cadList.value
-  return cadList.value.filter((item) => item.buildingName === currentBuilding)
+  const buildingName = String(
+    props.scanData?.pointCloudBuildingName || '',
+  ).trim()
+  const floorName = String(props.scanData?.pointCloudFloorName || '').trim()
+  if (!buildingName || !floorName) return cadList.value
+  return cadList.value.filter(
+    (item) =>
+      String(item.buildingName || '').trim() === buildingName &&
+      String(item.floorName || '').trim() === floorName,
+  )
 })
 
 const cadOptions = computed(() => sameBuildingCadList.value)
