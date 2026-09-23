@@ -2,8 +2,8 @@
   <el-dialog
     v-model="visible"
     class="simple-upload-dialog"
-    title="上传设计模型"
-    width="min(650px, calc(100vw - 82px))"
+    :title="dialogTitle"
+    width="min(700px, calc(100vw - 32px))"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
@@ -14,7 +14,7 @@
         ref="fileInput"
         class="hidden-input"
         type="file"
-        accept=".ifc"
+        :accept="accept"
         @change="handleFileChange"
       />
       <div
@@ -26,12 +26,12 @@
         <el-icon class="file-symbol" :size="24"><Document /></el-icon>
         <div class="file-details">
           <strong :title="selectedFile?.name">
-            {{ selectedFile ? selectedFile.name : '选择 IFC 模型文件' }}
+            {{ selectedFile ? selectedFile.name : filePlaceholder }}
           </strong>
           <span v-if="selectedFile">
-            {{ formatFileSize(selectedFile.size) }} · IFC
+            {{ formatFileSize(selectedFile.size) }} · {{ fileKindLabel }}
           </span>
-          <span v-else>IFC · 可将文件拖放到此处</span>
+          <span v-else>{{ fileKindLabel }} · 可将文件拖放到此处</span>
         </div>
         <div class="file-actions">
           <button
@@ -154,16 +154,58 @@ import {
   ARCHIVE_COMPONENT_TYPES,
   buildArchiveCode,
   type ArchiveComponentType,
+  type FileType,
 } from '@/api/fileManage'
 
-defineOptions({ name: 'DesignModelUploadDialog' })
+defineOptions({ name: 'ArchiveUploadDialog' })
+
+/** 各文件类型的默认文案与可接受后缀。 */
+const FILE_TYPE_PRESET: Record<
+  string,
+  { title: string; accept: string; kind: string; placeholder: string }
+> = {
+  bim: {
+    title: '上传设计模型',
+    accept: '.ifc',
+    kind: 'IFC',
+    placeholder: '选择 IFC 模型文件',
+  },
+  cad: {
+    title: '上传CAD图纸',
+    accept: '.dwg,.dxf',
+    kind: 'DWG/DXF',
+    placeholder: '选择 CAD 图纸',
+  },
+  gauss: {
+    title: '上传高斯模型',
+    accept: '.zip',
+    kind: 'ZIP',
+    placeholder: '选择高斯模型文件',
+  },
+}
 
 const props = withDefaults(
   defineProps<{
     modelValue: boolean
     projectId?: number | null
+    /** 文件类型：bim / cad / gauss。 */
+    fileType: FileType
+    /** 覆盖弹窗标题。 */
+    title?: string
+    /** 覆盖可接受后缀（如 .dwg,.dxf）。 */
+    accept?: string
+    /** 覆盖文件类型提示文案。 */
+    fileKindLabel?: string
+    /** 覆盖文件选择占位文案。 */
+    filePlaceholder?: string
   }>(),
-  { projectId: null },
+  {
+    projectId: null,
+    title: '',
+    accept: '',
+    fileKindLabel: '',
+    filePlaceholder: '',
+  },
 )
 
 const emit = defineEmits<{
@@ -175,6 +217,29 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value),
 })
+
+const preset = computed(
+  () =>
+    FILE_TYPE_PRESET[props.fileType] ?? {
+      title: '上传文件',
+      accept: '',
+      kind: '',
+      placeholder: '选择文件',
+    },
+)
+const dialogTitle = computed(() => props.title || preset.value.title)
+const accept = computed(() => props.accept || preset.value.accept)
+const fileKindLabel = computed(() => props.fileKindLabel || preset.value.kind)
+const filePlaceholder = computed(
+  () => props.filePlaceholder || preset.value.placeholder,
+)
+
+const allowedExtensions = computed(() =>
+  accept.value
+    .split(',')
+    .map((item) => item.trim().toLowerCase().replace(/^\./, ''))
+    .filter(Boolean),
+)
 
 const fileInput = ref<HTMLInputElement>()
 const selectedFile = ref<File>()
@@ -212,8 +277,11 @@ function handleDrop(event: DragEvent) {
 }
 function acceptFile(file: File) {
   const extension = file.name.split('.').pop()?.toLowerCase() || ''
-  if (extension !== 'ifc') {
-    ElMessage.warning('这里只能上传 IFC 文件')
+  if (
+    allowedExtensions.value.length &&
+    !allowedExtensions.value.includes(extension)
+  ) {
+    ElMessage.warning(`仅支持 ${fileKindLabel.value} 格式`)
     return
   }
   selectedFile.value = file
@@ -228,7 +296,7 @@ function clearFile() {
 
 async function submit() {
   if (!selectedFile.value) {
-    ElMessage.warning('请先选择 IFC 模型文件')
+    ElMessage.warning('请先选择文件')
     return
   }
   if (!props.projectId) {
@@ -251,7 +319,7 @@ async function submit() {
     const { uploadFile } = await import('@/utils/upload')
     await uploadFile({
       projectId: props.projectId,
-      type: 'bim',
+      type: props.fileType,
       file: selectedFile.value,
       buildingName: form.buildingName.trim(),
       floorName: form.floorName.trim(),
@@ -263,7 +331,7 @@ async function submit() {
       },
     })
     progress.value = 100
-    ElMessage.success('设计模型已上传并进入处理')
+    ElMessage.success('上传成功，已进入处理')
     emit('complete')
     visible.value = false
   } catch (error) {

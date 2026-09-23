@@ -64,6 +64,22 @@
               <span class="menu-status">模型浏览</span>
             </span>
           </button>
+          <button
+            class="menu-item"
+            :class="{ 'is-active': activePath === '/design/gauss' }"
+            :aria-current="activePath === '/design/gauss' ? 'page' : undefined"
+            title="高斯模型"
+            type="button"
+            @click="go('/design/gauss')"
+          >
+            <span class="menu-icon">
+              <el-icon><Grid /></el-icon>
+            </span>
+            <span class="menu-text">
+              <span class="menu-title">高斯模型</span>
+              <span class="menu-status">高斯外观</span>
+            </span>
+          </button>
         </div>
       </div>
 
@@ -95,7 +111,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Box, DataBoard, Document, MagicStick } from '@element-plus/icons-vue'
+import {
+  Box,
+  DataBoard,
+  Document,
+  Grid,
+  MagicStick,
+} from '@element-plus/icons-vue'
 
 const props = defineProps<{
   projectId: number
@@ -108,6 +130,7 @@ const router = useRouter()
 const activePath = computed(() => {
   if (route.path.startsWith('/survey')) return '/survey'
   if (route.path.startsWith('/design/bim')) return '/design/bim'
+  if (route.path.startsWith('/design/gauss')) return '/design/gauss'
   if (route.path.startsWith('/design/cad')) return '/design/cad'
   if (route.path.startsWith('/design/overview')) return '/design/overview'
   return route.path

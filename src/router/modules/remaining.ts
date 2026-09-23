@@ -116,6 +116,15 @@ export default [
       showLink: false,
     },
   },
+  {
+    path: '/design/gauss',
+    name: 'CloudBimGauss',
+    component: () => import('@/views/cloudbim/design/gauss.vue'),
+    meta: {
+      title: '高斯模型',
+      showLink: false,
+    },
+  },
   // 项目工作区 - 实测数据
   {
     path: '/survey',

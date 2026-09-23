@@ -234,10 +234,25 @@
       :project-id="projectId || null"
       @complete="handleScanComplete"
     />
-    <DesignModelUploadDialog
+    <ArchiveUploadDialog
       v-else-if="isBimList"
       v-model="uploadDialogVisible"
       :project-id="projectId || null"
+      file-type="bim"
+      @complete="handleScanComplete"
+    />
+    <ArchiveUploadDialog
+      v-else-if="isCadList"
+      v-model="uploadDialogVisible"
+      :project-id="projectId || null"
+      file-type="cad"
+      @complete="handleScanComplete"
+    />
+    <ArchiveUploadDialog
+      v-else-if="isGaussList"
+      v-model="uploadDialogVisible"
+      :project-id="projectId || null"
+      file-type="gauss"
       @complete="handleScanComplete"
     />
     <UploadDialog
@@ -265,7 +280,7 @@ import {
 import type { FileType, ProjectFileInfo } from '@/api/fileManage'
 import UploadDialog from '@/views/data/history-model/components/UploadDialog.vue'
 import DataUploadDialog from '@/views/data/components/DataUploadDialog.vue'
-import DesignModelUploadDialog from '@/views/data/components/DesignModelUploadDialog.vue'
+import ArchiveUploadDialog from '@/views/data/components/ArchiveUploadDialog.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import NeumorphicPagination from './NeumorphicPagination.vue'
 import { useProjectFileList } from '../composables/useProjectFileList'
@@ -302,6 +317,8 @@ const {
 
 const isScanList = computed(() => props.kinds.includes('scan'))
 const isBimList = computed(() => props.kinds.includes('bim'))
+const isCadList = computed(() => props.kinds.includes('cad'))
+const isGaussList = computed(() => props.kinds.includes('gauss'))
 
 /** 作用：扫描点云关联的设计模型（BIM）名称，用于列表展示与进入分析校验。 */
 function linkedBimName(file: ProjectFileInfo) {
