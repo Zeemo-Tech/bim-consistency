@@ -42,7 +42,8 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
           target: VITE_API_BASE_URL,
           changeOrigin: true,
           ws: true,
-          rewrite: (path) => path.replace(/^\/api/, ''),
+          // 远程后端接口在 /api 前缀下，保留前缀（本地后端时才需要 strip）
+          // rewrite: (path) => path.replace(/^\/api/, ''),
           timeout: 1800000,
           proxyTimeout: 1800000,
         },
