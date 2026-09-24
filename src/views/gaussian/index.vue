@@ -1,5 +1,5 @@
 <template>
-  <div class="gaussian-container">
+  <div class="gaussian-container cb-shell">
     <!-- 顶部工具栏 -->
     <div class="top-toolbar" :class="{ 'toolbar-hidden': !showToolbar }">
       <div class="toolbar-left">
@@ -104,14 +104,15 @@
       </div>
     </transition>
 
+    <!-- 右侧面板折叠按钮（固定屏幕右侧中间）-->
+    <div class="panel-toggle" @click="showPanel = !showPanel">
+      <el-icon>
+        <component :is="showPanel ? ArrowRight : ArrowLeft" />
+      </el-icon>
+    </div>
+
     <!-- 右侧控制面板 -->
     <div class="controls-panel" :class="{ 'panel-collapsed': !showPanel }">
-      <div class="panel-toggle" @click="showPanel = !showPanel">
-        <el-icon>
-          <component :is="showPanel ? ArrowRight : ArrowLeft" />
-        </el-icon>
-      </div>
-
       <div v-show="showPanel" class="panel-content">
         <!-- 渲染设置卡片 -->
         <el-card shadow="hover" class="control-card">
@@ -291,47 +292,6 @@
       </div>
     </div>
 
-    <!-- 底部信息栏 -->
-    <div class="bottom-info-bar">
-      <div class="info-section">
-        <el-icon><Aim /></el-icon>
-        <span>相机位置: X:{{ cameraPos.x }} Y:{{ cameraPos.y }} Z:{{ cameraPos.z }}</span>
-      </div>
-      <div class="info-section">
-        <el-icon><Timer /></el-icon>
-        <span>FPS: {{ fps }}</span>
-        <el-tag
-          :type="fps >= 50 ? 'success' : fps >= 30 ? 'warning' : 'danger'"
-          size="small"
-          effect="dark"
-          style="margin-left: 8px"
-        >
-          {{ fps >= 50 ? '流畅' : fps >= 30 ? '一般' : '卡顿' }}
-        </el-tag>
-        <el-tooltip :content="`实际渲染: ${renderCount}帧/秒`" placement="top">
-          <el-icon style="margin-left: 8px; cursor: help;"><InfoFilled /></el-icon>
-        </el-tooltip>
-      </div>
-      <div class="info-section">
-        <el-icon><View /></el-icon>
-        <span>
-          当前视图: {{ firstPersonEnabled ? '第一人称' : viewNames[currentView] }}
-        </span>
-      </div>
-      <div class="info-section">
-        <el-icon><Lock /></el-icon>
-        <span>碰撞保护: {{ collisionProtection ? '已开启' : '已关闭' }}</span>
-        <el-tag
-          :type="collisionAvailable ? 'success' : 'info'"
-          size="small"
-          effect="dark"
-          style="margin-left: 8px"
-        >
-          {{ collisionAvailable ? '可用' : '等待模型' }}
-        </el-tag>
-      </div>
-    </div>
-
     <!-- 快捷键提示 -->
     <transition name="slide-up">
       <div v-if="showHelp" class="help-panel">
@@ -432,12 +392,9 @@ import {
   Promotion,
   FolderOpened,
   DataAnalysis,
-  Aim,
-  Timer,
   View,
   QuestionFilled,
   Close,
-  InfoFilled,
   Lock,
 } from '@element-plus/icons-vue'
 import * as THREE from 'three'
@@ -2223,30 +2180,39 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
-.gaussian-container {
-  width: 100%;
-  height: 100vh;
-  position: relative;
-  overflow: hidden;
-  background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+@keyframes gaussian-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-// ==================== 顶部工具栏 ====================
+/* ==================== CloudBIM 统一风格 ==================== */
+.gaussian-container {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  color: var(--text-primary);
+  background: var(--bg-page);
+}
+
+// ==================== 顶部工具栏（对齐 bim-preview-header）====================
 .top-toolbar {
   position: absolute;
   top: 0;
-  left: 0;
   right: 0;
-  height: 64px;
-  background: linear-gradient(180deg, rgba(10, 10, 10, 0.95) 0%, rgba(10, 10, 10, 0) 100%);
-  backdrop-filter: blur(20px) saturate(180%);
+  left: 0;
+  z-index: 20;
   display: flex;
+  gap: var(--spacing-md);
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  z-index: 10;
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  height: 64px;
+  padding: 0 var(--spacing-md);
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color-light);
+  transition: transform var(--transition-base);
 
   &.toolbar-hidden {
     transform: translateY(-100%);
@@ -2256,377 +2222,291 @@ onBeforeUnmount(() => {
   .toolbar-center,
   .toolbar-right {
     display: flex;
+    gap: var(--spacing-sm);
     align-items: center;
-    gap: 12px;
   }
 
   :deep(.el-button) {
-    border-radius: 8px;
-    backdrop-filter: blur(10px);
-    transition: all 0.3s ease;
+    min-height: var(--control-height);
+    padding: 0 var(--spacing-compact);
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-card);
+    border-color: var(--border-color-light);
+    border-radius: var(--radius-xs);
+    transition:
+      background-color var(--transition-fast),
+      border-color var(--transition-fast),
+      color var(--transition-fast);
+  }
 
-    &:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
-    }
+  :deep(.el-button:hover) {
+    color: var(--color-primary);
+    background: var(--bg-control-hover);
+    border-color: var(--border-color-hover);
+  }
+
+  :deep(.el-button--primary) {
+    color: #fff;
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+  }
+
+  :deep(.el-button--primary:hover) {
+    color: #fff;
+    background: var(--color-primary-hover);
+    border-color: var(--color-primary-hover);
+  }
+
+  :deep(.el-button-group .el-button + .el-button) {
+    margin-left: -1px;
   }
 }
 
+// 工具栏收起后的展开按钮
 .toolbar-toggle {
   position: absolute;
   top: 0;
   left: 50%;
-  transform: translateX(-50%);
-  width: 48px;
-  height: 28px;
-  background: linear-gradient(135deg, rgba(10, 10, 10, 0.9) 0%, rgba(26, 26, 46, 0.9) 100%);
-  backdrop-filter: blur(20px);
-  border-radius: 0 0 14px 14px;
+  z-index: 19;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 48px;
+  height: 26px;
+  color: var(--color-primary);
   cursor: pointer;
-  z-index: 9;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color-light);
   border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  transform: translateX(-50%);
+  transition: all var(--transition-fast);
 
   &:hover {
-    background: linear-gradient(135deg, rgba(10, 10, 10, 1) 0%, rgba(26, 26, 46, 1) 100%);
-    height: 32px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    height: 30px;
+    color: var(--color-primary-hover);
   }
 
   .el-icon {
-    color: #409EFF;
-    font-size: 18px;
+    font-size: 16px;
   }
 }
 
 // ==================== 3D 画布 ====================
 .canvas-container {
+  position: relative;
   width: 100%;
   height: 100%;
-  background: transparent;
-  position: relative;
+  background: #0b1020;
 }
 
 // ==================== 方向控制器 ====================
 .direction-controls {
   position: absolute;
-  bottom: 80px;
-  left: 24px;
+  bottom: 88px;
+  left: var(--spacing-md);
+  z-index: 9;
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 6px;
-  z-index: 9;
+  align-items: center;
+  padding: 0;
   user-select: none;
-  padding: 12px;
-  background: rgba(10, 10, 10, 0.15);
-  backdrop-filter: blur(8px);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  transition: all 0.3s ease;
-
-  &:hover {
-    background: rgba(10, 10, 10, 0.25);
-    backdrop-filter: blur(12px);
-    border-color: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  }
+  background: transparent;
+  border: none;
+  box-shadow: none;
 
   .arrow-horizontal {
     display: flex;
-    align-items: center;
     gap: 6px;
+    align-items: center;
   }
 
   .arrow-btn {
-    width: 52px;
-    height: 52px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(12px) saturate(150%);
-    border: 1.5px solid rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
+    width: 44px;
+    height: 44px;
+    color: rgb(255 255 255 / 85%);
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    overflow: hidden;
-
-    // 光晕效果
-    &::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(circle at center, rgba(64, 158, 255, 0.1), transparent 70%);
-      opacity: 0;
-      transition: opacity 0.3s ease;
-    }
+    background: rgb(255 255 255 / 8%);
+    border: 1px solid rgb(255 255 255 / 18%);
+    border-radius: var(--radius-sm);
+    backdrop-filter: blur(6px);
+    transition: all var(--transition-fast);
 
     .el-icon {
-      color: rgba(255, 255, 255, 0.65);
-      font-size: 24px;
-      transition: all 0.3s ease;
-      position: relative;
-      z-index: 1;
+      font-size: 20px;
     }
 
     &:hover {
-      background: rgba(64, 158, 255, 0.28);
-      backdrop-filter: blur(16px) saturate(180%);
-      border-color: rgba(64, 158, 255, 0.5);
-      transform: scale(1.1);
-      box-shadow: 0 8px 24px rgba(64, 158, 255, 0.4),
-                  0 0 20px rgba(64, 158, 255, 0.2);
-
-      &::before {
-        opacity: 1;
-      }
-
-      .el-icon {
-        color: rgba(255, 255, 255, 1);
-        transform: scale(1.15);
-        filter: drop-shadow(0 0 8px rgba(64, 158, 255, 0.6));
-      }
+      color: #fff;
+      background: var(--color-primary);
+      border-color: var(--color-primary);
     }
 
     &:active {
-      transform: scale(0.98);
-      background: rgba(64, 158, 255, 0.4);
-      box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
-    }
-
-    // 方向特定的动画效果
-    &.arrow-up:hover .el-icon {
-      animation: bounce-up 0.6s ease-in-out infinite;
-    }
-
-    &.arrow-down:hover .el-icon {
-      animation: bounce-down 0.6s ease-in-out infinite;
-    }
-
-    &.arrow-left:hover .el-icon {
-      animation: bounce-left 0.6s ease-in-out infinite;
-    }
-
-    &.arrow-right:hover .el-icon {
-      animation: bounce-right 0.6s ease-in-out infinite;
+      transform: scale(0.96);
     }
   }
-}
-
-// 箭头弹跳动画
-@keyframes bounce-up {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
-}
-
-@keyframes bounce-down {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(4px); }
-}
-
-@keyframes bounce-left {
-  0%, 100% { transform: translateX(0); }
-  50% { transform: translateX(-4px); }
-}
-
-@keyframes bounce-right {
-  0%, 100% { transform: translateX(0); }
-  50% { transform: translateX(4px); }
 }
 
 // ==================== 加载覆盖层 ====================
 .loading-overlay {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(135deg, rgba(10, 10, 10, 0.98) 0%, rgba(26, 26, 46, 0.98) 100%);
-  backdrop-filter: blur(30px);
+  inset: 0;
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  background: var(--bg-card-translucent);
+  backdrop-filter: blur(6px);
 }
 
 .loading-content {
-  width: 420px;
+  width: 380px;
+  padding: var(--spacing-xl) var(--spacing-lg);
   text-align: center;
-  padding: 48px 40px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
-  border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(40px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
 
   .loading-spinner {
     position: relative;
-    width: 80px;
-    height: 80px;
-    margin: 0 auto 32px;
+    width: 56px;
+    height: 56px;
+    margin: 0 auto var(--spacing-lg);
 
     .spinner-ring {
       position: absolute;
-      width: 100%;
-      height: 100%;
-      border: 3px solid transparent;
-      border-top-color: #409EFF;
+      inset: 0;
+      border: 3px solid var(--border-color-light);
+      border-top-color: var(--color-primary);
       border-radius: 50%;
-      animation: spin 1.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
+      animation: gaussian-spin 0.9s linear infinite;
 
-      &:nth-child(2) {
-        width: 70%;
-        height: 70%;
-        top: 15%;
-        left: 15%;
-        border-top-color: #67C23A;
-        animation-duration: 2s;
-        animation-direction: reverse;
-      }
-
+      &:nth-child(2),
       &:nth-child(3) {
-        width: 40%;
-        height: 40%;
-        top: 30%;
-        left: 30%;
-        border-top-color: #E6A23C;
-        animation-duration: 1s;
+        display: none;
       }
     }
   }
 
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-
   .loading-text {
-    margin-top: 24px;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 16px;
-    font-weight: 500;
+    margin-top: var(--spacing-md);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
   }
 
   .loading-percent {
-    margin-top: 8px;
-    color: #409EFF;
-    font-size: 32px;
+    margin-top: var(--spacing-xs);
+    font-size: var(--font-size-2xl);
     font-weight: 700;
-    text-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
+    color: var(--color-primary);
   }
 
   .loading-tip {
-    margin-top: 16px;
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 14px;
     height: 20px;
-    transition: opacity 0.3s ease;
+    margin-top: var(--spacing-sm);
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    transition: opacity var(--transition-fast);
   }
 }
 
 // ==================== 右侧控制面板 ====================
+// 折叠按钮：固定在屏幕右侧中间
+.panel-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 44px;
+  color: var(--color-primary);
+  cursor: pointer;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color-light);
+  border-right: none;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-50%);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+
+  &:hover {
+    color: var(--color-primary-hover);
+    background: var(--bg-control-hover);
+  }
+
+  .el-icon {
+    font-size: 14px;
+  }
+}
+
 .controls-panel {
   position: absolute;
-  top: 84px;
-  right: 0;
-  max-height: calc(100% - 164px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  z-index: 8;
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  top: 80px;
+  right: var(--spacing-md);
+  bottom: 72px;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  overflow: visible;
+  transition: transform var(--transition-base);
 
   &.panel-collapsed {
-    transform: translateX(calc(100% - 48px));
-  }
-
-  &::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: rgba(64, 158, 255, 0.3);
-    border-radius: 3px;
-
-    &:hover {
-      background: rgba(64, 158, 255, 0.5);
-    }
-  }
-
-  .panel-toggle {
-    position: absolute;
-    left: -48px;
-    top: 24px;
-    width: 48px;
-    height: 64px;
-    background: linear-gradient(90deg, rgba(10, 10, 10, 0.9) 0%, rgba(26, 26, 46, 0.9) 100%);
-    backdrop-filter: blur(20px);
-    border-radius: 12px 0 0 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-right: none;
-
-    &:hover {
-      background: linear-gradient(90deg, rgba(10, 10, 10, 1) 0%, rgba(26, 26, 46, 1) 100%);
-      left: -50px;
-      box-shadow: -4px 0 12px rgba(0, 0, 0, 0.3);
-    }
-
-    .el-icon {
-      color: #409EFF;
-      font-size: 22px;
-    }
+    transform: translateX(calc(100% + var(--spacing-md)));
   }
 
   .panel-content {
-    padding: 24px;
     display: flex;
+    flex: 1;
     flex-direction: column;
-    gap: 20px;
+    gap: var(--spacing-md);
+    min-height: 0;
+    padding-right: 4px;
+    overflow-y: auto;
+  }
+
+  .panel-content::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .panel-content::-webkit-scrollbar-thumb {
+    background: var(--border-color-hover);
+    border-radius: var(--radius-pill);
+  }
+
+  .panel-content > * {
+    flex: 0 0 auto;
   }
 }
 
 .control-card {
-  width: 300px;
-  background: linear-gradient(135deg, rgba(10, 10, 10, 0.9) 0%, rgba(26, 26, 46, 0.9) 100%);
-  backdrop-filter: blur(30px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
   overflow: hidden;
-  transition: all 0.3s ease;
-
-  &:hover {
-    border-color: rgba(64, 158, 255, 0.3);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  }
+  background: var(--bg-card);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 
   :deep(.el-card__header) {
-    background: linear-gradient(135deg, rgba(64, 158, 255, 0.1) 0%, rgba(103, 194, 58, 0.05) 100%);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 16px 20px;
+    padding: var(--spacing-compact) var(--spacing-md);
     cursor: pointer;
-    transition: all 0.3s ease;
-
-    &:hover {
-      background: linear-gradient(135deg, rgba(64, 158, 255, 0.15) 0%, rgba(103, 194, 58, 0.08) 100%);
-    }
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border-color-light);
   }
 
   :deep(.el-card__body) {
-    padding: 20px;
+    padding: var(--spacing-md);
   }
 
   .card-header {
@@ -2637,22 +2517,22 @@ onBeforeUnmount(() => {
 
     .header-left {
       display: flex;
+      gap: var(--spacing-sm);
       align-items: center;
-      gap: 10px;
+      font-size: var(--font-size-sm);
       font-weight: 600;
-      font-size: 15px;
-      color: rgba(255, 255, 255, 0.95);
+      color: var(--text-primary);
 
       .el-icon {
-        color: #409EFF;
-        font-size: 18px;
+        font-size: 16px;
+        color: var(--color-primary);
       }
     }
 
     .expand-icon {
-      color: rgba(255, 255, 255, 0.6);
-      font-size: 16px;
-      transition: transform 0.3s ease;
+      font-size: 15px;
+      color: var(--text-tertiary);
+      transition: transform var(--transition-fast);
 
       &.is-expanded {
         transform: rotate(180deg);
@@ -2665,37 +2545,36 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 0;
-  transition: all 0.3s ease;
+  padding: var(--spacing-sm) 0;
 
   .control-label {
     display: flex;
+    gap: var(--spacing-sm);
     align-items: center;
-    gap: 10px;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 14px;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
 
     .el-icon {
-      color: #409EFF;
-      font-size: 16px;
+      font-size: 15px;
+      color: var(--color-primary);
     }
   }
 }
 
 .control-item-full {
-  padding: 10px 0;
+  padding: var(--spacing-sm) 0;
 
   .control-label {
     display: flex;
+    gap: var(--spacing-sm);
     align-items: center;
-    gap: 10px;
-    margin-bottom: 14px;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 14px;
+    margin-bottom: var(--spacing-compact);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
 
     .el-icon {
-      color: #409EFF;
-      font-size: 16px;
+      font-size: 15px;
+      color: var(--color-primary);
     }
   }
 }
@@ -2705,75 +2584,27 @@ onBeforeUnmount(() => {
   .info-content {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-sm);
   }
 
   .info-item {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 12px;
-    background: linear-gradient(135deg, rgba(64, 158, 255, 0.05) 0%, rgba(103, 194, 58, 0.02) 100%);
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    transition: all 0.3s ease;
-
-    &:hover {
-      background: linear-gradient(135deg, rgba(64, 158, 255, 0.08) 0%, rgba(103, 194, 58, 0.04) 100%);
-      border-color: rgba(64, 158, 255, 0.2);
-      transform: translateX(-2px);
-    }
+    justify-content: space-between;
+    padding: var(--spacing-sm) var(--spacing-compact);
+    background: var(--bg-control);
+    border: 1px solid var(--border-color-light);
+    border-radius: var(--radius-sm);
 
     .info-label {
-      color: rgba(255, 255, 255, 0.7);
-      font-size: 13px;
+      font-size: var(--font-size-xs);
+      color: var(--text-secondary);
     }
 
     .info-value {
-      color: #409EFF;
+      font-size: var(--font-size-xs);
       font-weight: 600;
-      font-size: 14px;
-      text-shadow: 0 2px 4px rgba(64, 158, 255, 0.2);
-    }
-  }
-}
-
-// ==================== 底部信息栏 ====================
-.bottom-info-bar {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 56px;
-  background: linear-gradient(0deg, rgba(10, 10, 10, 0.95) 0%, rgba(10, 10, 10, 0) 100%);
-  backdrop-filter: blur(20px) saturate(180%);
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  padding: 0 24px;
-  z-index: 10;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-
-  .info-section {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 13px;
-    padding: 8px 16px;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    transition: all 0.3s ease;
-
-    &:hover {
-      background: rgba(255, 255, 255, 0.05);
-      border-color: rgba(64, 158, 255, 0.2);
-    }
-
-    .el-icon {
-      color: #409EFF;
-      font-size: 16px;
+      color: var(--text-primary);
     }
   }
 }
@@ -2781,101 +2612,85 @@ onBeforeUnmount(() => {
 // ==================== 帮助面板 ====================
 .help-button {
   position: absolute;
-  bottom: 76px;
-  right: 24px;
-  width: 56px;
-  height: 56px;
-  background: linear-gradient(135deg, #409EFF 0%, #67C23A 100%);
-  border-radius: 50%;
+  right: 328px;
+  bottom: 64px;
+  z-index: 11;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: #fff;
   cursor: pointer;
-  z-index: 11;
-  box-shadow: 0 6px 20px rgba(64, 158, 255, 0.4);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--color-primary);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-md);
+  transition: all var(--transition-fast);
 
   &:hover {
-    transform: scale(1.1) rotate(90deg);
-    box-shadow: 0 8px 28px rgba(64, 158, 255, 0.6);
-  }
-
-  .el-icon {
-    color: #fff;
+    background: var(--color-primary-hover);
   }
 }
 
 .help-panel {
   position: absolute;
-  bottom: 76px;
-  right: 92px;
-  width: 320px;
-  background: linear-gradient(135deg, rgba(10, 10, 10, 0.98) 0%, rgba(26, 26, 46, 0.98) 100%);
-  backdrop-filter: blur(40px);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  overflow: hidden;
+  right: 380px;
+  bottom: 64px;
   z-index: 11;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+  width: 300px;
+  overflow: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
 
   .help-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 18px 24px;
-    background: linear-gradient(135deg, rgba(64, 158, 255, 0.15) 0%, rgba(103, 194, 58, 0.08) 100%);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    color: #fff;
+    padding: var(--spacing-compact) var(--spacing-md);
+    font-size: var(--font-size-sm);
     font-weight: 600;
-    font-size: 15px;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-color-light);
   }
 
   .help-content {
-    padding: 20px 24px;
-    max-height: 400px;
+    max-height: 380px;
+    padding: var(--spacing-sm) var(--spacing-md);
     overflow-y: auto;
-
-    &::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background: rgba(64, 158, 255, 0.3);
-      border-radius: 3px;
-    }
   }
 
   .help-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 0;
-    color: rgba(255, 255, 255, 0.85);
-    font-size: 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding: var(--spacing-sm) 0;
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color-light);
 
     &:last-child {
       border-bottom: none;
     }
 
     kbd {
-      padding: 6px 12px;
-      background: linear-gradient(135deg, rgba(64, 158, 255, 0.2) 0%, rgba(103, 194, 58, 0.1) 100%);
-      border: 1px solid rgba(64, 158, 255, 0.3);
-      border-radius: 6px;
-      font-family: 'Monaco', 'Menlo', monospace;
-      font-size: 12px;
+      padding: 2px 8px;
+      font-family: var(--font-family-number);
+      font-size: var(--font-size-xs);
       font-weight: 600;
-      color: #409EFF;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      color: var(--text-primary);
+      background: var(--bg-control);
+      border: 1px solid var(--border-color-light);
+      border-radius: var(--radius-xs);
     }
   }
 }
 
-// ==================== 动画效果 ====================
+// ==================== 过渡动画 ====================
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity var(--transition-base);
 }
 
 .fade-enter-from,
@@ -2885,30 +2700,30 @@ onBeforeUnmount(() => {
 
 .slide-up-enter-active,
 .slide-up-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--transition-base);
 }
 
 .slide-up-enter-from,
 .slide-up-leave-to {
   opacity: 0;
-  transform: translateY(20px);
+  transform: translateY(16px);
 }
 
 .slide-down-enter-active,
 .slide-down-leave-active {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
+  transition: all var(--transition-fast);
 }
 
 .slide-down-enter-from,
 .slide-down-leave-to {
-  opacity: 0;
   max-height: 0;
+  opacity: 0;
 }
 
 .slide-down-enter-to,
 .slide-down-leave-from {
-  opacity: 1;
   max-height: 1000px;
+  opacity: 1;
 }
 </style>
