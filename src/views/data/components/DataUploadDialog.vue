@@ -308,9 +308,11 @@ function clearFile() {
 
 function handleBuildingChange(value: string) {
   form.buildingName = value?.trim() ?? ''
-  form.floorName = ''
-  form.componentType = ''
-  form.archiveSerial = ''
+  // 选择楼栋后，从同幢的设计模型（BIM）自动回填楼层 / 楼板类型 / 归档序号
+  const design = matchingDesign.value
+  form.floorName = design?.floorName?.trim() || ''
+  form.componentType = design?.componentType || ''
+  form.archiveSerial = design?.archiveSerial?.trim() || ''
 }
 
 async function submit() {

@@ -67,11 +67,26 @@
         <div class="archive-fields" :class="{ 'is-three': !showFloor }">
           <div class="archive-field">
             <span>楼栋</span>
-            <el-input
+            <el-select
               v-model="form.buildingName"
-              placeholder="如 2#"
+              filterable
+              allow-create
+              default-first-option
               clearable
-            />
+              :loading="designLoading"
+              :no-data-text="
+                designLoading ? '加载中…' : '可直接输入新楼栋'
+              "
+              placeholder="选择或输入楼栋"
+              @change="handleBuildingChange"
+            >
+              <el-option
+                v-for="item in buildingOptions"
+                :key="item"
+                :label="item"
+                :value="item"
+              />
+            </el-select>
           </div>
           <div v-if="showFloor" class="archive-field">
             <span>楼层</span>
@@ -153,8 +168,10 @@ import { ElMessage } from 'element-plus'
 import {
   ARCHIVE_COMPONENT_TYPES,
   buildArchiveCode,
+  getProjectFilesByProjectId,
   type ArchiveComponentType,
   type FileType,
+  type ProjectFileInfo,
 } from '@/api/fileManage'
 
 defineOptions({ name: 'ArchiveUploadDialog' })
@@ -246,6 +263,10 @@ const selectedFile = ref<File>()
 const uploading = ref(false)
 const progress = ref(0)
 
+// 设计模型（BIM）：用于「选择楼栋后自动回填楼层 / 楼板类型 / 归档序号」
+const designModels = ref<ProjectFileInfo[]>([])
+const designLoading = ref(false)
+
 const form = reactive({
   buildingName: '',
   floorName: '',
@@ -264,8 +285,62 @@ const archiveCode = computed(() =>
 /** BIM 只有幢、没有层。 */
 const showFloor = computed(() => props.fileType !== 'bim')
 
+const archivePart = (value?: string | null) => value?.trim().toUpperCase() || ''
+
+const buildingOptions = computed(() =>
+  Array.from(
+    new Set(
+      designModels.value
+        .map((item) => item.buildingName?.trim())
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ),
+)
+
+/** 与当前所选楼栋匹配的设计模型（BIM）。 */
+const matchingDesign = computed(
+  () =>
+    designModels.value.find(
+      (item) =>
+        archivePart(item.buildingName) === archivePart(form.buildingName),
+    ) || null,
+)
+
+async function loadDesignModels() {
+  if (!props.projectId) {
+    designModels.value = []
+    return
+  }
+  designLoading.value = true
+  try {
+    const response = await getProjectFilesByProjectId(props.projectId)
+    const groups = response.data || []
+    designModels.value = groups
+      .filter((group) => group.type === 'bim')
+      .flatMap((group) => group.files)
+      .filter(
+        (file) => file.status === 'stored' && archivePart(file.buildingName),
+      )
+  } catch {
+    designModels.value = []
+  } finally {
+    designLoading.value = false
+  }
+}
+
+/** 选择楼栋后自动回填：BIM 本身即设计模型，不回填；CAD/高斯从同幢 BIM 回填。 */
+function handleBuildingChange(value: string) {
+  form.buildingName = value?.trim() ?? ''
+  if (props.fileType === 'bim') return
+  const design = matchingDesign.value
+  form.floorName = design?.floorName?.trim() || ''
+  form.componentType = (design?.componentType as ArchiveComponentType) || ''
+  form.archiveSerial = design?.archiveSerial?.trim() || ''
+}
+
 function handleOpened() {
   resetForm()
+  void loadDesignModels()
 }
 
 function chooseFile() {
