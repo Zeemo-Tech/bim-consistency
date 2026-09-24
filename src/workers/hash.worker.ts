@@ -21,11 +21,16 @@ interface WorkerResponse {
 /** 默认分片大小：2MB */
 const DEFAULT_CHUNK_SIZE = 2 * 1024 * 1024
 
-/** 大文件快速指纹阈值：1GB */
-const SPARSE_HASH_THRESHOLD = 1024 * 1024 * 1024
+/**
+ * 大文件快速指纹阈值：16MB。
+ * 高斯 / 归档 zip 动辄几百 MB，整包读取会触发 Chrome 浏览器进程读大 Blob 的崩溃
+ * （线程池前台 worker SIGTRAP）。因此只要文件偏大就改用「采样指纹」，
+ * 只读少量头 / 尾 / 均匀分布的分片，不再整包读取。
+ */
+const SPARSE_HASH_THRESHOLD = 16 * 1024 * 1024
 
-/** 大文件快速指纹最多读取 64MB */
-const SPARSE_HASH_BUDGET = 64 * 1024 * 1024
+/** 大文件快速指纹最多读取 8MB */
+const SPARSE_HASH_BUDGET = 8 * 1024 * 1024
 
 /** 最小分片大小：512KB */
 const MIN_CHUNK_SIZE = 512 * 1024
@@ -48,10 +53,10 @@ const postResponse = (response: WorkerResponse): void => {
 }
 
 const buildSparsePlan = (fileSize: number, chunkSize: number) => {
-  const sampleChunkSize = Math.min(chunkSize, 2 * 1024 * 1024)
+  const sampleChunkSize = Math.min(chunkSize, 1024 * 1024)
   const sampleCount = Math.max(
     3,
-    Math.min(32, Math.ceil(SPARSE_HASH_BUDGET / sampleChunkSize)),
+    Math.min(8, Math.ceil(SPARSE_HASH_BUDGET / sampleChunkSize)),
   )
   const maxOffset = Math.max(fileSize - sampleChunkSize, 0)
   const offsets = new Set<number>([0, maxOffset])

@@ -145,20 +145,49 @@ const resolveUploadConcurrency = (totalChunks: number): number => {
 }
 
 /**
+ * 大文件元数据指纹阈值：16MB。
+ * 超过该大小不再读取文件内容（避免浏览器进程读大 Blob 崩溃），
+ * 用「大小 + 修改时间 + 文件名」做稳定指纹，去重/续传仍可工作。
+ */
+const METADATA_FINGERPRINT_THRESHOLD = 16 * 1024 * 1024
+
+/** FNV-1a 32 位哈希（十六进制），仅用于把文件名压缩成短串 */
+const fnv1aHex = (input: string): string => {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+const buildMetadataFingerprint = (file: File): string =>
+  `meta-${file.size}-${file.lastModified}-${fnv1aHex(file.name)}`
+
+/**
  * 计算文件 hash - 使用 Web Worker 避免阻塞主线程
  */
 export const calculateFileHash = (
   file: File,
   onHashProgress?: (progress: number) => void,
 ): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const cachedHash = getCachedFileHash(file)
-    if (cachedHash) {
-      onHashProgress?.(100)
-      resolve(cachedHash)
-      return
-    }
+  const cachedHash = getCachedFileHash(file)
+  if (cachedHash) {
+    onHashProgress?.(100)
+    return Promise.resolve(cachedHash)
+  }
 
+  // 大文件（高斯/归档 zip 动辄数百 MB）不读取内容：仅用「大小 + 修改时间 + 文件名」
+  // 生成元数据指纹。整包读取会触发浏览器进程读大 Blob 的崩溃
+  // （Crash 报告：Process Google Chrome / ThreadPoolForegroundWorker / SIGTRAP）。
+  if (file.size >= METADATA_FINGERPRINT_THRESHOLD) {
+    const hash = buildMetadataFingerprint(file)
+    saveCachedFileHash(file, hash)
+    onHashProgress?.(100)
+    return Promise.resolve(hash)
+  }
+
+  return new Promise((resolve, reject) => {
     // 创建 Web Worker
     const worker = new Worker(
       new URL('../workers/hash.worker.ts', import.meta.url),
