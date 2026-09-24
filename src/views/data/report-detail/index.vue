@@ -855,7 +855,7 @@ const toggleReportFullscreen = async () => {
     reportFullscreen.value = !reportFullscreen.value
   }
 }
-const exportWatermarkText = computed(() => '中建八局')
+const exportWatermarkText = computed(() => '实模一致')
 const exportFilename = computed(() => {
   const projectName =
     reviewForm.projectName?.trim() || report.value?.projectName || '项目'

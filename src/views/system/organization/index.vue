@@ -32,7 +32,7 @@
       <div class="summary-card summary-card--primary">
         <div class="count">
           <span class="desc">集团总部</span>
-          <span class="num">{{ currentOrganization?.name || '中建八局' }}</span>
+          <span class="num">{{ currentOrganization?.name || '实模一致' }}</span>
         </div>
         <div class="icon">
           <el-icon><OfficeBuilding /></el-icon>
