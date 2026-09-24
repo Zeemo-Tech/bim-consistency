@@ -79,6 +79,23 @@
       <div class="viewer-region" :class="`theme-${backgroundTheme}`">
         <div ref="viewerContainerRef" class="three-viewer-container" />
 
+        <!-- 视口坐标轴 X Y Z -->
+        <PointcloudAxesTriad
+          v-show="bimControls.showAxes"
+          class="viewer-axes-triad"
+          :camera="viewerCamera"
+        />
+
+        <!-- 视角导航立方体 -->
+        <PointcloudViewCube
+          class="viewer-view-cube"
+          :camera="viewerCamera"
+          @select-direction="setViewDirection"
+          @orbit="orbitView"
+          @roll="rollView"
+          @home="resetView"
+        />
+
         <!-- 测量工具条 -->
         <div v-if="analysisMode !== 'none'" class="measure-analysis-toolbar">
           <strong>{{ analysisTitle }}</strong>
@@ -378,6 +395,8 @@ import { Line2 } from 'three/examples/jsm/lines/webgpu/Line2.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
 import { InfiniteGroundGrid } from '@/utils/three/infiniteGroundGrid'
 import MeasurementToolbar from './MeasurementToolbar.vue'
+import PointcloudAxesTriad from './PointcloudAxesTriad.vue'
+import PointcloudViewCube from './PointcloudViewCube.vue'
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
@@ -485,6 +504,8 @@ const viewerContainerRef = ref<HTMLDivElement | null>(null)
 let renderer: WebGPURenderer | null = null
 let scene: THREE.Scene | null = null
 let camera: THREE.PerspectiveCamera | null = null
+// 供视角导航立方体 / 视口坐标轴读取的响应式相机引用
+const viewerCamera = ref<THREE.PerspectiveCamera | null>(null)
 let controls: OrbitControls | null = null
 let contentGroup: THREE.Group | null = null
 let clippingGroup: ClippingGroup | null = null
@@ -2625,6 +2646,65 @@ const resetView = () => {
   ElMessage.success('视角已重置')
 }
 
+// 模型最大尺寸（用于视角导航切换时的合适距离）
+const getViewerMaxDim = () => {
+  if (!contentGroup) return 0
+  const box = new THREE.Box3().setFromObject(contentGroup)
+  if (box.isEmpty()) return 0
+  const size = box.getSize(new THREE.Vector3())
+  return Math.max(size.x, size.y, size.z)
+}
+
+// 视角导航立方体：点击面 / 棱 / 角切换标准视角
+const setViewDirection = (direction: [number, number, number]) => {
+  if (!camera || !controls) return
+  const target = controls.target.clone()
+  const dir = new THREE.Vector3(...direction)
+  if (dir.lengthSq() < 1e-8) return
+  dir.normalize()
+  const distance = Math.max(
+    camera.position.distanceTo(target),
+    getViewerMaxDim() * 0.5,
+    1,
+  )
+  camera.up.set(0, 1, 0)
+  if (Math.abs(dir.y) > 0.99) {
+    camera.up.set(0, 0, dir.y > 0 ? -1 : 1)
+  }
+  camera.position.copy(target.clone().addScaledVector(dir, distance))
+  camera.lookAt(target)
+  controls.update()
+  requestRender()
+}
+
+// 视角导航立方体：拖拽 / 方向键轨道旋转
+const orbitView = (delta: { lon: number; lat: number }) => {
+  if (!camera || !controls) return
+  const target = controls.target.clone()
+  const offset = camera.position.clone().sub(target)
+  const spherical = new THREE.Spherical().setFromVector3(offset)
+  spherical.theta -= THREE.MathUtils.degToRad(delta.lon)
+  spherical.phi -= THREE.MathUtils.degToRad(delta.lat)
+  spherical.phi = THREE.MathUtils.clamp(spherical.phi, 0.001, Math.PI - 0.001)
+  offset.setFromSpherical(spherical)
+  camera.position.copy(target.clone().add(offset))
+  camera.up.set(0, 1, 0)
+  camera.lookAt(target)
+  controls.update()
+  requestRender()
+}
+
+// 视角导航立方体：绕视线轴旋转 90°
+const rollView = (direction: -1 | 1) => {
+  if (!camera) return
+  const forward = new THREE.Vector3()
+  camera.getWorldDirection(forward)
+  camera.up.applyAxisAngle(forward, direction * (Math.PI / 2))
+  if (controls?.target) camera.lookAt(controls.target)
+  controls?.update()
+  requestRender()
+}
+
 const toggleFullscreen = () => {
   if (!isFullscreen.value) {
     // 进入全屏
@@ -2717,6 +2797,7 @@ async function initThree() {
   // 创建相机
   camera = new THREE.PerspectiveCamera(50, 1, 0.01, 5000)
   camera.position.set(0, 1.5, 4)
+  viewerCamera.value = camera
 
   // 创建WebGPU渲染器
   renderer = new WebGPURenderer({ antialias: true })
@@ -3240,6 +3321,7 @@ function disposeResources() {
   resizeObserver = null
   controls = null
   camera = null
+  viewerCamera.value = null
   scene = null
   renderer = null
   contentGroup = null
@@ -4375,6 +4457,23 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden;
   background: #0b1020;
+}
+
+/* 视口坐标轴 X Y Z */
+.viewer-axes-triad {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 25;
+  pointer-events: none;
+}
+
+/* 视角导航立方体 */
+.viewer-view-cube {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 60;
 }
 
 .viewer-region .component-tree-panel {
