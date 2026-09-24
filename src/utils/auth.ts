@@ -149,36 +149,54 @@ export function setOrganizationId(id: number | null) {
   }
 }
 
-/** 初始化组织ID - 从 localStorage 恢复或从服务器获取 */
+/** 初始化组织ID - 优先使用缓存，但会校验缓存组织是否属于当前用户，失效时自动切换到有效组织 */
 export async function initOrganizationId() {
-  // 先尝试从 localStorage 获取
-  const cachedId = getOrganizationId();
-  if (cachedId) {
-    useUserStoreHook().SET_ORGANIZATIONID(cachedId);
-    return cachedId;
-  }
+  const cachedId = getOrganizationId()
+  const token = getToken()
 
-  // 如果没有缓存，且用户已登录，则从服务器获取
-  const token = getToken();
-  if (token && token.accessToken) {
-    try {
-      // 动态导入避免循环依赖
-      const { getUserOrganizations } = await import('@/api/user');
-      const res = await getUserOrganizations(1, 1);
-
-      if (res?.data?.list && res.data.list.length > 0) {
-        const firstOrgId = res.data.list[0]?.organization?.id;
-        if (firstOrgId) {
-          setOrganizationId(firstOrgId);
-          return firstOrgId;
-        }
-      }
-    } catch (error) {
-      console.error('初始化组织ID失败:', error);
+  // 未登录：暂时保留缓存（登录成功后会重新校验）
+  if (!token || !token.accessToken) {
+    if (cachedId) {
+      useUserStoreHook().SET_ORGANIZATIONID(cachedId)
+      return cachedId
     }
+    return null
   }
 
-  return null;
+  try {
+    const { getUserOrganizations } = await import('@/api/user')
+    // 拉取全部组织用于校验缓存是否仍然有效
+    const res = await getUserOrganizations(1, 100)
+    const list = res?.data?.list ?? []
+    const validIds = list
+      .map(item => item?.organization?.id)
+      .filter((id): id is number => typeof id === 'number' && id > 0)
+
+    // 用户没有任何组织
+    if (validIds.length === 0) {
+      setOrganizationId(null)
+      return null
+    }
+
+    // 缓存的组织仍然属于当前用户 → 继续使用
+    if (cachedId && validIds.includes(cachedId)) {
+      useUserStoreHook().SET_ORGANIZATIONID(cachedId)
+      return cachedId
+    }
+
+    // 无缓存，或缓存已失效（被移除 / 无权限）→ 自动改用第一个有效组织
+    const fallbackId = validIds[0]
+    setOrganizationId(fallbackId)
+    return fallbackId
+  } catch (error) {
+    console.error('初始化组织ID失败:', error)
+    // 网络异常时退回缓存，避免直接清空导致无法使用
+    if (cachedId) {
+      useUserStoreHook().SET_ORGANIZATIONID(cachedId)
+      return cachedId
+    }
+    return null
+  }
 }
 
 /** 格式化token（jwt格式） */
