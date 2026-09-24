@@ -87,22 +87,56 @@
         tabindex="0"
         :aria-label="`${props.title}文件列表`"
       >
-        <el-table-column label="文件名称" min-width="240" align="left">
+        <el-table-column label="文件名称" min-width="220" align="left">
           <template #default="{ row }">
             <div class="bim-name-cell">
               <span :title="row.originalName">{{ row.originalName }}</span>
-              <small class="bim-name-meta">
-                {{ row.buildingName || '—' }} · {{ row.floorName || '—' }}
-              </small>
-              <small
-                v-if="isScanList"
-                class="bim-name-related"
-                :class="{ 'is-ready': linkedBimName(row) }"
-                :title="linkedBimName(row) || '未匹配设计模型'"
-              >
-                关联：{{ linkedBimName(row) || '未匹配设计模型' }}
-              </small>
             </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="幢号" min-width="110" align="left">
+          <template #default="{ row }">
+            {{ row.buildingName || '—' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="楼层" min-width="90" align="left">
+          <template #default="{ row }">
+            {{ row.floorName || '—' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="构件类型" min-width="150" align="left">
+          <template #default="{ row }">
+            {{ archiveComponentTypeLabel(row.componentType) || '—' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="归档编号" min-width="160" align="left">
+          <template #default="{ row }">
+            <span class="bim-code-text" :title="row.archiveCode || ''">
+              {{ row.archiveCode || '—' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-if="isScanList"
+          label="关联设计模型"
+          min-width="180"
+          align="left"
+        >
+          <template #default="{ row }">
+            <span
+              class="bim-related"
+              :class="{ 'is-ready': linkedBimName(row) }"
+              :title="linkedBimName(row) || '未匹配设计模型'"
+            >
+              {{ linkedBimName(row) || '未匹配设计模型' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" min-width="96" align="left">
+          <template #default="{ row }">
+            <el-tag size="small" :type="statusTagType(row.status)">
+              {{ statusText(row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="文件大小" min-width="100" align="left">
@@ -113,13 +147,6 @@
         <el-table-column label="上传时间" min-width="160" align="left">
           <template #default="{ row }">
             {{ formatDate(row.createdAt) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" min-width="96" align="left">
-          <template #default="{ row }">
-            <el-tag size="small" :type="statusTagType(row.status)">
-              {{ statusText(row.status) }}
-            </el-tag>
           </template>
         </el-table-column>
         <el-table-column
@@ -139,8 +166,9 @@
         </el-table-column>
         <el-table-column
           label="操作"
-          :width="isScanList ? 312 : 172"
+          :width="isScanList ? 236 : 150"
           align="right"
+          fixed="right"
           class-name="bim-operation-column"
           label-class-name="bim-operation-column"
         >
@@ -166,7 +194,7 @@
               </button>
               <button
                 v-if="isScanList"
-                class="bim-action-button bim-action-button--text"
+                class="bim-action-button"
                 type="button"
                 title="四分屏"
                 aria-label="四分屏"
@@ -174,7 +202,6 @@
                 @click="openFourScreen(row)"
               >
                 <el-icon><Grid /></el-icon>
-                <span>四分屏</span>
               </button>
               <button
                 class="bim-action-button"
@@ -277,7 +304,11 @@ import {
   Upload,
   View,
 } from '@element-plus/icons-vue'
-import type { FileType, ProjectFileInfo } from '@/api/fileManage'
+import {
+  archiveComponentTypeLabel,
+  type FileType,
+  type ProjectFileInfo,
+} from '@/api/fileManage'
 import UploadDialog from '@/views/data/history-model/components/UploadDialog.vue'
 import DataUploadDialog from '@/views/data/components/DataUploadDialog.vue'
 import ArchiveUploadDialog from '@/views/data/components/ArchiveUploadDialog.vue'
@@ -544,24 +575,25 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.bim-name-meta {
-  display: block;
-  margin-top: 2px;
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-}
-
-.bim-name-related {
+.bim-code-text {
   display: block;
   overflow: hidden;
-  margin-top: 2px;
-  font-size: var(--font-size-xs);
-  color: var(--color-warning, #b45309);
   text-overflow: ellipsis;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 
-.bim-name-related.is-ready {
+.bim-related {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-xs);
+  color: var(--color-warning, #b45309);
+  white-space: nowrap;
+}
+
+.bim-related.is-ready {
   color: var(--color-success, #15803d);
 }
 
