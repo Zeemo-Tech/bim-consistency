@@ -78,9 +78,89 @@
               role="group"
               aria-label="点云着色"
             >
-              <button type="button" class="on" aria-pressed="true" disabled>
+              <button
+                type="button"
+                :class="{ on: colorMode === 'rgb' }"
+                :aria-pressed="colorMode === 'rgb'"
+                @click="colorMode = 'rgb'"
+              >
                 真彩
               </button>
+              <button
+                type="button"
+                :class="{ on: colorMode === 'table-class' }"
+                :aria-pressed="colorMode === 'table-class'"
+                :disabled="!colorAttributeAvailable"
+                :title="
+                  colorAttributeAvailable
+                    ? '台面分色'
+                    : '需先对点云做台面预处理'
+                "
+                @click="colorMode = 'table-class'"
+              >
+                台面分色
+              </button>
+              <button
+                type="button"
+                :class="{ on: colorMode === 'intensity' }"
+                :aria-pressed="colorMode === 'intensity'"
+                :disabled="!colorAttributeAvailable"
+                :title="colorAttributeAvailable ? '强度' : '该点云不含强度属性'"
+                @click="colorMode = 'intensity'"
+              >
+                强度
+              </button>
+            </div>
+          </div>
+
+          <!-- 色带（选择强度时可用） -->
+          <div v-if="colorMode === 'intensity'" class="pc-display-row">
+            <div
+              class="pc-segmented pc-ramp-modes"
+              role="group"
+              aria-label="色带"
+            >
+              <button
+                v-for="item in RAMP_LABELS"
+                :key="item.key"
+                type="button"
+                :class="{ on: colorRamp === item.key }"
+                @click="colorRamp = item.key"
+              >
+                {{ item.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 颜色轴（强度时显示，左低右高） -->
+          <div v-if="colorMode === 'intensity'" class="pc-display-row">
+            <div class="pc-colorbar" aria-label="强度颜色轴">
+              <span class="pc-colorbar__min">
+                {{ colorRangeLabel(colorRange[0]) }}
+              </span>
+              <div
+                class="pc-colorbar__bar"
+                :style="{ background: RAMP_GRADIENTS[colorRamp] }"
+              />
+              <span class="pc-colorbar__max">
+                {{ colorRangeLabel(colorRange[1]) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- 台面分色图例 -->
+          <div v-if="colorMode === 'table-class'" class="pc-display-row">
+            <div
+              class="pc-category-legend"
+              role="group"
+              aria-label="台面分色图例"
+            >
+              <span class="pc-legend-item">
+                <i class="pc-legend-dot is-table" />台面
+              </span>
+              <span class="pc-legend-item">
+                <i class="pc-legend-dot is-body" />主体
+              </span>
             </div>
           </div>
 
@@ -281,6 +361,13 @@ type PointCloudViewerExpose = InstanceType<typeof PointCloudViewer> & {
   setPointSize?: (size: number) => void
   setShowGrid?: (show: boolean) => void
   setEdlEnabled?: (enabled: boolean) => void
+  setColorMode?: (
+    mode: ScanColorMode,
+    ramp?: ScanColorRamp,
+    range?: [number, number] | null,
+  ) => void
+  getColorRange?: () => [number, number]
+  isColorAttributeAvailable?: () => boolean
   setTilesErrorTargetOverride?: (value: number | null) => void
   requestRender?: () => void
 }
@@ -315,6 +402,27 @@ const showGrid = ref(false)
 const edlEnabled = ref(true)
 const pointSize = ref(2.5)
 let scanMaxDim = 10
+
+// 点云着色：真彩 / 台面分色 / 强度 + 色带 + 颜色轴
+type ScanColorMode = 'rgb' | 'table-class' | 'intensity'
+type ScanColorRamp = 'grayscale' | 'spectrum' | 'viridis'
+const colorMode = ref<ScanColorMode>('rgb')
+const colorRamp = ref<ScanColorRamp>('spectrum')
+const colorRange = ref<[number, number]>([0, 1])
+const colorAttributeAvailable = ref(false)
+const RAMP_LABELS: Array<{ key: ScanColorRamp; label: string }> = [
+  { key: 'grayscale', label: '灰度' },
+  { key: 'spectrum', label: '彩虹' },
+  { key: 'viridis', label: '紫黄' },
+]
+const RAMP_GRADIENTS: Record<ScanColorRamp, string> = {
+  grayscale: 'linear-gradient(90deg,#000,#fff)',
+  spectrum:
+    'linear-gradient(90deg,#0000ff,#00ffff,#00ff00,#ffff00,#ff0000)',
+  viridis: 'linear-gradient(90deg,#440154,#31688e,#35b779,#fde725)',
+}
+const colorRangeLabel = (value: number) =>
+  Number.isFinite(value) ? value.toFixed(Math.abs(value) >= 100 ? 0 : 1) : '—'
 
 // 测量工具
 type AnalysisMode = 'none' | 'distance' | 'locate' | 'area'
@@ -1653,8 +1761,44 @@ function handlePointcloudWorldReady() {
   pointcloudViewerRef.value?.setPointSize?.(pointSize.value)
   pointcloudViewerRef.value?.setShowGrid?.(showGrid.value)
   pointcloudViewerRef.value?.setEdlEnabled?.(edlEnabled.value)
+  applyColorMode()
+  scheduleColorAvailabilityRefresh()
   // 与参考页一致：点云 LOD errorTarget = 32
   pointcloudViewerRef.value?.setTilesErrorTargetOverride?.(32)
+}
+
+/** 把当前着色模式/色带/范围下发给渲染器 */
+const applyColorMode = () => {
+  pointcloudViewerRef.value?.setColorMode?.(
+    colorMode.value,
+    colorRamp.value,
+    colorRange.value,
+  )
+}
+
+/** 刷新“强度/台面分色”是否可用（依赖 tiles 的 INTENSITY/CLASSIFICATION 属性） */
+const refreshColorAvailability = () => {
+  const viewer = pointcloudViewerRef.value
+  colorAttributeAvailable.value =
+    viewer?.isColorAttributeAvailable?.() ?? false
+  const range = viewer?.getColorRange?.()
+  if (range && Number.isFinite(range[0]) && Number.isFinite(range[1])) {
+    colorRange.value = range
+  }
+}
+
+let colorAvailabilityTimers: number[] = []
+const clearColorAvailabilityTimers = () => {
+  colorAvailabilityTimers.forEach((timer) => clearTimeout(timer))
+  colorAvailabilityTimers = []
+}
+const scheduleColorAvailabilityRefresh = () => {
+  clearColorAvailabilityTimers()
+  ;[600, 1600, 3200].forEach((delay) => {
+    colorAvailabilityTimers.push(
+      window.setTimeout(refreshColorAvailability, delay),
+    )
+  })
 }
 
 const waitForViewerReady = async () => {
@@ -1743,6 +1887,7 @@ watch(backgroundTheme, () => applyBackgroundTheme())
 watch(showGrid, (value) => pointcloudViewerRef.value?.setShowGrid?.(value))
 watch(pointSize, (value) => pointcloudViewerRef.value?.setPointSize?.(value))
 watch(edlEnabled, (value) => pointcloudViewerRef.value?.setEdlEnabled?.(value))
+watch([colorMode, colorRamp], () => applyColorMode())
 watch(analysisMode, (mode) => {
   const dom = getViewerRendererDom()
   if (dom) dom.style.cursor = mode === 'none' ? '' : 'crosshair'
@@ -1781,6 +1926,7 @@ onBeforeUnmount(() => {
   clearAnalysis()
   unbindClipInteractions()
   clearBoundsHelpers()
+  clearColorAvailabilityTimers()
   pointcloudViewerRef.value?.setClipBox?.(null)
   pointcloudViewerRef.value?.cleanup?.()
 })
@@ -2214,6 +2360,68 @@ onBeforeUnmount(() => {
   color: var(--viewer-accent);
   background: rgb(255 255 255 / 14%);
   box-shadow: 0 0 0 1px rgb(255 255 255 / 12%);
+}
+
+.pc-ramp-modes button {
+  min-width: 44px;
+}
+
+/* 强度颜色轴 */
+.pc-colorbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  min-width: 200px;
+}
+
+.pc-colorbar__bar {
+  flex: 1;
+  height: 10px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 4px;
+}
+
+.pc-colorbar__min,
+.pc-colorbar__max {
+  min-width: 28px;
+  font-size: var(--font-size-xs);
+  color: rgb(255 255 255 / 72%);
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-colorbar__max {
+  text-align: right;
+}
+
+/* 台面分色图例 */
+.pc-category-legend {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.pc-legend-item {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: var(--font-size-xs);
+  color: rgb(255 255 255 / 78%);
+}
+
+.pc-legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.pc-legend-dot.is-table {
+  background: #db5c38;
+}
+
+.pc-legend-dot.is-body {
+  background: #3d94e6;
 }
 
 .pc-header-controls .pc-segmented {

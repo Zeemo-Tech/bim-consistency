@@ -201,6 +201,191 @@ let pointcloudGroundGridVisible = false
 let edlPipeline: PointCloudEdlPipeline | null = null
 let edlPipelineWebgl: PointCloudEdlPipelineWebgl | null = null
 let edlEnabled = true
+
+// ==================== 点云着色模式（真彩 / 强度 / 台面分色）====================
+type PointCloudColorMode = 'rgb' | 'intensity' | 'table-class'
+type PointCloudColorRamp = 'grayscale' | 'spectrum' | 'viridis'
+const COLOR_MODE_INDEX: Record<PointCloudColorMode, number> = {
+  rgb: 0,
+  intensity: 1,
+  'table-class': 2,
+}
+const COLOR_RAMP_INDEX: Record<PointCloudColorRamp, number> = {
+  grayscale: 0,
+  spectrum: 1,
+  viridis: 2,
+}
+let pointColorMode: PointCloudColorMode = 'rgb'
+let pointColorRamp: PointCloudColorRamp = 'spectrum'
+let pointColorRange: [number, number] = [0, 1]
+let pointAttributeAvailable = false
+const colorModeUniforms = {
+  uColorMode: { value: 0 },
+  uColorRamp: { value: 1 },
+  uRangeMin: { value: 0 },
+  uRangeMax: { value: 1 },
+}
+const colorModeMaterials = new WeakSet<THREE.Material>()
+
+const POINT_COLOR_VERTEX_DECL = `
+attribute float aIntensity;
+attribute float aClass;
+uniform int uColorMode;
+uniform int uColorRamp;
+uniform float uRangeMin;
+uniform float uRangeMax;
+varying vec3 vModeColor;
+vec3 pointRampColor(float t) {
+  t = clamp(t, 0.0, 1.0);
+  if (uColorRamp == 0) { return vec3(t); }
+  if (uColorRamp == 2) {
+    const vec3 c0 = vec3(0.267, 0.005, 0.329);
+    const vec3 c1 = vec3(0.188, 0.408, 0.556);
+    const vec3 c2 = vec3(0.208, 0.718, 0.472);
+    const vec3 c3 = vec3(0.993, 0.906, 0.144);
+    float x = t * 3.0;
+    if (x < 1.0) return mix(c0, c1, x);
+    if (x < 2.0) return mix(c1, c2, x - 1.0);
+    return mix(c2, c3, x - 2.0);
+  }
+  return clamp(vec3(
+    abs(t * 6.0 - 3.0) - 1.0,
+    2.0 - abs(t * 6.0 - 2.0),
+    2.0 - abs(t * 6.0 - 4.0)
+  ), 0.0, 1.0);
+}
+`
+const POINT_COLOR_VERTEX_BODY = `
+vModeColor = vec3(1.0);
+if (uColorMode == 1) {
+  float t = (aIntensity - uRangeMin) / max(uRangeMax - uRangeMin, 1e-5);
+  vModeColor = pointRampColor(t);
+} else if (uColorMode == 2) {
+  vModeColor = aClass > 0.5 ? vec3(0.86, 0.36, 0.22) : vec3(0.24, 0.58, 0.90);
+}
+`
+
+const attachColorModeShader = (mat: THREE.Material) => {
+  if (!mat || colorModeMaterials.has(mat)) return
+  const pointMat = mat as THREE.PointsMaterial & {
+    onBeforeCompile?: (shader: any) => void
+  }
+  const previous = pointMat.onBeforeCompile
+  pointMat.onBeforeCompile = (shader: any) => {
+    previous?.call(pointMat, shader)
+    shader.uniforms.uColorMode = colorModeUniforms.uColorMode
+    shader.uniforms.uColorRamp = colorModeUniforms.uColorRamp
+    shader.uniforms.uRangeMin = colorModeUniforms.uRangeMin
+    shader.uniforms.uRangeMax = colorModeUniforms.uRangeMax
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\n${POINT_COLOR_VERTEX_DECL}`)
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>\n${POINT_COLOR_VERTEX_BODY}`,
+      )
+    const fragmentDecl = `
+varying vec3 vModeColor;
+uniform int uColorMode;
+`
+    const fragmentOverride = `if (uColorMode > 0) diffuseColor.rgb = vModeColor;\n`
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `#include <common>\n${fragmentDecl}`,
+    )
+    if (shader.fragmentShader.includes('#include <opaque_fragment>')) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `${fragmentOverride}#include <opaque_fragment>`,
+      )
+    } else {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <color_fragment>',
+        `${fragmentOverride}#include <color_fragment>`,
+      )
+    }
+  }
+  pointMat.needsUpdate = true
+  colorModeMaterials.add(mat)
+}
+
+// 从 pnts 的 batch table 读取 INTENSITY / CLASSIFICATION，写成顶点属性
+const readBatchScalar = (batchTable: any, key: string): number[] | null => {
+  if (!batchTable || typeof batchTable.getData !== 'function') return null
+  const desc = batchTable.header?.[key]
+  if (!desc) return null
+  try {
+    const data = batchTable.getData(key, desc.componentType, desc.type)
+    return data ? Array.from(data as ArrayLike<number>) : null
+  } catch {
+    return null
+  }
+}
+
+const applyPointAttributes = (root: any) => {
+  let intensityMin = Infinity
+  let intensityMax = -Infinity
+  let anyAttribute = false
+  root?.traverse?.((obj: any) => {
+    if (!obj?.isPoints || !obj.geometry) return
+    const geometry = obj.geometry as THREE.BufferGeometry
+    if (geometry.getAttribute('aIntensity') || geometry.getAttribute('aClass'))
+      return
+    const batchTable = obj.batchTable ?? obj.userData?.batchTable
+    const count: number = batchTable?.count ?? geometry.getAttribute('position')?.count ?? 0
+    if (!count) return
+    const intensity = readBatchScalar(batchTable, 'INTENSITY')
+    const classification = readBatchScalar(batchTable, 'CLASSIFICATION')
+    if (intensity && intensity.length === count) {
+      const attribute = new Float32Array(count)
+      for (let i = 0; i < count; i++) {
+        const value = Number(intensity[i])
+        attribute[i] = value
+        if (value < intensityMin) intensityMin = value
+        if (value > intensityMax) intensityMax = value
+      }
+      geometry.setAttribute('aIntensity', new THREE.BufferAttribute(attribute, 1))
+      anyAttribute = true
+    }
+    if (classification && classification.length === count) {
+      const attribute = new Float32Array(count)
+      for (let i = 0; i < count; i++) {
+        attribute[i] = Number(classification[i]) === 2 ? 1 : 0
+      }
+      geometry.setAttribute('aClass', new THREE.BufferAttribute(attribute, 1))
+      anyAttribute = true
+    }
+  })
+  if (intensityMin <= intensityMax && Number.isFinite(intensityMin)) {
+    pointColorRange = [intensityMin, intensityMax]
+    colorModeUniforms.uRangeMin.value = intensityMin
+    colorModeUniforms.uRangeMax.value = intensityMax
+  }
+  if (anyAttribute) pointAttributeAvailable = true
+}
+
+const syncColorModeUniforms = () => {
+  colorModeUniforms.uColorMode.value = COLOR_MODE_INDEX[pointColorMode]
+  colorModeUniforms.uColorRamp.value = COLOR_RAMP_INDEX[pointColorRamp]
+  colorModeUniforms.uRangeMin.value = pointColorRange[0]
+  colorModeUniforms.uRangeMax.value = pointColorRange[1]
+}
+
+/** 作用：切换点云着色模式（真彩 / 强度 / 台面分色），并可选设置色带与范围。 */
+const setColorMode = (
+  mode: PointCloudColorMode,
+  ramp?: PointCloudColorRamp,
+  range?: [number, number] | null,
+) => {
+  pointColorMode = mode
+  if (ramp) pointColorRamp = ramp
+  if (range && Number.isFinite(range[0]) && Number.isFinite(range[1])) {
+    pointColorRange = range
+  }
+  syncColorModeUniforms()
+  if (pointcloudScene) applyMaterialMode(pointcloudScene)
+  requestRender()
+}
+
 let lastTilesErrorTarget = -1
 let rendererReady = false
 let initPromise: Promise<void> | null = null
@@ -298,6 +483,7 @@ const getOrCreateUnlitMaterialWebGL = (
     if (src?.map) next.map = src.map
     applySharedMaterialFlags(next, src)
     next.toneMapped = false
+    attachColorModeShader(next)
     mat = next
   } else {
     const next = new THREE.MeshBasicMaterial({
@@ -2120,6 +2306,8 @@ const loadPointcloudTileset = async (
       if (rendererMode === 'webgpu') {
         sanitizeObjectForWebGPU(tileScene)
       }
+      // 从 pnts batch table 提取 INTENSITY / CLASSIFICATION 属性，供强度 / 台面分色着色
+      applyPointAttributes(tileScene)
       applyMaterialMode(tileScene)
       applyPointSizeToScene()
       applyManualClipBox()
@@ -2137,6 +2325,7 @@ const loadPointcloudTileset = async (
       if (rendererMode === 'webgpu') {
         sanitizeObjectForWebGPU(tr.group)
       }
+      applyPointAttributes(tr.group)
       applyMaterialMode(tr.group)
       applyPointSizeToScene()
       applyManualClipBox()
@@ -2852,6 +3041,9 @@ defineExpose({
   setPointSize,
   setShowGrid,
   setEdlEnabled,
+  setColorMode,
+  getColorRange: () => [...pointColorRange] as [number, number],
+  isColorAttributeAvailable: () => pointAttributeAvailable,
   requestRender,
   setClipBox: (box: THREE.Box3 | null) => {
     manualClipBox = box ? box.clone() : null
