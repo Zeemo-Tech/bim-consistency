@@ -90,11 +90,9 @@
                 type="button"
                 :class="{ on: colorMode === 'table-class' }"
                 :aria-pressed="colorMode === 'table-class'"
-                :disabled="!colorAttributeAvailable"
+                :disabled="!colorHasClass"
                 :title="
-                  colorAttributeAvailable
-                    ? '台面分色'
-                    : '需先对点云做台面预处理'
+                  colorHasClass ? '台面分色' : '该点云不含台面/分类属性'
                 "
                 @click="colorMode = 'table-class'"
               >
@@ -104,8 +102,8 @@
                 type="button"
                 :class="{ on: colorMode === 'intensity' }"
                 :aria-pressed="colorMode === 'intensity'"
-                :disabled="!colorAttributeAvailable"
-                :title="colorAttributeAvailable ? '强度' : '该点云不含强度属性'"
+                :disabled="!colorHasIntensity"
+                :title="colorHasIntensity ? '强度' : '该点云不含强度属性'"
                 @click="colorMode = 'intensity'"
               >
                 强度
@@ -129,22 +127,6 @@
               >
                 {{ item.label }}
               </button>
-            </div>
-          </div>
-
-          <!-- 颜色轴（强度时显示，左低右高） -->
-          <div v-if="colorMode === 'intensity'" class="pc-display-row">
-            <div class="pc-colorbar" aria-label="强度颜色轴">
-              <span class="pc-colorbar__min">
-                {{ colorRangeLabel(colorRange[0]) }}
-              </span>
-              <div
-                class="pc-colorbar__bar"
-                :style="{ background: RAMP_GRADIENTS[colorRamp] }"
-              />
-              <span class="pc-colorbar__max">
-                {{ colorRangeLabel(colorRange[1]) }}
-              </span>
             </div>
           </div>
 
@@ -233,6 +215,52 @@
         @home="resetView"
       />
 
+      <!-- 强度颜色轴：直方图 + 色带（对齐 cloudBIM-viewer）-->
+      <div
+        v-if="colorMode === 'intensity'"
+        class="pc-int-axis"
+        role="group"
+        aria-label="强度颜色轴"
+      >
+        <button
+          type="button"
+          class="pc-int-axis__reset"
+          title="重置强度范围"
+          aria-label="重置强度范围"
+          @click="refreshColorAvailability"
+        >
+          <el-icon><RefreshLeft /></el-icon>
+        </button>
+        <div class="pc-int-axis__body">
+          <div class="pc-int-axis__hist">
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <path
+                v-if="histogramPath"
+                :d="histogramPath"
+                class="pc-int-axis__area"
+              />
+            </svg>
+            <span class="pc-int-axis__pct">%</span>
+          </div>
+          <div class="pc-int-axis__barrow">
+            <span class="pc-int-axis__label">
+              {{ colorRangeLabel(colorRange[0]) }}
+            </span>
+            <div
+              class="pc-int-axis__bar"
+              :style="{ background: colorRampGradient }"
+            />
+            <span class="pc-int-axis__label">
+              {{ colorRangeLabel(colorRange[1]) }}
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div v-if="analysisMode !== 'none'" class="pc-analysis-toolbar">
         <strong>{{ analysisTitle }}</strong>
         <span v-if="analysisSummary" class="pc-analysis-value">
@@ -302,7 +330,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Aim, Close, FullScreen } from '@element-plus/icons-vue'
+import { Aim, Close, FullScreen, RefreshLeft } from '@element-plus/icons-vue'
 import * as THREE from 'three'
 import PointCloudViewer from '@/views/twoScreen/components/PointCloudViewer.vue'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
@@ -368,6 +396,8 @@ type PointCloudViewerExpose = InstanceType<typeof PointCloudViewer> & {
   ) => void
   getColorRange?: () => [number, number]
   isColorAttributeAvailable?: () => boolean
+  getColorAvailability?: () => { intensity: boolean; tableClass: boolean }
+  getIntensityHistogram?: (bins?: number) => number[]
   setTilesErrorTargetOverride?: (value: number | null) => void
   requestRender?: () => void
 }
@@ -409,18 +439,87 @@ type ScanColorRamp = 'grayscale' | 'spectrum' | 'viridis'
 const colorMode = ref<ScanColorMode>('rgb')
 const colorRamp = ref<ScanColorRamp>('spectrum')
 const colorRange = ref<[number, number]>([0, 1])
-const colorAttributeAvailable = ref(false)
+const colorHasIntensity = ref(false)
+const colorHasClass = ref(false)
+const intensityHistogram = ref<number[]>([])
+const histogramPath = computed(() => {
+  const bins = intensityHistogram.value
+  if (bins.length < 2) return ''
+  const n = bins.length
+  const points = bins.map(
+    (value, index) =>
+      `${((index / (n - 1)) * 100).toFixed(2)},${(100 - value * 100).toFixed(2)}`,
+  )
+  return `M0,100 L${points.join(' L')} L100,100 Z`
+})
 const RAMP_LABELS: Array<{ key: ScanColorRamp; label: string }> = [
   { key: 'grayscale', label: '灰度' },
   { key: 'spectrum', label: '彩虹' },
   { key: 'viridis', label: '紫黄' },
 ]
-const RAMP_GRADIENTS: Record<ScanColorRamp, string> = {
-  grayscale: 'linear-gradient(90deg,#000,#fff)',
-  spectrum:
-    'linear-gradient(90deg,#0000ff,#00ffff,#00ff00,#ffff00,#ff0000)',
-  viridis: 'linear-gradient(90deg,#440154,#31688e,#35b779,#fde725)',
+
+// 与 PointCloudViewer 里点云实际使用的色带保持完全一致的取色
+const RAMP_VIRIDIS_STOPS: Array<[number, number, number]> = [
+  [68, 1, 84],
+  [49, 104, 142],
+  [53, 183, 121],
+  [253, 231, 37],
+]
+const rampColorCss = (
+  ramp: ScanColorRamp,
+  t: number,
+): [number, number, number] => {
+  const x = Math.min(1, Math.max(0, t))
+  if (ramp === 'grayscale') {
+    const v = Math.round(x * 255)
+    return [v, v, v]
+  }
+  if (ramp === 'viridis') {
+    const segment = Math.min(2, Math.floor(x * 3))
+    const local = x * 3 - segment
+    const a = RAMP_VIRIDIS_STOPS[segment]
+    const b = RAMP_VIRIDIS_STOPS[segment + 1]
+    return [
+      Math.round(a[0] + (b[0] - a[0]) * local),
+      Math.round(a[1] + (b[1] - a[1]) * local),
+      Math.round(a[2] + (b[2] - a[2]) * local),
+    ]
+  }
+  // spectrum / 彩虹：蓝(低) → 青 → 绿 → 黄 → 红(高)
+  const hue = (1 - x) * 240
+  const hh = hue / 60
+  const xx = 1 - Math.abs((hh % 2) - 1)
+  let r = 0
+  let g = 0
+  let b = 0
+  if (hh < 1) {
+    r = 1
+    g = xx
+  } else if (hh < 2) {
+    r = xx
+    g = 1
+  } else if (hh < 3) {
+    g = 1
+    b = xx
+  } else if (hh < 4) {
+    g = xx
+    b = 1
+  } else {
+    r = xx
+    b = 1
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)]
 }
+const colorRampGradient = computed(() => {
+  const steps = 16
+  const stops: string[] = []
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+    const [r, g, b] = rampColorCss(colorRamp.value, t)
+    stops.push(`rgb(${r}, ${g}, ${b}) ${(t * 100).toFixed(1)}%`)
+  }
+  return `linear-gradient(90deg, ${stops.join(', ')})`
+})
 const colorRangeLabel = (value: number) =>
   Number.isFinite(value) ? value.toFixed(Math.abs(value) >= 100 ? 0 : 1) : '—'
 
@@ -1779,12 +1878,14 @@ const applyColorMode = () => {
 /** 刷新“强度/台面分色”是否可用（依赖 tiles 的 INTENSITY/CLASSIFICATION 属性） */
 const refreshColorAvailability = () => {
   const viewer = pointcloudViewerRef.value
-  colorAttributeAvailable.value =
-    viewer?.isColorAttributeAvailable?.() ?? false
+  const availability = viewer?.getColorAvailability?.()
+  colorHasIntensity.value = availability?.intensity ?? false
+  colorHasClass.value = availability?.tableClass ?? false
   const range = viewer?.getColorRange?.()
   if (range && Number.isFinite(range[0]) && Number.isFinite(range[1])) {
     colorRange.value = range
   }
+  intensityHistogram.value = viewer?.getIntensityHistogram?.(96) ?? []
 }
 
 let colorAvailabilityTimers: number[] = []
@@ -1887,7 +1988,10 @@ watch(backgroundTheme, () => applyBackgroundTheme())
 watch(showGrid, (value) => pointcloudViewerRef.value?.setShowGrid?.(value))
 watch(pointSize, (value) => pointcloudViewerRef.value?.setPointSize?.(value))
 watch(edlEnabled, (value) => pointcloudViewerRef.value?.setEdlEnabled?.(value))
-watch([colorMode, colorRamp], () => applyColorMode())
+watch([colorMode, colorRamp], () => {
+  applyColorMode()
+  if (colorMode.value === 'intensity') refreshColorAvailability()
+})
 watch(analysisMode, (mode) => {
   const dom = getViewerRendererDom()
   if (dom) dom.style.cursor = mode === 'none' ? '' : 'crosshair'
@@ -2366,34 +2470,6 @@ onBeforeUnmount(() => {
   min-width: 44px;
 }
 
-/* 强度颜色轴 */
-.pc-colorbar {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  width: 100%;
-  min-width: 200px;
-}
-
-.pc-colorbar__bar {
-  flex: 1;
-  height: 10px;
-  border: 1px solid rgb(255 255 255 / 18%);
-  border-radius: 4px;
-}
-
-.pc-colorbar__min,
-.pc-colorbar__max {
-  min-width: 28px;
-  font-size: var(--font-size-xs);
-  color: rgb(255 255 255 / 72%);
-  font-variant-numeric: tabular-nums;
-}
-
-.pc-colorbar__max {
-  text-align: right;
-}
-
 /* 台面分色图例 */
 .pc-category-legend {
   display: inline-flex;
@@ -2481,6 +2557,97 @@ onBeforeUnmount(() => {
   top: 16px;
   right: 16px;
   z-index: 60;
+}
+
+/* 底部强度颜色轴：直方图 + 色带（对齐 cloudBIM-viewer）*/
+.pc-int-axis {
+  position: absolute;
+  right: 20px;
+  bottom: 14px;
+  left: 176px;
+  z-index: 26;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgb(22 25 32 / 82%);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+
+.pc-int-axis__reset {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: rgb(255 255 255 / 72%);
+  cursor: pointer;
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 6px;
+}
+
+.pc-int-axis__reset:hover {
+  color: #fff;
+  background: rgb(255 255 255 / 16%);
+}
+
+.pc-int-axis__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pc-int-axis__hist {
+  position: relative;
+  height: 22px;
+}
+
+.pc-int-axis__hist svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pc-int-axis__area {
+  fill: rgb(255 255 255 / 42%);
+  stroke: rgb(255 255 255 / 75%);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.pc-int-axis__pct {
+  position: absolute;
+  top: -3px;
+  right: 0;
+  font-size: var(--font-size-xs);
+  color: rgb(255 255 255 / 55%);
+}
+
+.pc-int-axis__barrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.pc-int-axis__bar {
+  flex: 1;
+  height: 14px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
+}
+
+.pc-int-axis__label {
+  min-width: 34px;
+  font-size: var(--font-size-xs);
+  color: rgb(255 255 255 / 82%);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 .pc-analysis-toolbar {

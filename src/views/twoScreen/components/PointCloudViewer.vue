@@ -205,110 +205,38 @@ let edlEnabled = true
 // ==================== 点云着色模式（真彩 / 强度 / 台面分色）====================
 type PointCloudColorMode = 'rgb' | 'intensity' | 'table-class'
 type PointCloudColorRamp = 'grayscale' | 'spectrum' | 'viridis'
-const COLOR_MODE_INDEX: Record<PointCloudColorMode, number> = {
-  rgb: 0,
-  intensity: 1,
-  'table-class': 2,
-}
-const COLOR_RAMP_INDEX: Record<PointCloudColorRamp, number> = {
-  grayscale: 0,
-  spectrum: 1,
-  viridis: 2,
-}
 let pointColorMode: PointCloudColorMode = 'rgb'
 let pointColorRamp: PointCloudColorRamp = 'spectrum'
-let pointColorRange: [number, number] = [0, 1]
-let pointAttributeAvailable = false
-const colorModeUniforms = {
-  uColorMode: { value: 0 },
-  uColorRamp: { value: 1 },
-  uRangeMin: { value: 0 },
-  uRangeMax: { value: 1 },
-}
-const colorModeMaterials = new WeakSet<THREE.Material>()
+let pointHasIntensity = false
+let pointHasClass = false
+let pointIntensityMin = 0
+let pointIntensityMax = 1
+// 强度采样（用于底部直方图），有上限，避免大点云占用过多内存
+const INTENSITY_SAMPLE_CAP = 200000
+const intensitySamples: number[] = []
 
-const POINT_COLOR_VERTEX_DECL = `
-attribute float aIntensity;
-attribute float aClass;
-uniform int uColorMode;
-uniform int uColorRamp;
-uniform float uRangeMin;
-uniform float uRangeMax;
-varying vec3 vModeColor;
-vec3 pointRampColor(float t) {
-  t = clamp(t, 0.0, 1.0);
-  if (uColorRamp == 0) { return vec3(t); }
-  if (uColorRamp == 2) {
-    const vec3 c0 = vec3(0.267, 0.005, 0.329);
-    const vec3 c1 = vec3(0.188, 0.408, 0.556);
-    const vec3 c2 = vec3(0.208, 0.718, 0.472);
-    const vec3 c3 = vec3(0.993, 0.906, 0.144);
-    float x = t * 3.0;
-    if (x < 1.0) return mix(c0, c1, x);
-    if (x < 2.0) return mix(c1, c2, x - 1.0);
-    return mix(c2, c3, x - 2.0);
+/** 计算强度直方图（归一化到 0..1），供底部颜色轴绘制分布曲线。 */
+const getIntensityHistogram = (bins = 96): number[] => {
+  if (!intensitySamples.length) return []
+  const span = Math.max(pointIntensityMax - pointIntensityMin, 1e-6)
+  const hist = new Array<number>(bins).fill(0)
+  for (let i = 0; i < intensitySamples.length; i++) {
+    const t = (intensitySamples[i] - pointIntensityMin) / span
+    const index = Math.min(bins - 1, Math.max(0, Math.floor(t * bins)))
+    hist[index] += 1
   }
-  return clamp(vec3(
-    abs(t * 6.0 - 3.0) - 1.0,
-    2.0 - abs(t * 6.0 - 2.0),
-    2.0 - abs(t * 6.0 - 4.0)
-  ), 0.0, 1.0);
-}
-`
-const POINT_COLOR_VERTEX_BODY = `
-vModeColor = vec3(1.0);
-if (uColorMode == 1) {
-  float t = (aIntensity - uRangeMin) / max(uRangeMax - uRangeMin, 1e-5);
-  vModeColor = pointRampColor(t);
-} else if (uColorMode == 2) {
-  vModeColor = aClass > 0.5 ? vec3(0.86, 0.36, 0.22) : vec3(0.24, 0.58, 0.90);
-}
-`
-
-const attachColorModeShader = (mat: THREE.Material) => {
-  if (!mat || colorModeMaterials.has(mat)) return
-  const pointMat = mat as THREE.PointsMaterial & {
-    onBeforeCompile?: (shader: any) => void
-  }
-  const previous = pointMat.onBeforeCompile
-  pointMat.onBeforeCompile = (shader: any) => {
-    previous?.call(pointMat, shader)
-    shader.uniforms.uColorMode = colorModeUniforms.uColorMode
-    shader.uniforms.uColorRamp = colorModeUniforms.uColorRamp
-    shader.uniforms.uRangeMin = colorModeUniforms.uRangeMin
-    shader.uniforms.uRangeMax = colorModeUniforms.uRangeMax
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n${POINT_COLOR_VERTEX_DECL}`)
-      .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>\n${POINT_COLOR_VERTEX_BODY}`,
-      )
-    const fragmentDecl = `
-varying vec3 vModeColor;
-uniform int uColorMode;
-`
-    const fragmentOverride = `if (uColorMode > 0) diffuseColor.rgb = vModeColor;\n`
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <common>',
-      `#include <common>\n${fragmentDecl}`,
-    )
-    if (shader.fragmentShader.includes('#include <opaque_fragment>')) {
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <opaque_fragment>',
-        `${fragmentOverride}#include <opaque_fragment>`,
-      )
-    } else {
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <color_fragment>',
-        `${fragmentOverride}#include <color_fragment>`,
-      )
-    }
-  }
-  pointMat.needsUpdate = true
-  colorModeMaterials.add(mat)
+  let maxCount = 0
+  for (let i = 0; i < bins; i++) if (hist[i] > maxCount) maxCount = hist[i]
+  if (maxCount <= 0) return hist
+  return hist.map((value) => value / maxCount)
 }
 
-// 从 pnts 的 batch table 读取 INTENSITY / CLASSIFICATION，写成顶点属性
+const TABLE_CLASS_COLOR = { r: 0.86, g: 0.36, b: 0.22 }
+const BODY_CLASS_COLOR = { r: 0.24, g: 0.58, b: 0.9 }
+const VIRIDIS_STOPS = [0x440154, 0x31688e, 0x35b779, 0xfde725]
+const rampScratch = new THREE.Color()
+
+/** 从 pnts 的 batch table 读取一个标量数组（INTENSITY / CLASSIFICATION）。 */
 const readBatchScalar = (batchTable: any, key: string): number[] | null => {
   if (!batchTable || typeof batchTable.getData !== 'function') return null
   const desc = batchTable.header?.[key]
@@ -321,56 +249,142 @@ const readBatchScalar = (batchTable: any, key: string): number[] | null => {
   }
 }
 
-const applyPointAttributes = (root: any) => {
-  let intensityMin = Infinity
-  let intensityMax = -Infinity
-  let anyAttribute = false
+const rampColor = (t: number, target: THREE.Color): THREE.Color => {
+  const x = Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0))
+  if (pointColorRamp === 'grayscale') return target.setRGB(x, x, x)
+  if (pointColorRamp === 'viridis') {
+    const segment = Math.min(2, Math.floor(x * 3))
+    const local = x * 3 - segment
+    return target
+      .setHex(VIRIDIS_STOPS[segment])
+      .lerp(
+        new THREE.Color(VIRIDIS_STOPS[segment + 1]),
+        Math.min(1, Math.max(0, local)),
+      )
+  }
+  // spectrum / 彩虹：蓝(低) → 青 → 绿 → 黄 → 红(高)
+  const hue = (1 - x) * 240
+  const hh = hue / 60
+  const xx = 1 - Math.abs((hh % 2) - 1)
+  let r = 0
+  let g = 0
+  let b = 0
+  if (hh < 1) {
+    r = 1
+    g = xx
+  } else if (hh < 2) {
+    r = xx
+    g = 1
+  } else if (hh < 3) {
+    g = 1
+    b = xx
+  } else if (hh < 4) {
+    g = xx
+    b = 1
+  } else {
+    r = xx
+    b = 1
+  }
+  return target.setRGB(r, g, b)
+}
+
+/** 按当前模式，把某个几何体的 color 属性重算一遍（CPU 侧着色）。 */
+const recolorGeometry = (geometry: THREE.BufferGeometry) => {
+  const base = geometry.getAttribute('aBaseColor') as
+    | THREE.BufferAttribute
+    | undefined
+  const count = base?.count ?? 0
+  if (!count) return
+  const intensity = geometry.getAttribute('aIntensity')
+  const classified = geometry.getAttribute('aClass')
+  const out = new Float32Array(count * 3)
+  const span = Math.max(pointIntensityMax - pointIntensityMin, 1e-6)
+  for (let i = 0; i < count; i++) {
+    if (pointColorMode === 'intensity' && intensity) {
+      const t = (intensity.getX(i) - pointIntensityMin) / span
+      rampColor(t, rampScratch)
+    } else if (pointColorMode === 'table-class' && classified) {
+      const isTable = classified.getX(i) > 0.5
+      const c = isTable ? TABLE_CLASS_COLOR : BODY_CLASS_COLOR
+      rampScratch.setRGB(c.r, c.g, c.b)
+    } else {
+      rampScratch.setRGB(base.getX(i), base.getY(i), base.getZ(i))
+    }
+    out[i * 3] = rampScratch.r
+    out[i * 3 + 1] = rampScratch.g
+    out[i * 3 + 2] = rampScratch.b
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(out, 3))
+}
+
+/**
+ * 处理新加载的点云瓦片：保存原始真彩色，读取 batch table 的
+ * INTENSITY / CLASSIFICATION，并按当前模式着色。
+ */
+const processPointObject = (root: any) => {
   root?.traverse?.((obj: any) => {
     if (!obj?.isPoints || !obj.geometry) return
     const geometry = obj.geometry as THREE.BufferGeometry
-    if (geometry.getAttribute('aIntensity') || geometry.getAttribute('aClass'))
-      return
+    if ((geometry.userData as any).__pcColorReady) return
+    const colorAttr = geometry.getAttribute('color') as
+      | THREE.BufferAttribute
+      | undefined
+    const count = geometry.getAttribute('position')?.count ?? 0
+    if (!colorAttr || !count || colorAttr.count !== count) return
+
+    // 保存原始真彩色（getX 会自动把 normalized 的 Uint8 还原到 0..1）
+    const base = new Float32Array(count * 3)
+    for (let i = 0; i < count; i++) {
+      base[i * 3] = colorAttr.getX(i)
+      base[i * 3 + 1] = colorAttr.getY(i)
+      base[i * 3 + 2] = colorAttr.getZ(i)
+    }
+    geometry.setAttribute('aBaseColor', new THREE.BufferAttribute(base, 3))
+
     const batchTable = obj.batchTable ?? obj.userData?.batchTable
-    const count: number = batchTable?.count ?? geometry.getAttribute('position')?.count ?? 0
-    if (!count) return
     const intensity = readBatchScalar(batchTable, 'INTENSITY')
-    const classification = readBatchScalar(batchTable, 'CLASSIFICATION')
     if (intensity && intensity.length === count) {
-      const attribute = new Float32Array(count)
+      const values = new Float32Array(count)
       for (let i = 0; i < count; i++) {
         const value = Number(intensity[i])
-        attribute[i] = value
-        if (value < intensityMin) intensityMin = value
-        if (value > intensityMax) intensityMax = value
+        values[i] = value
+        if (!pointHasIntensity) {
+          pointIntensityMin = value
+          pointIntensityMax = value
+        } else {
+          if (value < pointIntensityMin) pointIntensityMin = value
+          if (value > pointIntensityMax) pointIntensityMax = value
+        }
+        if (intensitySamples.length < INTENSITY_SAMPLE_CAP) {
+          intensitySamples.push(value)
+        }
       }
-      geometry.setAttribute('aIntensity', new THREE.BufferAttribute(attribute, 1))
-      anyAttribute = true
+      geometry.setAttribute('aIntensity', new THREE.BufferAttribute(values, 1))
+      pointHasIntensity = true
     }
+
+    const classification = readBatchScalar(batchTable, 'CLASSIFICATION')
     if (classification && classification.length === count) {
-      const attribute = new Float32Array(count)
+      const values = new Float32Array(count)
       for (let i = 0; i < count; i++) {
-        attribute[i] = Number(classification[i]) === 2 ? 1 : 0
+        values[i] = Number(classification[i]) === 2 ? 1 : 0
       }
-      geometry.setAttribute('aClass', new THREE.BufferAttribute(attribute, 1))
-      anyAttribute = true
+      geometry.setAttribute('aClass', new THREE.BufferAttribute(values, 1))
+      pointHasClass = true
     }
+
+    ;(geometry.userData as any).__pcColorReady = true
+    recolorGeometry(geometry)
   })
-  if (intensityMin <= intensityMax && Number.isFinite(intensityMin)) {
-    pointColorRange = [intensityMin, intensityMax]
-    colorModeUniforms.uRangeMin.value = intensityMin
-    colorModeUniforms.uRangeMax.value = intensityMax
-  }
-  if (anyAttribute) pointAttributeAvailable = true
 }
 
-const syncColorModeUniforms = () => {
-  colorModeUniforms.uColorMode.value = COLOR_MODE_INDEX[pointColorMode]
-  colorModeUniforms.uColorRamp.value = COLOR_RAMP_INDEX[pointColorRamp]
-  colorModeUniforms.uRangeMin.value = pointColorRange[0]
-  colorModeUniforms.uRangeMax.value = pointColorRange[1]
+const recolorAllPoints = () => {
+  pointcloudScene?.traverse?.((obj: any) => {
+    if (obj?.isPoints && obj.geometry) recolorGeometry(obj.geometry)
+  })
 }
 
-/** 作用：切换点云着色模式（真彩 / 强度 / 台面分色），并可选设置色带与范围。 */
+/** 作用：切换点云着色模式（真彩 / 强度 / 台面分色），并可选设置色带与强度范围。 */
 const setColorMode = (
   mode: PointCloudColorMode,
   ramp?: PointCloudColorRamp,
@@ -379,10 +393,10 @@ const setColorMode = (
   pointColorMode = mode
   if (ramp) pointColorRamp = ramp
   if (range && Number.isFinite(range[0]) && Number.isFinite(range[1])) {
-    pointColorRange = range
+    pointIntensityMin = range[0]
+    pointIntensityMax = range[1]
   }
-  syncColorModeUniforms()
-  if (pointcloudScene) applyMaterialMode(pointcloudScene)
+  recolorAllPoints()
   requestRender()
 }
 
@@ -483,7 +497,6 @@ const getOrCreateUnlitMaterialWebGL = (
     if (src?.map) next.map = src.map
     applySharedMaterialFlags(next, src)
     next.toneMapped = false
-    attachColorModeShader(next)
     mat = next
   } else {
     const next = new THREE.MeshBasicMaterial({
@@ -2307,7 +2320,7 @@ const loadPointcloudTileset = async (
         sanitizeObjectForWebGPU(tileScene)
       }
       // 从 pnts batch table 提取 INTENSITY / CLASSIFICATION 属性，供强度 / 台面分色着色
-      applyPointAttributes(tileScene)
+      processPointObject(tileScene)
       applyMaterialMode(tileScene)
       applyPointSizeToScene()
       applyManualClipBox()
@@ -2325,7 +2338,7 @@ const loadPointcloudTileset = async (
       if (rendererMode === 'webgpu') {
         sanitizeObjectForWebGPU(tr.group)
       }
-      applyPointAttributes(tr.group)
+      processPointObject(tr.group)
       applyMaterialMode(tr.group)
       applyPointSizeToScene()
       applyManualClipBox()
@@ -3042,8 +3055,13 @@ defineExpose({
   setShowGrid,
   setEdlEnabled,
   setColorMode,
-  getColorRange: () => [...pointColorRange] as [number, number],
-  isColorAttributeAvailable: () => pointAttributeAvailable,
+  getColorRange: () => [pointIntensityMin, pointIntensityMax] as [number, number],
+  isColorAttributeAvailable: () => pointHasIntensity || pointHasClass,
+  getColorAvailability: () => ({
+    intensity: pointHasIntensity,
+    tableClass: pointHasClass,
+  }),
+  getIntensityHistogram,
   requestRender,
   setClipBox: (box: THREE.Box3 | null) => {
     manualClipBox = box ? box.clone() : null
