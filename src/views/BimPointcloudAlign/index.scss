@@ -13,7 +13,7 @@
 .calibration-page {
   --editor-panel-width: var(--viewer-panel-width, 360px);
   --editor-toolbar-width: 50px;
-  --editor-header-height: 72px;
+  --editor-header-height: 78px;
 }
 
 @media (max-width: 1120px) {
@@ -30,7 +30,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-md);
-  min-height: 72px;
+  min-height: 78px;
   padding: 8px 14px 8px 10px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
@@ -105,7 +105,7 @@
 .alignment-workflow-nav {
   min-width: 0;
   max-width: 1500px;
-  height: 56px;
+  height: 62px;
   margin-inline: auto;
   display: flex;
   flex: 1 1 auto;
@@ -122,13 +122,13 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 0;
+  padding: 8px 0;
 }
 
 .alignment-workflow-step {
   position: relative;
   min-width: 0;
-  height: 36px;
+  height: 46px;
   display: flex;
   flex: 1 1 0;
   align-items: center;

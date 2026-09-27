@@ -5767,6 +5767,16 @@ function applyMaterialMode(root: any, mode: 'original' | 'unlit' | 'lambert') {
   return changed
 }
 
+/** 作用：补齐缺失的顶点法线，保证光照材质能正确分面（IFC→GLB 偶有无法线几何）。 */
+function ensureGeometryNormals(root: any) {
+  root?.traverse?.((obj: any) => {
+    if (!obj?.isMesh) return
+    const geometry = obj.geometry
+    if (!geometry?.attributes?.position) return
+    if (!geometry.attributes.normal) geometry.computeVertexNormals()
+  })
+}
+
 /** 作用：对 glTF root 做合批优化，并在 BatchedMesh 上保留 elementId 元数据用于点选/显隐。 */
 function optimizeRoot(root: any) {
   /**
@@ -5971,6 +5981,7 @@ async function loadFile(file: File) {
       }
 
       applyRendererToneMapping()
+      ensureGeometryNormals(root)
       const materialChanged = applyMaterialMode(root, materialMode.value)
 
       statusText.value = `Optimizing: ${file.name}`
@@ -6029,46 +6040,50 @@ async function loadGlbBlob(blob: Blob, label: string) {
     url,
     (gltf: any) => {
       try {
-      const root = gltf?.scene ?? gltf?.scenes?.[0]
-      if (!root) {
-        statusText.value = 'Load failed: empty glTF scene.'
-        return
-      }
+        const root = gltf?.scene ?? gltf?.scenes?.[0]
+        if (!root) {
+          statusText.value = 'Load failed: empty glTF scene.'
+          return
+        }
 
-      applyRendererToneMapping()
-      const materialChanged = applyMaterialMode(root, materialMode.value)
+        applyRendererToneMapping()
+        ensureGeometryNormals(root)
+        const materialChanged = applyMaterialMode(root, materialMode.value)
 
-      statusText.value = `Optimizing: ${label}`
-      clearPickedElement()
-      buildWireframeForRoot(root)
-      let batchedCount = 0
-      try {
-        // WebGPU 合批失败时降级为原始模型，避免整个模型加载中断导致无操作杆。
-        batchedCount = optimizeRoot(root).batchedCount
-      } catch (batchError) {
-        console.warn('[BimPointcloudAlign] 模型合批失败，已降级为原始模型:', batchError)
-        batchedCount = 0
-      }
-      const pivot = createCenteredPivot(root, label)
-      loadedRoots.push(pivot)
-      const host = ensureClipHostForObject(pivot)
-      contentGroup?.add(host ?? pivot)
-      recenterLoadedContentAsWhole()
-      invalidateClipBounds()
-      fitCameraToObject(pivot)
-      pivot.updateMatrixWorld?.(true)
-      statusText.value = `Loaded: ${label} (mode ${materialMode.value}, changed ${materialChanged}, batched ${batchedCount})`
-      updateLoadedFlags()
-      rebuildLoadedItems()
-      rebuildElementIndex()
-      onMeshWireframeChange()
-      applyTransformSelection()
-      updateBoundsHelpers()
-      updateClipRangeFromContent({ preserveT: true })
-      applyClippingState()
-      tryRestoreSavedBimAlignment()
-      requestRender()
-      requestAnimationFrame(() => requestRender())
+        statusText.value = `Optimizing: ${label}`
+        clearPickedElement()
+        buildWireframeForRoot(root)
+        let batchedCount = 0
+        try {
+          // WebGPU 合批失败时降级为原始模型，避免整个模型加载中断导致无操作杆。
+          batchedCount = optimizeRoot(root).batchedCount
+        } catch (batchError) {
+          console.warn(
+            '[BimPointcloudAlign] 模型合批失败，已降级为原始模型:',
+            batchError,
+          )
+          batchedCount = 0
+        }
+        const pivot = createCenteredPivot(root, label)
+        loadedRoots.push(pivot)
+        const host = ensureClipHostForObject(pivot)
+        contentGroup?.add(host ?? pivot)
+        recenterLoadedContentAsWhole()
+        invalidateClipBounds()
+        fitCameraToObject(pivot)
+        pivot.updateMatrixWorld?.(true)
+        statusText.value = `Loaded: ${label} (mode ${materialMode.value}, changed ${materialChanged}, batched ${batchedCount})`
+        updateLoadedFlags()
+        rebuildLoadedItems()
+        rebuildElementIndex()
+        onMeshWireframeChange()
+        applyTransformSelection()
+        updateBoundsHelpers()
+        updateClipRangeFromContent({ preserveT: true })
+        applyClippingState()
+        tryRestoreSavedBimAlignment()
+        requestRender()
+        requestAnimationFrame(() => requestRender())
       } catch (err) {
         console.error('[BimPointcloudAlign] BIM 加载后处理失败:', err)
         statusText.value = `Load failed: ${label}`
@@ -7250,16 +7265,26 @@ async function initThree() {
   stats.dom.style.opacity = '0.9'
   el.appendChild(stats.dom)
 
-  // 灯光与 cloudBIM-viewer 点云与工程坐标配准一致
-  scene.add(new THREE.AmbientLight(0xffffff, 0.78))
+  // 灯光：低环境光 + 半球环境光 + 主/辅/轮廓方向光。
+  // 降低全局环境光、拉开方向光对比，让 BIM 构件产生清晰的明暗面与轮廓（更立体）。
+  scene.add(new THREE.AmbientLight(0xffffff, 0.28))
 
-  const keyLight = new THREE.DirectionalLight(0xffffff, 0.92)
+  const hemisphereLight = new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.85)
+  hemisphereLight.position.set(0, 1, 0)
+  scene.add(hemisphereLight)
+
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.55)
   keyLight.position.set(14, 18, 12)
   scene.add(keyLight)
 
-  const fillLight = new THREE.DirectionalLight(0x9cc3ff, 0.42)
+  const fillLight = new THREE.DirectionalLight(0x9cc3ff, 0.55)
   fillLight.position.set(-10, 8, -10)
   scene.add(fillLight)
+
+  // 轮廓光：从模型侧后方补光，勾勒边缘、增强体积感。
+  const rimLight = new THREE.DirectionalLight(0xffe4bd, 0.5)
+  rimLight.position.set(-9, 6, 18)
+  scene.add(rimLight)
 
   rebuildOrbitControls()
 
