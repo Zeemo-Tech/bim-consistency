@@ -607,6 +607,149 @@
               </button>
             </div>
             <template v-if="registrationStage === 'fine'">
+              <div
+                class="fine-status"
+                :class="`is-${finePhase}`"
+                role="status"
+                aria-live="polite"
+              >
+                <el-icon
+                  v-if="finePhase === 'computing'"
+                  class="is-loading fine-status__icon"
+                  :size="16"
+                >
+                  <Loading />
+                </el-icon>
+                <el-icon
+                  v-else-if="finePhase === 'saved' || finePhase === 'computed'"
+                  class="fine-status__icon"
+                  :size="16"
+                >
+                  <CircleCheck />
+                </el-icon>
+                <el-icon
+                  v-else-if="
+                    finePhase === 'regressed' ||
+                    finePhase === 'blocked' ||
+                    finePhase === 'failed'
+                  "
+                  class="fine-status__icon"
+                  :size="16"
+                >
+                  <Warning />
+                </el-icon>
+                <el-icon v-else class="fine-status__icon" :size="16">
+                  <InfoFilled />
+                </el-icon>
+                <div class="fine-status__text">
+                  <strong>{{ fineHeadline }}</strong>
+                  <small>{{ fineSubtext }}</small>
+                </div>
+              </div>
+
+              <div
+                v-if="fineAlignResult"
+                class="fine-result"
+                :class="{ 'fine-result--warning': fineAlignResult.regressed }"
+              >
+                <div class="fine-result__title">
+                  <span>
+                    {{
+                      fineAlignResult.regressed ? '精调退化告警' : '精调结果'
+                    }}
+                  </span>
+                  <span
+                    class="fine-result__tag"
+                    :class="fineAlignmentSaved ? 'is-saved' : 'is-unsaved'"
+                  >
+                    {{ fineAlignmentSaved ? '已保存' : '未保存' }}
+                  </span>
+                </div>
+                <div class="fine-result__grid">
+                  <span>
+                    RMSE
+                    <strong>
+                      {{ fmtNum(fineAlignResult.metrics?.initRmse, 4) }} →
+                      {{ fmtNum(fineAlignResult.metrics?.fineRmse, 4) }} m
+                    </strong>
+                    <em
+                      v-if="fineRmseImprovement !== null"
+                      class="fine-result__delta"
+                      :class="fineRmseImprovement >= 0 ? 'is-good' : 'is-bad'"
+                    >
+                      {{ fineRmseImprovement >= 0 ? '↓' : '↑' }}
+                      {{ Math.abs(fineRmseImprovement).toFixed(1) }}%
+                    </em>
+                  </span>
+                  <span>
+                    Fitness
+                    <strong>
+                      {{ fmtNum(fineAlignResult.metrics?.initFitness, 4) }} →
+                      {{ fmtNum(fineAlignResult.metrics?.fineFitness, 4) }}
+                    </strong>
+                    <em
+                      v-if="fineFitnessImprovement !== null"
+                      class="fine-result__delta"
+                      :class="
+                        fineFitnessImprovement >= 0 ? 'is-good' : 'is-bad'
+                      "
+                    >
+                      {{ fineFitnessImprovement >= 0 ? '↑' : '↓' }}
+                      {{ Math.abs(fineFitnessImprovement).toFixed(1) }}%
+                    </em>
+                  </span>
+                  <span>
+                    位移变化
+                    <strong>
+                      {{
+                        fmtNum(fineAlignResult.metrics?.deltaTranslationM, 3)
+                      }}
+                      m
+                    </strong>
+                  </span>
+                  <span>
+                    旋转变化
+                    <strong>
+                      {{ fmtNum(fineAlignResult.metrics?.deltaRotationDeg, 3) }}
+                      deg
+                    </strong>
+                  </span>
+                  <span>
+                    耗时
+                    <strong>
+                      {{ fmtNum(fineAlignResult.metrics?.elapsedS, 1) }} s
+                    </strong>
+                  </span>
+                  <span>
+                    点数
+                    <strong>
+                      {{ fineAlignResult.metrics?.sourceTotalPoints ?? 0 }} /
+                      {{ fineAlignResult.metrics?.targetPoints ?? 0 }}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+
+              <div class="fine-actions">
+                <el-button
+                  type="primary"
+                  :loading="fineAlignLoading"
+                  :disabled="!canRunFineAlignment"
+                  style="width: 100%"
+                  @click="runFineAlignment"
+                >
+                  {{ fineRunLabel }}
+                </el-button>
+                <el-button
+                  :loading="savingCalibration"
+                  :disabled="!canSaveFineAlignment"
+                  style="width: 100%; margin-left: 0"
+                  @click="saveFineAlignmentMatrix"
+                >
+                  保存结果
+                </el-button>
+              </div>
+
               <div class="fine-params">
                 <div class="fine-param-row">
                   <span class="fine-param-label">负优化策略</span>
@@ -654,104 +797,6 @@
                 >
                   恢复默认阈值
                 </button>
-              </div>
-              <div class="fine-actions">
-                <el-button
-                  type="primary"
-                  :loading="fineAlignLoading"
-                  :disabled="!canRunFineAlignment"
-                  style="width: 100%"
-                  @click="runFineAlignment"
-                >
-                  开始计算
-                </el-button>
-                <el-button
-                  :loading="savingCalibration"
-                  :disabled="!canSaveFineAlignment"
-                  style="width: 100%; margin-left: 0"
-                  @click="saveFineAlignmentMatrix"
-                >
-                  保存配准结果
-                </el-button>
-              </div>
-              <div v-if="fineRunBlockedReason" class="fine-actions__hint">
-                {{ fineRunBlockedReason }}
-              </div>
-              <div
-                v-if="fineAlignResult"
-                class="fine-result"
-                :class="{ 'fine-result--warning': fineAlignResult.regressed }"
-              >
-                <div class="fine-result__title">
-                  {{
-                    fineAlignResult.regressed
-                      ? '精调结果出现退化告警'
-                      : '精调结果'
-                  }}
-                </div>
-                <div class="fine-result__grid">
-                  <span>
-                    RMSE
-                    <strong>
-                      {{
-                        Number(fineAlignResult.metrics?.fineRmse ?? 0).toFixed(
-                          4,
-                        )
-                      }}
-                      m
-                    </strong>
-                  </span>
-                  <span>
-                    Fitness
-                    <strong>
-                      {{
-                        Number(
-                          fineAlignResult.metrics?.fineFitness ?? 0,
-                        ).toFixed(4)
-                      }}
-                    </strong>
-                  </span>
-                  <span>
-                    位移变化
-                    <strong>
-                      {{
-                        Number(
-                          fineAlignResult.metrics?.deltaTranslationM ?? 0,
-                        ).toFixed(3)
-                      }}
-                      m
-                    </strong>
-                  </span>
-                  <span>
-                    旋转变化
-                    <strong>
-                      {{
-                        Number(
-                          fineAlignResult.metrics?.deltaRotationDeg ?? 0,
-                        ).toFixed(3)
-                      }}
-                      deg
-                    </strong>
-                  </span>
-                  <span>
-                    耗时
-                    <strong>
-                      {{
-                        Number(fineAlignResult.metrics?.elapsedS ?? 0).toFixed(
-                          1,
-                        )
-                      }}
-                      s
-                    </strong>
-                  </span>
-                  <span>
-                    点数
-                    <strong>
-                      {{ fineAlignResult.metrics?.sourceTotalPoints ?? 0 }} /
-                      {{ fineAlignResult.metrics?.targetPoints ?? 0 }}
-                    </strong>
-                  </span>
-                </div>
               </div>
             </template>
 
@@ -1290,7 +1335,7 @@ import {
   shallowRef,
   watch,
 } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import {
   ArrowLeft,
   DArrowLeft,
@@ -1300,6 +1345,10 @@ import {
   RefreshLeft,
   Sunny,
   View,
+  Loading,
+  CircleCheck,
+  Warning,
+  InfoFilled,
 } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import wanggeIcon from '@/assets/images/wangge.png'
@@ -1798,15 +1847,16 @@ function collectCalibrationSnapshot(options?: { warnOnMissing?: boolean }) {
   }
 }
 
-const handleCalibrationComplete = async () => {
-  if (savingCalibration.value) return
+const handleCalibrationComplete = async (): Promise<boolean> => {
+  if (savingCalibration.value) return false
   savingCalibration.value = true
   try {
     const saved = await saveCalibrationResult()
-    if (!saved) return
+    if (!saved) return false
     const stageLabel = registrationStage.value === 'fine' ? '精细化' : '粗配准'
     ElMessage.success(`${stageLabel}矩阵已保存并覆盖校准矩阵`)
     await handleShowAlignmentMatrix()
+    return true
   } finally {
     savingCalibration.value = false
   }
@@ -1820,7 +1870,10 @@ async function saveCoarseAlignmentMatrix() {
 }
 
 async function saveFineAlignmentMatrix() {
-  await handleCalibrationComplete()
+  const saved = await handleCalibrationComplete()
+  if (saved && registrationStage.value === 'fine') {
+    fineAlignmentSaved.value = true
+  }
 }
 
 /**
@@ -2834,6 +2887,10 @@ function activateCoarseRegistration() {
 
 /** 精细化配准结果（ICP 精调），用于在 UI 中展示 Metrics。 */
 const fineAlignResult = ref<FineAlignmentResult | null>(null)
+/** 精调结果是否已写入校准矩阵（区分“仅计算预览”与“已保存”）。 */
+const fineAlignmentSaved = ref(false)
+/** 精调失败原因（用于 UI 展示“失败”状态）。 */
+const fineAlignError = ref('')
 /** 精细化配准执行中的 loading 状态。 */
 const fineAlignLoading = ref(false)
 /** 负优化触发时是否仍应用精调结果（默认关闭：仅告警不应用）。 */
@@ -2894,6 +2951,101 @@ const fineRunBlockedReason = computed(() => {
   return ''
 })
 
+/** 数值格式化（用于精调指标展示，非法值显示占位符）。 */
+function fmtNum(value: unknown, digits: number): string {
+  const num = Number(value)
+  return Number.isFinite(num) ? num.toFixed(digits) : '—'
+}
+
+/** RMSE 相对初值的改善百分比（正=变小/变好，null=无数据）。 */
+const fineRmseImprovement = computed<number | null>(() => {
+  const m = fineAlignResult.value?.metrics
+  if (!m) return null
+  const init = Number(m.initRmse)
+  const fine = Number(m.fineRmse)
+  if (!Number.isFinite(init) || !Number.isFinite(fine) || init <= 0) return null
+  return ((init - fine) / init) * 100
+})
+
+/** Fitness 相对初值的改善百分比（正=变大/变好，null=无数据）。 */
+const fineFitnessImprovement = computed<number | null>(() => {
+  const m = fineAlignResult.value?.metrics
+  if (!m) return null
+  const init = Number(m.initFitness)
+  const fine = Number(m.fineFitness)
+  if (
+    !Number.isFinite(init) ||
+    !Number.isFinite(fine) ||
+    Math.abs(init) < 1e-9
+  ) {
+    return null
+  }
+  return ((fine - init) / Math.abs(init)) * 100
+})
+
+type FinePhase =
+  | 'blocked'
+  | 'computing'
+  | 'regressed'
+  | 'saved'
+  | 'computed'
+  | 'failed'
+  | 'idle'
+
+/** 精细化配准阶段状态。 */
+const finePhase = computed<FinePhase>(() => {
+  if (fineRunBlockedReason.value) return 'blocked'
+  if (fineAlignLoading.value) return 'computing'
+  if (fineAlignResult.value) {
+    if (fineAlignResult.value.regressed) return 'regressed'
+    return fineAlignmentSaved.value ? 'saved' : 'computed'
+  }
+  if (fineAlignError.value) return 'failed'
+  return 'idle'
+})
+
+const fineHeadline = computed(() => {
+  switch (finePhase.value) {
+    case 'blocked':
+      return '暂不可进行精细化配准'
+    case 'computing':
+      return '正在精细化配准…'
+    case 'regressed':
+      return '精调出现退化告警'
+    case 'saved':
+      return '精细化配准已完成并保存'
+    case 'computed':
+      return '精细化配准已完成（未保存）'
+    case 'failed':
+      return '精细化配准失败'
+    default:
+      return '尚未进行精细化配准'
+  }
+})
+
+const fineSubtext = computed(() => {
+  switch (finePhase.value) {
+    case 'blocked':
+      return fineRunBlockedReason.value
+    case 'computing':
+      return '以粗配准矩阵为初值执行 ICP 精调，请稍候'
+    case 'regressed':
+      return '可调整阈值，或开启「告警但应用精调」后重新计算'
+    case 'saved':
+      return '校准矩阵已保存，可进入「偏差对比」'
+    case 'computed':
+      return '点击下方「保存结果」写入校准矩阵'
+    case 'failed':
+      return fineAlignError.value || '请检查数据后重试'
+    default:
+      return '点击下方「开始计算」执行 ICP 精调'
+  }
+})
+
+const fineRunLabel = computed(() =>
+  fineAlignResult.value ? '重新计算' : '开始计算',
+)
+
 /** 顶部"校准完成"按钮的可用性判断。 */
 const canSaveCalibration = computed(() => {
   if (!hasModel.value || !hasTileset.value) return false
@@ -2912,6 +3064,8 @@ const saveCalibrationTooltip = computed(() => {
 
 function markFineAlignmentDirty() {
   fineAlignResult.value = null
+  fineAlignmentSaved.value = false
+  fineAlignError.value = ''
 }
 
 function markCoarseAlignmentDirty() {
@@ -2956,57 +3110,6 @@ function resetFineThresholdDefaults() {
   markFineAlignmentDirty()
 }
 
-/** 格式化精细化配准指标，用于弹窗展示。 */
-function formatFineAlignMetrics(result: FineAlignmentResult): string {
-  const m = result.metrics
-  const regressed =
-    typeof result.regressed === 'boolean' ? result.regressed : !!result.fallback
-  const appliedFineResult =
-    typeof result.appliedFineResult === 'boolean'
-      ? result.appliedFineResult
-      : !result.fallback
-  const rmseRatio = Number.isFinite(result.rmseRegressRatio)
-    ? result.rmseRegressRatio
-    : fineRmseRegressRatio.value
-  const fitnessRatio = Number.isFinite(result.fitnessRegressRatio)
-    ? result.fitnessRegressRatio
-    : fineFitnessRegressRatio.value
-  const formatNum = (value: unknown, digits: number) => {
-    const num = Number(value)
-    if (!Number.isFinite(num)) return (0).toFixed(digits)
-    return num.toFixed(digits)
-  }
-  const formatCount = (value: unknown) => {
-    const num = Number(value)
-    if (!Number.isFinite(num)) return '0'
-    return Math.round(num).toLocaleString()
-  }
-
-  const decisionTip = regressed
-    ? appliedFineResult
-      ? '\n⚠️ 检测到负优化告警，已按开关应用精调结果（未自动保存）'
-      : '\n⚠️ 检测到负优化告警，已按开关保留初始矩阵（未自动保存）'
-    : '\n✅ 未触发负优化告警，已应用精调结果（未自动保存）'
-  const thresholdTip = `告警阈值：RMSE>${formatNum(rmseRatio, 2)}x 或 Fitness<${formatNum(fitnessRatio, 2)}x`
-  return [
-    `${decisionTip}`,
-    `${thresholdTip}`,
-    ``,
-    `── 配准质量对比 ──`,
-    `初始状态：fitness=${formatNum(m?.initFitness, 4)}  RMSE=${formatNum(m?.initRmse, 4)}m`,
-    `精调结果：fitness=${formatNum(m?.fineFitness, 4)}  RMSE=${formatNum(m?.fineRmse, 4)}m`,
-    ``,
-    `── 矩阵变化量 ──`,
-    `平移变化：${formatNum(m?.deltaTranslationM, 4)}m`,
-    `旋转变化：${formatNum(m?.deltaRotationDeg, 4)}°`,
-    ``,
-    `── 数据规模 ──`,
-    `点云点数：${formatCount(m?.sourceTotalPoints)}`,
-    `Mesh顶点：${formatCount(m?.targetPoints)}`,
-    `计算耗时：${formatNum(m?.elapsedS, 1)}s`,
-  ].join('\n')
-}
-
 /** 执行精细化配准（ICP 精调）。 */
 function activateFineRegistration() {
   registrationStage.value = 'fine'
@@ -3038,6 +3141,7 @@ async function runFineAlignment() {
   }
 
   fineAlignLoading.value = true
+  fineAlignError.value = ''
   try {
     const res = await computeFineAlignment(projectId.value, {
       modelScanFileId: scanFileId.value,
@@ -3054,6 +3158,7 @@ async function runFineAlignment() {
     }
 
     fineAlignResult.value = result
+    fineAlignmentSaved.value = false
 
     // 将精调后的矩阵作为“未保存预览”应用到场景中
     latestAlignmentResult.value = {
@@ -3078,13 +3183,18 @@ async function runFineAlignment() {
     pendingAlignmentRestore.value = latestAlignmentResult.value
     tryRestoreSavedBimAlignment(true, false)
 
-    ElMessageBox.alert(formatFineAlignMetrics(result), '精细化配准结果', {
-      confirmButtonText: '确定',
-      customStyle: { 'white-space': 'pre-wrap', 'font-family': 'monospace' },
-    })
+    if (result.regressed) {
+      ElMessage.warning('精调出现退化告警，请查看结果后决定是否保存')
+    } else {
+      ElMessage.success('精细化配准完成，点击「保存结果」写入校准矩阵')
+    }
   } catch (error: any) {
     console.error('精细化配准失败:', error)
-    ElMessage.error(error?.message || '精细化配准失败，请稍后重试')
+    fineAlignError.value =
+      error?.response?.data?.msg ||
+      error?.message ||
+      '精细化配准失败，请稍后重试'
+    ElMessage.error(fineAlignError.value)
   } finally {
     fineAlignLoading.value = false
   }

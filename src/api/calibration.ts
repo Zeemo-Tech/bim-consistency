@@ -331,17 +331,22 @@ export const computeBimAlignment = (
 /**
  * 执行精细化配准（ICP 精调）
  */
-export const computeFineAlignment = (projectId: number, params: FineAlignmentParams) => {
+export const computeFineAlignment = (
+  projectId: number,
+  params: FineAlignmentParams,
+) => {
   return http.request<Result<FineAlignmentResult>>(
-    "post",
+    'post',
     `/api/projects/${projectId}/alignments/bim/fine`,
     {
       data: params,
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
-    }
-  );
+      // ICP 精调耗时较长（大点云可达数分钟），覆盖全局 20s 超时
+      timeout: 1800000,
+    },
+  )
 };
 
 /**

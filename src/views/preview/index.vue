@@ -4668,7 +4668,6 @@ onBeforeUnmount(() => {
   grid-template-columns: 1fr 1fr;
   gap: 2px;
   padding: 2px;
-  margin-top: 2px;
   background: var(--bg-muted);
   border: 1px solid var(--border-color-light);
   border-radius: var(--radius-xs);
@@ -4704,6 +4703,12 @@ onBeforeUnmount(() => {
 .mesh-segmented__btn:disabled {
   color: var(--text-disabled);
   cursor: not-allowed;
+}
+
+.mesh-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-compact);
 }
 
 .mesh-section-head {
@@ -4754,7 +4759,6 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  margin-top: 10px;
 }
 
 .mesh-status-row__icon {
@@ -4805,7 +4809,7 @@ onBeforeUnmount(() => {
 
 .mesh-stats {
   width: 100%;
-  margin: 10px 0 0;
+  margin: 0;
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
   border-collapse: collapse;
@@ -4831,7 +4835,6 @@ onBeforeUnmount(() => {
 .mesh-actions {
   display: flex;
   gap: 6px;
-  margin-top: 10px;
 }
 
 .mesh-run-btn {
@@ -4849,7 +4852,7 @@ onBeforeUnmount(() => {
 }
 
 .error-message {
-  margin: var(--spacing-sm) 0 0;
+  margin: 0;
   font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
