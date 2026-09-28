@@ -446,22 +446,22 @@
                 aria-label="工程容差半宽，单位毫米"
               />
             </div>
-          </div>
 
-          <div class="c2m-setting-row">
-            <span class="c2m-setting-row__icon">
-              <el-icon><Histogram /></el-icon>
-            </span>
-            <span class="c2m-setting-row__label">直方图桶数</span>
-            <el-input-number
-              v-model="c2mHistBins"
-              :min="10"
-              :max="200"
-              :step="10"
-              :precision="0"
-              size="small"
-              aria-label="直方图桶数"
-            />
+            <div class="c2m-setting-row">
+              <span class="c2m-setting-row__icon">
+                <el-icon><Histogram /></el-icon>
+              </span>
+              <span class="c2m-setting-row__label">直方图桶数</span>
+              <el-input-number
+                v-model="c2mHistBins"
+                :min="10"
+                :max="200"
+                :step="10"
+                :precision="0"
+                size="small"
+                aria-label="直方图桶数"
+              />
+            </div>
           </div>
 
           <!-- 法向约束高级参数（折叠） -->
@@ -2653,7 +2653,7 @@ function histBarColor(index: number): string {
 }
 
 .c2m-secondary-settings .c2m-setting-row {
-  grid-template-columns: 28px minmax(0, 1fr) 88px;
+  grid-template-columns: 28px minmax(0, 1fr) 104px;
 }
 
 .c2m-setting-row {
@@ -2695,7 +2695,7 @@ function histBarColor(index: number): string {
 }
 
 .c2m-secondary-settings .c2m-setting-row > :deep(.el-input-number) {
-  width: 88px;
+  width: 104px;
   align-self: center;
 }
 
@@ -2716,12 +2716,13 @@ function histBarColor(index: number): string {
   background: #fff !important;
 }
 
-.c2m-setting-row :deep(.el-input-number__input),
+.c2m-setting-row :deep(.el-input__inner),
 .c2m-setting-row :deep(.el-select__selected-item),
 .c2m-setting-row :deep(.el-select__caret) {
   color: #223b5d !important;
   font-family: var(--font-family-number);
   font-size: 11px;
+  text-align: center;
 }
 
 .c2m-setting-row :deep(.el-input-number__increase),

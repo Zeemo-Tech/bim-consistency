@@ -1138,7 +1138,9 @@
   width: 100%;
 }
 
-.right-panel :deep(.el-input-number .el-input__wrapper) {
+/* 仅右侧控件的数字输入（controls-position=right）收紧右内边距；
+   双侧控件（is-center）必须保持左右对称，否则数字会被右侧按钮遮挡 */
+.right-panel :deep(.el-input-number:not(.is-center) .el-input__wrapper) {
   padding-right: 10px;
 }
 
@@ -2083,6 +2085,7 @@
 }
 
 .calibration-page .pointcloud-view-cube {
+  right: 56px;
   z-index: 60;
 }
 
@@ -3226,11 +3229,10 @@
   }
 }
 
-/* ===== 参考项目：折叠按钮最终定位（面板展开时 right:56px，收起时 right:8px） ===== */
+/* ===== 折叠按钮定位：面板展开时贴近右边缘（避免遮挡面板内容），收起时 right:8px ===== */
 .calibration-page .right-panel-toggle,
-.calibration-page .right-panel-toggle:hover,
-.calibration-page .pointcloud-view-cube {
-  right: 56px;
+.calibration-page .right-panel-toggle:hover {
+  right: 10px;
 }
 
 .calibration-page .main-content.is-panel-hidden .right-panel-toggle {
