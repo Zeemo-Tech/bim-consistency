@@ -1414,8 +1414,9 @@ const syncCadBindingFromCalibration = async (): Promise<boolean> => {
       formData.value.projectId,
       formData.value.scanFileId,
     )
-    if (res.code === 200 && res.data?.cadFileId) {
-      formData.value.cadFileId = res.data.cadFileId
+    const resolved = res.data?.resolvedCadFileId ?? res.data?.cadFileId
+    if (res.code === 200 && resolved) {
+      formData.value.cadFileId = resolved
       return true
     }
   } catch (error) {

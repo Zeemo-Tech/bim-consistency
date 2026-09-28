@@ -7623,7 +7623,9 @@ async function prefetchCadForStep2() {
   if (!projectId.value || !scanFileId.value) return
   try {
     const res = await getScanCalibration(projectId.value, scanFileId.value)
-    const cadFileId = Number(res?.data?.cadFileId)
+    const cadFileId = Number(
+      res?.data?.resolvedCadFileId ?? res?.data?.cadFileId,
+    )
     if (!Number.isFinite(cadFileId) || cadFileId <= 0) return
     await prefetchCadCalibration({
       projectId: projectId.value,

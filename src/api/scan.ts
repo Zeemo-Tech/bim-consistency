@@ -41,6 +41,10 @@ export interface ScanCalibration {
   gaussFileId: number | null
   gaussBuildingName?: string | null
   gaussFloorName?: string | null
+  /** 可用于 CAD 校准的图纸：优先已绑定，其次同幢同层匹配（只读解析，不代表已校准） */
+  resolvedCadFileId?: number | null
+  /** resolvedCadFileId 的来源：bound / same-building-floor / none */
+  cadMatchSource?: string
 }
 
 /** 获取扫描历史列表参数 */
