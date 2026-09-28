@@ -462,8 +462,9 @@
 // BIM 材质浮层（参考项目 left-material-popover）
 .left-material-popover {
   position: absolute;
-  top: 118px;
-  left: 60px;
+  top: 50%;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
   z-index: 13;
   box-sizing: border-box;
   width: 126px;
@@ -1822,8 +1823,9 @@
 
 .calibration-page .left-material-popover {
   position: absolute;
-  top: 118px;
-  left: calc(var(--editor-toolbar-width) + 10px);
+  top: 50%;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
   z-index: calc(var(--z-sticky) + 3);
   box-sizing: border-box;
   width: 126px;
@@ -1866,7 +1868,8 @@
   place-items: center;
 }
 
-.calibration-page .left-toolbar.view-toolbar .measurement-tool-item {
+.calibration-page .left-toolbar.view-toolbar .measurement-tool-item,
+.calibration-page .left-toolbar.view-toolbar .material-tool-item {
   position: relative;
   overflow: visible;
 }
@@ -1911,14 +1914,6 @@
 .calibration-page .left-toolbar.view-toolbar .tool-btn__img1 {
   width: 18px;
   height: 18px;
-}
-
-.calibration-page
-  .left-toolbar.view-toolbar
-  .tool-btn--orthographic
-  .tool-btn__img1 {
-  filter: invert(43%) sepia(12%) saturate(740%) hue-rotate(176deg)
-    brightness(86%) contrast(88%);
 }
 
 .calibration-page .left-toolbar.view-toolbar .tool-btn__svg {

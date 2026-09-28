@@ -134,11 +134,8 @@
         >
           <div class="tool-item">
             <el-button
-              class="tool-btn tool-btn--img"
-              :class="{
-                'is-on': projectionMode === 'orthographic',
-                'tool-btn--orthographic': projectionMode === 'orthographic',
-              }"
+              class="tool-btn tool-btn--svg"
+              :class="{ 'is-on': projectionMode === 'orthographic' }"
               :aria-label="
                 projectionMode === 'perspective'
                   ? '当前透视，切换正交'
@@ -155,12 +152,12 @@
                 )
               "
             >
-              <img
-                class="tool-btn__img1"
-                :src="
-                  projectionMode === 'perspective' ? toushiIcon : zhengjiaoIcon
+              <ViewportToolGlyph
+                :name="
+                  projectionMode === 'perspective'
+                    ? 'projectionPerspective'
+                    : 'projectionOrthographic'
                 "
-                alt=""
               />
             </el-button>
           </div>
@@ -182,23 +179,6 @@
           </div>
         </el-tooltip>
 
-        <el-tooltip
-          :content="isLightBackground ? '切换夜间背景' : '切换白昼背景'"
-          placement="right"
-        >
-          <div class="tool-item">
-            <el-button
-              class="tool-btn"
-              :class="{ 'is-on': isLightBackground }"
-              circle
-              text
-              :icon="isLightBackground ? Moon : Sunny"
-              :aria-label="isLightBackground ? '切换夜间背景' : '切换白昼背景'"
-              @click="toggleBackground"
-            />
-          </div>
-        </el-tooltip>
-
         <el-tooltip :content="meshWireframeTooltip" placement="right">
           <div class="tool-item">
             <el-button
@@ -212,36 +192,6 @@
               @click="toggleMeshWireframe"
             >
               <ViewportToolGlyph name="wireframe" />
-            </el-button>
-          </div>
-        </el-tooltip>
-
-        <el-tooltip content="BIM 材质" placement="right">
-          <div class="tool-item">
-            <el-button
-              class="tool-btn tool-btn--material"
-              :class="{ 'is-on': showMaterialMenu }"
-              circle
-              text
-              :disabled="!hasModel"
-              aria-label="BIM 材质"
-              :aria-expanded="showMaterialMenu"
-              @click="showMaterialMenu = !showMaterialMenu"
-            >
-              <svg
-                class="tool-btn__svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M12 3 21 8 12 13 3 8 12 3Z" />
-                <path d="m3 12 9 5 9-5" />
-                <path d="m3 16 9 5 9-5" />
-              </svg>
             </el-button>
           </div>
         </el-tooltip>
@@ -321,6 +271,93 @@
           </div>
         </el-tooltip>
 
+        <el-divider />
+
+        <el-tooltip
+          :content="isLightBackground ? '切换夜间背景' : '切换白昼背景'"
+          placement="right"
+        >
+          <div class="tool-item">
+            <el-button
+              class="tool-btn"
+              :class="{ 'is-on': isLightBackground }"
+              circle
+              text
+              :icon="isLightBackground ? Moon : Sunny"
+              :aria-label="isLightBackground ? '切换夜间背景' : '切换白昼背景'"
+              @click="toggleBackground"
+            />
+          </div>
+        </el-tooltip>
+
+        <div class="tool-item material-tool-item">
+          <el-tooltip
+            content="BIM 材质"
+            placement="right"
+            :disabled="showMaterialMenu"
+          >
+            <el-button
+              class="tool-btn tool-btn--material"
+              :class="{ 'is-on': showMaterialMenu }"
+              circle
+              text
+              :disabled="!hasModel"
+              aria-label="BIM 材质"
+              :aria-expanded="showMaterialMenu"
+              @click="showMaterialMenu = !showMaterialMenu"
+            >
+              <svg
+                class="tool-btn__svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 3 21 8 12 13 3 8 12 3Z" />
+                <path d="m3 12 9 5 9-5" />
+                <path d="m3 16 9 5 9-5" />
+              </svg>
+            </el-button>
+          </el-tooltip>
+          <div
+            v-if="showMaterialMenu"
+            class="left-material-popover"
+            role="menu"
+            aria-label="BIM 材质模式"
+          >
+            <button
+              type="button"
+              :class="{ 'is-active': materialMode === 'original' }"
+              role="menuitemradio"
+              :aria-checked="materialMode === 'original'"
+              @click="selectMaterialMode('original')"
+            >
+              原始材质
+            </button>
+            <button
+              type="button"
+              :class="{ 'is-active': materialMode === 'unlit' }"
+              role="menuitemradio"
+              :aria-checked="materialMode === 'unlit'"
+              @click="selectMaterialMode('unlit')"
+            >
+              无光照
+            </button>
+            <button
+              type="button"
+              :class="{ 'is-active': materialMode === 'lambert' }"
+              role="menuitemradio"
+              :aria-checked="materialMode === 'lambert'"
+              @click="selectMaterialMode('lambert')"
+            >
+              漫反射
+            </button>
+          </div>
+        </div>
+
         <el-popover
           v-model:visible="showPointcloudSettings"
           placement="right-end"
@@ -385,6 +422,19 @@
               />
               <output>{{ pointcloudPointSize.toFixed(1) }} px</output>
             </label>
+            <label class="pointcloud-size-control pointcloud-count-control">
+              <span>点数量</span>
+              <input
+                v-model.number="pointcloudPointRatio"
+                aria-label="点数量（显示比例）"
+                type="range"
+                min="1"
+                max="100"
+                step="1"
+                @input="applyPointcloudPointLimit"
+              />
+              <output>{{ pointCloudVisiblePoints.toLocaleString() }}</output>
+            </label>
             <div v-if="activeWorkflowStep === 1" class="pointcloud-display-row">
               <div
                 class="pointcloud-segmented pointcloud-color-modes"
@@ -403,6 +453,10 @@
                   type="button"
                   :class="{ on: pointcloudColorMode === 'intensity' }"
                   :aria-pressed="pointcloudColorMode === 'intensity'"
+                  :disabled="!pointcloudHasIntensity"
+                  :title="
+                    pointcloudHasIntensity ? '按强度着色' : '该点云不含强度属性'
+                  "
                   @click="setPointcloudColorMode('intensity')"
                 >
                   强度
@@ -446,42 +500,6 @@
           </div>
         </el-popover>
       </aside>
-
-      <!-- BIM 材质浮层 -->
-      <div
-        v-if="showMaterialMenu"
-        class="left-material-popover"
-        role="menu"
-        aria-label="BIM 材质模式"
-      >
-        <button
-          type="button"
-          :class="{ 'is-active': materialMode === 'original' }"
-          role="menuitemradio"
-          :aria-checked="materialMode === 'original'"
-          @click="selectMaterialMode('original')"
-        >
-          原始材质
-        </button>
-        <button
-          type="button"
-          :class="{ 'is-active': materialMode === 'unlit' }"
-          role="menuitemradio"
-          :aria-checked="materialMode === 'unlit'"
-          @click="selectMaterialMode('unlit')"
-        >
-          无光照
-        </button>
-        <button
-          type="button"
-          :class="{ 'is-active': materialMode === 'lambert' }"
-          role="menuitemradio"
-          :aria-checked="materialMode === 'lambert'"
-          @click="selectMaterialMode('lambert')"
-        >
-          漫反射
-        </button>
-      </div>
 
       <!-- 中间3D视图区域 -->
       <div
@@ -1352,8 +1370,6 @@ import {
 } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import wanggeIcon from '@/assets/images/wangge.png'
-import toushiIcon from '@/assets/images/toushi.png'
-import zhengjiaoIcon from '@/assets/images/zhengjiao.png'
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
@@ -1767,6 +1783,7 @@ function clearLoadedTilesets() {
     entry.tr.dispose?.()
   }
   loadedTilesets.length = 0
+  pointCloudLoadedPoints.value = 0
   if (!getLoadedItemById(activeClipTargetId)) activeClipTargetId = ''
 
   updateLoadedFlags()
@@ -1926,7 +1943,7 @@ const webgpuSupported = computed(
 const statusText = ref<string>('')
 const isDragging = ref(false)
 const hasModel = ref(false)
-const materialMode = ref<'original' | 'unlit' | 'lambert'>('original')
+const materialMode = ref<'original' | 'unlit' | 'lambert'>('lambert')
 const tilesetUrl = ref<string>('')
 const hasTileset = ref(false)
 const hasGltf = ref(false)
@@ -1951,10 +1968,51 @@ const pointcloudColorMode = ref<'rgb' | 'intensity'>('rgb')
 const pointcloudColorRamp = ref<'grayscale' | 'spectrum' | 'viridis'>(
   'spectrum',
 )
+/** 当前点云是否含强度属性（决定「强度」着色是否可用） */
+const pointcloudHasIntensity = ref(false)
+let pointIntensityMin = 0
+let pointIntensityMax = 1
+/** 当前已加载点数（从已加载 tiles 统计） */
+const pointCloudLoadedPoints = ref(0)
+/** 点数量显示比例（1..100%，像点大小一样可调） */
+const pointcloudPointRatio = ref(100)
+const pointCloudVisiblePoints = computed(() =>
+  Math.floor(pointCloudLoadedPoints.value * (pointcloudPointRatio.value / 100)),
+)
+
+/** 作用：统计当前已加载 tiles 的点数（只读几何 count，成本与 tile 数量相关）。 */
+function updateLoadedPointCount() {
+  let total = 0
+  for (const entry of loadedTilesets) {
+    entry.wrapper?.traverse?.((obj: any) => {
+      if (obj?.isPoints && obj.geometry?.attributes?.position) {
+        total += obj.geometry.attributes.position.count
+      }
+    })
+  }
+  pointCloudLoadedPoints.value = total
+}
+
+/** 作用：按比例限制某个子树点云的显示点数（drawRange）。 */
+function applyPointLimitToRoot(root: any) {
+  const ratio = Math.min(1, Math.max(0.01, pointcloudPointRatio.value / 100))
+  root?.traverse?.((obj: any) => {
+    if (!obj?.isPoints || !obj.geometry) return
+    const count = obj.geometry.getAttribute('position')?.count ?? 0
+    obj.geometry.setDrawRange(0, Math.max(1, Math.floor(count * ratio)))
+  })
+}
+
+/** 作用：按当前比例应用「点数量」限制（所有已加载点云）。 */
+function applyPointcloudPointLimit() {
+  for (const entry of loadedTilesets) applyPointLimitToRoot(entry.wrapper)
+  requestRender()
+}
 
 /** 作用：把点云显示设置（点大小 / 配色 / EDL）应用到当前场景。 */
 function applyPointcloudDisplay() {
   applyPointcloudPointSize(pointcloudPointSize.value)
+  recolorAllPointClouds()
 }
 function setPointcloudColorMode(mode: 'rgb' | 'intensity') {
   pointcloudColorMode.value = mode
@@ -1968,6 +2026,154 @@ function toggleEdl(value: string | number | boolean) {
   edlEnabled.value = Boolean(value)
   if (edlPipeline) edlPipeline.enabled = edlEnabled.value
   applyPointcloudDisplay()
+  requestRender()
+}
+
+// ---------- 点云着色（真彩 / 强度 + 色带）；算法与点云渲染页一致 ----------
+const VIRIDIS_STOPS = [0x440154, 0x31688e, 0x35b779, 0xfde725]
+const colorRampScratch = new THREE.Color()
+
+/** 从 pnts 的 batch table 读取一个标量数组（INTENSITY / CLASSIFICATION）。 */
+function readBatchScalar(batchTable: any, key: string): number[] | null {
+  if (!batchTable || typeof batchTable.getData !== 'function') return null
+  const desc = batchTable.header?.[key]
+  if (!desc) return null
+  try {
+    const data = batchTable.getData(key, desc.componentType, desc.type)
+    return data ? Array.from(data as ArrayLike<number>) : null
+  } catch {
+    return null
+  }
+}
+
+/** 作用：按当前色带把归一化强度 t 映射到颜色。 */
+function rampColorValue(t: number, target: THREE.Color): THREE.Color {
+  const x = Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0))
+  if (pointcloudColorRamp.value === 'grayscale') return target.setRGB(x, x, x)
+  if (pointcloudColorRamp.value === 'viridis') {
+    const segment = Math.min(2, Math.floor(x * 3))
+    const local = x * 3 - segment
+    return target
+      .setHex(VIRIDIS_STOPS[segment])
+      .lerp(
+        new THREE.Color(VIRIDIS_STOPS[segment + 1]),
+        Math.min(1, Math.max(0, local)),
+      )
+  }
+  // spectrum / 彩虹：蓝(低) → 青 → 绿 → 黄 → 红(高)
+  const hue = (1 - x) * 240
+  const hh = hue / 60
+  const xx = 1 - Math.abs((hh % 2) - 1)
+  let r = 0
+  let g = 0
+  let b = 0
+  if (hh < 1) {
+    r = 1
+    g = xx
+  } else if (hh < 2) {
+    r = xx
+    g = 1
+  } else if (hh < 3) {
+    g = 1
+    b = xx
+  } else if (hh < 4) {
+    g = xx
+    b = 1
+  } else {
+    r = xx
+    b = 1
+  }
+  return target.setRGB(r, g, b)
+}
+
+/** 作用：按当前模式（真彩 / 强度）重算某个点几何的 color 属性。 */
+function recolorPointGeometry(geometry: any) {
+  const base = geometry?.getAttribute?.('aBaseColor')
+  const count = base?.count ?? 0
+  if (!count) return
+  const intensity = geometry.getAttribute('aIntensity')
+  // 复用同一个 Float32 color 属性并原地写入 + needsUpdate，
+  // 否则每次替换 BufferAttribute 时 three 的上传缓存不会刷新（画面不更新）。
+  let attr = geometry.getAttribute('color')
+  if (
+    !attr ||
+    !(attr.array instanceof Float32Array) ||
+    attr.itemSize !== 3 ||
+    attr.count !== count
+  ) {
+    attr = new THREE.BufferAttribute(new Float32Array(count * 3), 3)
+    geometry.setAttribute('color', attr)
+  }
+  const out = attr.array as Float32Array
+  const span = Math.max(pointIntensityMax - pointIntensityMin, 1e-6)
+  for (let i = 0; i < count; i++) {
+    if (pointcloudColorMode.value === 'intensity' && intensity) {
+      rampColorValue(
+        (intensity.getX(i) - pointIntensityMin) / span,
+        colorRampScratch,
+      )
+    } else {
+      colorRampScratch.setRGB(base.getX(i), base.getY(i), base.getZ(i))
+    }
+    out[i * 3] = colorRampScratch.r
+    out[i * 3 + 1] = colorRampScratch.g
+    out[i * 3 + 2] = colorRampScratch.b
+  }
+  attr.needsUpdate = true
+}
+
+/** 作用：处理新加载瓦片的着色属性（保存真彩 + 读取 INTENSITY），并按当前模式着色。 */
+function processPointColorAttributes(root: any) {
+  root?.traverse?.((obj: any) => {
+    if (!obj?.isPoints || !obj.geometry) return
+    const geometry = obj.geometry
+    if ((geometry.userData as any).__pcColorReady) {
+      recolorPointGeometry(geometry)
+      return
+    }
+    const colorAttr = geometry.getAttribute('color')
+    const count = geometry.getAttribute('position')?.count ?? 0
+    if (!colorAttr || !count || colorAttr.count !== count) return
+
+    const base = new Float32Array(count * 3)
+    for (let i = 0; i < count; i++) {
+      base[i * 3] = colorAttr.getX(i)
+      base[i * 3 + 1] = colorAttr.getY(i)
+      base[i * 3 + 2] = colorAttr.getZ(i)
+    }
+    geometry.setAttribute('aBaseColor', new THREE.BufferAttribute(base, 3))
+
+    const batchTable = obj.batchTable ?? obj.userData?.batchTable
+    const intensity = readBatchScalar(batchTable, 'INTENSITY')
+    if (intensity && intensity.length === count) {
+      const values = new Float32Array(count)
+      for (let i = 0; i < count; i++) {
+        const value = Number(intensity[i])
+        values[i] = value
+        if (!pointcloudHasIntensity.value) {
+          pointIntensityMin = value
+          pointIntensityMax = value
+        } else {
+          if (value < pointIntensityMin) pointIntensityMin = value
+          if (value > pointIntensityMax) pointIntensityMax = value
+        }
+      }
+      geometry.setAttribute('aIntensity', new THREE.BufferAttribute(values, 1))
+      pointcloudHasIntensity.value = true
+    }
+
+    ;(geometry.userData as any).__pcColorReady = true
+    recolorPointGeometry(geometry)
+  })
+}
+
+/** 作用：按当前模式重着色所有已加载点云。 */
+function recolorAllPointClouds() {
+  for (const entry of loadedTilesets) {
+    entry.wrapper?.traverse?.((obj: any) => {
+      if (obj?.isPoints && obj.geometry) recolorPointGeometry(obj.geometry)
+    })
+  }
   requestRender()
 }
 
@@ -6276,13 +6482,17 @@ async function loadTileset(url: string) {
   tr.setCamera(camera)
   resizeRenderer()
 
-  tr.addEventListener('needs-update', () => requestRender())
+  tr.addEventListener('needs-update', () => {
+    updateLoadedPointCount()
+    requestRender()
+  })
   tr.addEventListener('tiles-load-start', () => {
     statusText.value = `Loading tiles...`
     requestRender()
   })
   tr.addEventListener('tiles-load-end', () => {
     statusText.value = `Tiles loaded.`
+    updateLoadedPointCount()
     pointCloudClippingReady.value = true
     invalidateClipBounds()
     if (showBounds.value && !enableClipping.value && canEnableClipping.value) {
@@ -6338,9 +6548,11 @@ async function loadTileset(url: string) {
 
     const { fixedAttributes, oversizedGeometries } =
       sanitizeObjectForWebGPU(tileScene)
+    processPointColorAttributes(tileScene)
     applyMaterialMode(tileScene, materialMode.value)
     // 只处理本次新加载的瓦片，避免每个瓦片加载时都全量遍历整棵 tileset。
     applyPointSizeToRoot(tileScene, pointcloudPointSize.value)
+    applyPointLimitToRoot(tileScene)
     void computedPointBounds
     if (oversizedGeometries > 0) {
       statusText.value = `Tile too large for WebGPU (>${256}MB). Consider increasing SSE or re-tiling.`
@@ -7917,6 +8129,11 @@ onBeforeUnmount(() => {
 .pointcloud-tools-popover output {
   min-width: 40px;
   font-variant-numeric: tabular-nums;
+}
+
+.pointcloud-tools-popover .pointcloud-count-control output {
+  min-width: 76px;
+  text-align: right;
 }
 
 .pointcloud-tools-popover :is(button, input):focus-visible {
