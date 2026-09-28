@@ -225,15 +225,27 @@
 
         <div v-show="!sidebarCollapsed" class="sidebar-sections">
           <!-- 模型与网格 -->
-          <section class="tool-section">
-            <h3>模型与网格</h3>
-            <div
-              class="model-view-options"
-              role="group"
-              aria-label="模型显示内容"
-            >
+          <section class="tool-section mesh-section">
+            <div class="mesh-section-head">
+              <h3>模型与网格</h3>
+              <span class="mesh-badge" :class="`is-${remeshPhase}`">
+                <el-icon v-if="remeshPhaseIsBusy" class="is-loading" :size="12">
+                  <Loading />
+                </el-icon>
+                <el-icon v-else-if="remeshPhase === 'ready'" :size="12">
+                  <CircleCheck />
+                </el-icon>
+                <el-icon v-else-if="remeshPhase === 'failed'" :size="12">
+                  <CircleClose />
+                </el-icon>
+                <el-icon v-else :size="12"><Timer /></el-icon>
+                {{ remeshBadgeText }}
+              </span>
+            </div>
+
+            <div class="mesh-segmented" role="group" aria-label="模型显示内容">
               <button
-                class="preview-button"
+                class="mesh-segmented__btn"
                 :class="{ 'is-active': !remeshVisible }"
                 type="button"
                 :disabled="!hasModel || remeshBusy"
@@ -242,25 +254,59 @@
                 原始 IFC
               </button>
               <button
-                class="preview-button"
+                class="mesh-segmented__btn"
                 :class="{ 'is-active': remeshVisible }"
                 type="button"
                 :disabled="!hasModel || !remeshReady || remeshBusy"
                 @click="toggleRemesh(true)"
               >
+                <el-icon
+                  v-if="remeshPhaseIsBusy && !remeshVisible"
+                  class="is-loading"
+                  :size="12"
+                >
+                  <Loading />
+                </el-icon>
                 网格结果
               </button>
             </div>
-            <p
-              class="mesh-status"
+
+            <div
+              class="mesh-status-row"
+              :class="`is-${remeshPhase}`"
               role="status"
-              :class="{
-                'is-ready': remeshReady,
-                'is-error': remeshStatus?.status === 'failed',
-              }"
+              aria-live="polite"
             >
-              {{ remeshStatusText }}
-            </p>
+              <el-icon
+                v-if="remeshPhaseIsBusy"
+                class="is-loading mesh-status-row__icon"
+                :size="15"
+              >
+                <Loading />
+              </el-icon>
+              <el-icon
+                v-else-if="remeshPhase === 'ready'"
+                class="mesh-status-row__icon"
+                :size="15"
+              >
+                <CircleCheck />
+              </el-icon>
+              <el-icon
+                v-else-if="remeshPhase === 'failed'"
+                class="mesh-status-row__icon"
+                :size="15"
+              >
+                <CircleClose />
+              </el-icon>
+              <el-icon v-else class="mesh-status-row__icon" :size="15">
+                <Timer />
+              </el-icon>
+              <div class="mesh-status-row__text">
+                <strong>{{ remeshHeadline }}</strong>
+                <small>{{ remeshSubtext }}</small>
+              </div>
+            </div>
+
             <table
               v-if="remeshReady && remeshStats"
               class="mesh-stats"
@@ -286,34 +332,35 @@
                 </tr>
               </tbody>
             </table>
+
             <div class="mesh-actions">
               <button
-                class="preview-button primary-button"
+                class="preview-button primary-button mesh-run-btn"
                 type="button"
                 :disabled="!remeshCanRun || remeshBusy"
                 @click="retryRemesh"
               >
+                <el-icon v-if="remeshSubmitting" class="is-loading" :size="13">
+                  <Loading />
+                </el-icon>
                 {{ remeshActionText }}
               </button>
               <button
-                class="preview-button"
+                class="preview-button icon-btn"
                 type="button"
+                title="刷新状态"
+                aria-label="刷新状态"
                 :disabled="remeshBusy || remeshRunning"
                 @click="refreshRemeshStatus"
               >
-                刷新状态
+                <el-icon><Refresh /></el-icon>
               </button>
             </div>
+
             <p v-if="remeshError" role="alert" class="error-message">
               {{ remeshError }}
             </p>
-            <p class="section-note">
-              {{
-                remeshVisible
-                  ? '橙色模型为均匀化结果；开启线框可检查三角网格。'
-                  : '切换网格结果后，可用线框检查网格化效果。'
-              }}
-            </p>
+
             <label class="toggle-row">
               <span>线框模式</span>
               <el-switch
@@ -388,7 +435,12 @@ import {
   ArrowLeft,
   Grid,
   Warning,
-  DArrowRight
+  DArrowRight,
+  Loading,
+  CircleCheck,
+  CircleClose,
+  Timer,
+  Refresh
 } from '@element-plus/icons-vue'
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js'
 import { Line2 } from 'three/examples/jsm/lines/webgpu/Line2.js'
@@ -1770,26 +1822,97 @@ const remeshActionText = computed(() => {
   if (remeshStatus.value?.status === 'failed') return '重试生成网格'
   return '生成网格'
 })
-const remeshStatusText = computed(() => {
+/** 均匀化当前阶段：submitting/queued/processing/loading/ready/failed/idle */
+const remeshPhase = computed(() => {
+  if (remeshSubmitting.value) return 'submitting'
+  const status = remeshStatus.value?.status
+  if (status === 'queued') return 'queued'
+  if (status === 'processing') return 'processing'
+  if (remeshLoading.value) return 'loading'
+  if (remeshReady.value) return 'ready'
+  if (status === 'failed') return 'failed'
+  return 'idle'
+})
+/** 是否处于“进行中”（用于转圈图标） */
+const remeshPhaseIsBusy = computed(() =>
+  ['submitting', 'queued', 'processing', 'loading'].includes(remeshPhase.value),
+)
+const remeshBadgeText = computed(() => {
+  switch (remeshPhase.value) {
+    case 'submitting':
+      return '提交中'
+    case 'queued':
+      return '排队中'
+    case 'processing':
+      return '生成中'
+    case 'loading':
+      return '加载中'
+    case 'ready':
+      return remeshVisible.value ? '已显示' : '已完成'
+    case 'failed':
+      return '失败'
+    default:
+      return '未生成'
+  }
+})
+const remeshHeadline = computed(() => {
   if (!remeshStatus.value) return '正在查询均匀化状态…'
   if (!remeshStatus.value.supported) return '当前模型不支持网格均匀化'
-  switch (remeshStatus.value.status) {
+  switch (remeshPhase.value) {
+    case 'submitting':
+      return '正在提交均匀化任务…'
     case 'queued':
-      return '任务已排队，完成后自动显示保形网格'
+      return '均匀化任务排队中…'
     case 'processing':
-      return '正在生成保形网格，完成后自动显示'
-    case 'succeeded':
-      return remeshReady.value
-        ? remeshVisible.value
-          ? '当前显示：保形网格'
-          : '当前显示：原始模型；可开启保形网格'
-        : '已有结果不可用，请重新生成网格'
+      return '正在生成均匀化网格…'
+    case 'loading':
+      return '正在加载网格结果…'
+    case 'ready':
+      return remeshVisible.value ? '已显示网格结果' : '均匀化已完成'
     case 'failed':
-      return '均匀化失败，可重试'
+      return '均匀化失败'
     default:
       return '尚未生成均匀化网格'
   }
 })
+const remeshSubtext = computed(() => {
+  if (!remeshStatus.value) return '正在读取后端状态'
+  if (!remeshStatus.value.supported) return '仅 BIM（.ifc）文件支持网格均匀化'
+  switch (remeshPhase.value) {
+    case 'submitting':
+      return '已进入后台队列后开始计算'
+    case 'queued':
+    case 'processing':
+      return '完成后会自动切换到网格结果；期间不影响视角与测量'
+    case 'loading':
+      return '正在下载并解析 PLY，稍候自动显示'
+    case 'ready':
+      return remeshVisible.value
+        ? '橙色为均匀化结果；开启线框可检查三角网格'
+        : '点击“网格结果”查看均匀化结果'
+    case 'failed':
+      return remeshStatus.value.lastError || '可点击“重新生成网格”重试'
+    default:
+      return '点击“生成网格”开始均匀化（保形网格，用于 Scan↔BIM 偏差对比）'
+  }
+})
+
+/** 已自动展示过的结果文件 id：同一结果只自动切换一次，尊重用户手动切回原始模型 */
+let autoShownResultFileId: number | null = null
+
+/** 作用：均匀化完成后自动下载并切换到网格结果（若正忙则短暂重试） */
+async function maybeAutoShowRemesh(tries = 0) {
+  const status = remeshStatus.value
+  if (!status || status.status !== 'succeeded' || !status.resultFileId) return
+  if (autoShownResultFileId === status.resultFileId) return
+  if (remeshLoading.value || !hasModel.value) return
+  if (remeshBusy.value) {
+    if (tries < 20) setTimeout(() => void maybeAutoShowRemesh(tries + 1), 400)
+    return
+  }
+  autoShownResultFileId = status.resultFileId
+  await toggleRemesh(true)
+}
 
 /** 作用：为二进制资源请求构造鉴权头（PLY 结果等无法走 axios 拦截器） */
 function buildAuthHeaders(): Record<string, string> {
@@ -1888,6 +2011,9 @@ async function refreshRemeshStatus() {
       ['queued', 'processing'].includes(res.data.status || '')
     ) {
       remeshTimer = setTimeout(() => void refreshRemeshStatus(), 4000)
+    } else if (res.data?.status === 'succeeded') {
+      // 生成完成后自动加载并切换到网格结果
+      void maybeAutoShowRemesh()
     }
   } catch (error: any) {
     remeshError.value =
@@ -1981,6 +2107,8 @@ async function retryRemesh() {
   const force = remeshStatus.value?.status === 'succeeded'
   remeshSubmitting.value = true
   remeshError.value = ''
+  // 新一轮生成：允许新结果完成后再次自动切换
+  autoShownResultFileId = null
   try {
     const res = await remeshBimFile(projectId.value, fileId.value, {
       algorithm: 'bim_preprocessor',
@@ -1995,7 +2123,7 @@ async function retryRemesh() {
       canManualRetry: false
     }
     await refreshRemeshStatus()
-    ElMessage.success('网格均匀化任务已提交，完成后可切换查看')
+    ElMessage.success('网格均匀化任务已提交，完成后将自动切换到网格结果')
   } catch (error: any) {
     remeshError.value =
       error?.response?.data?.msg || error?.message || '提交均匀化任务失败'
@@ -4535,32 +4663,149 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
 }
 
-.model-view-options {
+.mesh-segmented {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: var(--spacing-sm);
+  gap: 2px;
+  padding: 2px;
+  margin-top: 2px;
+  background: var(--bg-muted);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-xs);
 }
 
-.mesh-status {
-  margin: var(--spacing-compact) 0;
-  font-size: var(--font-size-xs);
-  line-height: var(--line-height-base, 1.5);
+.mesh-segmented__btn {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--radius-xs) - 1px);
+}
+
+.mesh-segmented__btn:hover:not(:disabled):not(.is-active) {
+  color: var(--text-primary);
+  background: var(--bg-control-hover);
+}
+
+.mesh-segmented__btn.is-active {
+  font-weight: 600;
+  color: var(--bg-card);
+  background: var(--color-primary);
+}
+
+.mesh-segmented__btn:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.mesh-section-head {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mesh-section-head h3 {
+  margin: 0;
+}
+
+.mesh-badge {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  background: var(--bg-muted);
+  border: 1px solid var(--border-color-light);
+  border-radius: 999px;
+}
+
+.mesh-badge.is-submitting,
+.mesh-badge.is-queued,
+.mesh-badge.is-processing,
+.mesh-badge.is-loading {
+  color: var(--color-primary-active);
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+
+.mesh-badge.is-ready {
+  color: var(--color-success);
+  border-color: currentcolor;
+}
+
+.mesh-badge.is-failed {
+  color: var(--text-danger);
+  border-color: currentcolor;
+}
+
+.mesh-status-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 10px;
+}
+
+.mesh-status-row__icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--text-secondary);
+}
+
+.mesh-status-row__text {
+  min-width: 0;
+}
+
+.mesh-status-row__text strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.mesh-status-row__text small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 
-.mesh-status.is-ready {
+.mesh-status-row.is-submitting .mesh-status-row__icon,
+.mesh-status-row.is-queued .mesh-status-row__icon,
+.mesh-status-row.is-processing .mesh-status-row__icon,
+.mesh-status-row.is-loading .mesh-status-row__icon {
+  color: var(--color-primary-active);
+}
+
+.mesh-status-row.is-ready .mesh-status-row__icon {
   color: var(--color-success);
 }
 
-.mesh-status.is-error,
+.mesh-status-row.is-failed .mesh-status-row__icon {
+  color: var(--text-danger);
+}
+
 .error-message {
   color: var(--text-danger);
 }
 
 .mesh-stats {
   width: 100%;
-  margin-bottom: var(--spacing-md);
+  margin: 10px 0 0;
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
   border-collapse: collapse;
@@ -4568,7 +4813,7 @@ onBeforeUnmount(() => {
 
 .mesh-stats th,
 .mesh-stats td {
-  padding: var(--spacing-xs) 0;
+  padding: 3px 0;
   font-weight: 400;
   text-align: right;
 }
@@ -4585,11 +4830,22 @@ onBeforeUnmount(() => {
 
 .mesh-actions {
   display: flex;
-  gap: var(--spacing-sm);
+  gap: 6px;
+  margin-top: 10px;
 }
 
-.mesh-actions .primary-button {
+.mesh-run-btn {
   flex: 1;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.mesh-actions .icon-btn {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
 }
 
 .error-message {
