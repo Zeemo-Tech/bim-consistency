@@ -106,6 +106,10 @@ export interface UploadStatus {
   archiveSerial?: string
   archiveCode?: string
   linkedBimFileId?: number | null
+  /** 扫描设备字典 id 与「全景图 / 高斯」勾选（仅 scan）。 */
+  deviceId?: number | null
+  includePanorama?: boolean
+  includeGaussian?: boolean
 }
 
 // 项目文件信息
@@ -144,6 +148,10 @@ export interface ProjectFileInfo {
   archiveSerial?: string
   archiveCode?: string
   linkedBimFileId?: number | null
+  /** 扫描设备字典 id 与「全景图 / 高斯」勾选（仅 scan）。 */
+  deviceId?: number | null
+  includePanorama?: boolean
+  includeGaussian?: boolean
 }
 
 // 文件类型分组
@@ -194,6 +202,10 @@ export interface InitUploadParams {
   componentType?: string
   archiveSerial?: string
   archiveCode?: string
+  /** 扫描设备字典 id 与「全景图 / 高斯」勾选（仅 type=scan 生效，均可选）。 */
+  deviceId?: number
+  includePanorama?: boolean
+  includeGaussian?: boolean
 }
 
 // 完成上传请求参数

@@ -140,6 +140,58 @@
         </div>
       </section>
 
+      <section class="archive-form device-section">
+        <div class="archive-form-heading">
+          <div>
+            <h2>设备与能力</h2>
+          </div>
+        </div>
+        <div class="device-fields">
+          <div class="archive-field">
+            <span>设备</span>
+            <el-select
+              v-model="form.deviceId"
+              class="device-select"
+              filterable
+              clearable
+              placeholder="选择设备（可选）"
+              :loading="deviceLoading"
+              :no-data-text="deviceLoading ? '加载中…' : '暂无设备'"
+              @change="handleDeviceChange"
+            >
+              <el-option
+                v-for="item in devices"
+                :key="item.id"
+                :label="item.name"
+                :value="item.id"
+              >
+                <span>{{ item.name }}</span>
+                <small class="device-option-caps">
+                  {{ deviceCapText(item) }}
+                </small>
+              </el-option>
+            </el-select>
+          </div>
+          <div class="archive-field capability-field">
+            <span>包含内容</span>
+            <div class="capability-checks">
+              <el-checkbox
+                v-model="form.includePanorama"
+                :disabled="panoramaDisabled"
+              >
+                全景图（随轨迹）
+              </el-checkbox>
+              <el-checkbox
+                v-model="form.includeGaussian"
+                :disabled="gaussianDisabled"
+              >
+                高斯
+              </el-checkbox>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div
         v-if="uploading || progress > 0"
         class="upload-progress"
@@ -190,6 +242,7 @@ import {
   getProjectFilesByProjectId,
   type ProjectFileInfo,
 } from '@/api/fileManage'
+import { getDevices, type Device } from '@/api/device'
 
 defineOptions({ name: 'DataUploadDialog' })
 
@@ -217,6 +270,8 @@ const uploading = ref(false)
 const progress = ref(0)
 const designModels = ref<ProjectFileInfo[]>([])
 const designLoading = ref(false)
+const devices = ref<Device[]>([])
+const deviceLoading = ref(false)
 
 const form = reactive({
   buildingName: '',
@@ -224,7 +279,35 @@ const form = reactive({
   componentType: '',
   archiveSerial: '',
   producedAt: '',
+  deviceId: null as number | null,
+  includePanorama: false,
+  includeGaussian: false,
 })
+
+const selectedDevice = computed(
+  () => devices.value.find((item) => item.id === form.deviceId) || null,
+)
+const panoramaDisabled = computed(
+  () => Boolean(selectedDevice.value) && !selectedDevice.value?.hasPanorama,
+)
+const gaussianDisabled = computed(
+  () => Boolean(selectedDevice.value) && !selectedDevice.value?.hasGaussian,
+)
+
+function deviceCapText(device: Device) {
+  const caps: string[] = []
+  if (device.hasPanorama) caps.push('全景图')
+  if (device.hasGaussian) caps.push('高斯')
+  return caps.length ? caps.join(' / ') : '无附加能力'
+}
+
+function handleDeviceChange() {
+  const device = selectedDevice.value
+  if (!device) return
+  // 选择设备后按其能力自动勾选
+  form.includePanorama = device.hasPanorama
+  form.includeGaussian = device.hasGaussian
+}
 
 function archivePart(value?: string | null) {
   return value?.trim().toUpperCase() || ''
@@ -255,8 +338,21 @@ const archiveCode = computed(() =>
 
 async function handleOpened() {
   resetForm()
+  void loadDevices()
   if (props.projectId) {
     await loadDesignModels(props.projectId)
+  }
+}
+
+async function loadDevices() {
+  deviceLoading.value = true
+  try {
+    const res = await getDevices()
+    devices.value = res.data || []
+  } catch {
+    devices.value = []
+  } finally {
+    deviceLoading.value = false
   }
 }
 
@@ -353,6 +449,9 @@ async function submit() {
       componentType: form.componentType,
       archiveSerial: form.archiveSerial.trim(),
       archiveCode: archiveCode.value,
+      deviceId: form.deviceId ?? undefined,
+      includePanorama: form.includePanorama,
+      includeGaussian: form.includeGaussian,
       onProgress: (value) => {
         progress.value = value
       },
@@ -374,6 +473,9 @@ function resetForm() {
   form.componentType = ''
   form.archiveSerial = ''
   form.producedAt = ''
+  form.deviceId = null
+  form.includePanorama = false
+  form.includeGaussian = false
   selectedFile.value = undefined
   progress.value = 0
   uploading.value = false
@@ -560,6 +662,29 @@ function formatFileSize(size: number) {
   }
 }
 
+.device-section {
+  padding-top: 4px;
+}
+
+.device-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.capability-field .capability-checks {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 32px;
+}
+
+.device-option-caps {
+  margin-left: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
 .upload-progress {
   display: grid;
   gap: 8px;
@@ -612,7 +737,8 @@ function formatFileSize(size: number) {
 }
 
 @media (max-width: 720px) {
-  .archive-fields {
+  .archive-fields,
+  .device-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

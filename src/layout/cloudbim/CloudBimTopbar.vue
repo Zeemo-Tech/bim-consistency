@@ -88,7 +88,7 @@ function goDevices() {
   flex: 0 0 auto;
   gap: var(--spacing-sm);
   height: 100%;
-  padding: 0 64px 0 0;
+  padding: 0 78px 0 0;
   color: var(--brand-sapphire);
   cursor: pointer;
   background: transparent;

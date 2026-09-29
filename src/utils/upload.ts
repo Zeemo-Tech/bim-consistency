@@ -60,6 +60,10 @@ export interface UploadFileParams {
   componentType?: string
   archiveSerial?: string
   archiveCode?: string
+  /** 扫描设备字典 id 与「全景图 / 高斯」勾选（仅 type=scan）。 */
+  deviceId?: number
+  includePanorama?: boolean
+  includeGaussian?: boolean
 }
 
 export interface ChunkProgressState {
@@ -248,6 +252,9 @@ interface InitializeUploadParams {
   componentType?: string
   archiveSerial?: string
   archiveCode?: string
+  deviceId?: number
+  includePanorama?: boolean
+  includeGaussian?: boolean
 }
 
 /**
@@ -277,6 +284,9 @@ const initializeUpload = async (
     componentType,
     archiveSerial,
     archiveCode,
+    deviceId,
+    includePanorama,
+    includeGaussian,
   } = params
 
   // 如果有已存在的 uploadId（暂停后继续上传），直接使用它
@@ -303,6 +313,9 @@ const initializeUpload = async (
     componentType,
     archiveSerial,
     archiveCode,
+    deviceId,
+    includePanorama,
+    includeGaussian,
   }
 
   try {
@@ -499,6 +512,9 @@ export const uploadFile = async (
     componentType,
     archiveSerial,
     archiveCode,
+    deviceId,
+    includePanorama,
+    includeGaussian,
   } = params
 
   try {
@@ -572,6 +588,9 @@ export const uploadFile = async (
       componentType,
       archiveSerial,
       archiveCode,
+      deviceId,
+      includePanorama,
+      includeGaussian,
     })
 
     logger.info(
@@ -886,6 +905,10 @@ export interface FileUploaderOptions {
   componentType?: string
   archiveSerial?: string
   archiveCode?: string
+  /** 扫描设备字典 id 与「全景图 / 高斯」勾选（仅 type=scan）。 */
+  deviceId?: number
+  includePanorama?: boolean
+  includeGaussian?: boolean
 }
 
 /**
@@ -943,6 +966,9 @@ export class FileUploader {
         componentType: this.options.componentType,
         archiveSerial: this.options.archiveSerial,
         archiveCode: this.options.archiveCode,
+        deviceId: this.options.deviceId,
+        includePanorama: this.options.includePanorama,
+        includeGaussian: this.options.includeGaussian,
       })
 
       if (!this.shouldCancel) {

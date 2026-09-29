@@ -35,12 +35,18 @@
       </button>
     </header>
 
-    <main ref="stageRef" class="pc-stage" :class="`theme-${backgroundTheme}`">
+    <main
+      ref="stageRef"
+      class="pc-stage"
+      :class="`theme-${backgroundTheme}`"
+      @click="onStageClick"
+    >
       <PointCloudViewer
         ref="pointcloudViewerRef"
         class="pc-viewer"
         :is-preset-mode="true"
         :apply-tileset-transform="true"
+        :auto-fit-on-load="false"
         :click-to-enter-first-person="false"
         :show-internal-controls="false"
         :prefer-webgl="true"
@@ -48,6 +54,18 @@
         :tiles-resolution-scale="0.72"
         @loaded-change="handlePointcloudLoadedChange"
         @world-ready="handlePointcloudWorldReady"
+      />
+
+      <!-- 叠加层：高斯 + 轨迹，按点云坐标系叠加（跟随点云相机） -->
+      <ScanGaussTrajectoryOverlay
+        ref="overlayRef"
+        class="pc-gauss-overlay"
+        :get-camera-pose="getOverlayCameraPose"
+        :show-gaussian="attachIncludeGaussian && gaussianVisible"
+        :show-trajectory="trajectoryVisible && trajectoryPoints.length > 0"
+        :gauss-data-path="gaussDataPath"
+        :trajectory-points="trajectoryPoints"
+        :selected-index="selectedTrajectoryIndex"
       />
 
       <div class="pc-viewport-toolbar">
@@ -91,9 +109,7 @@
                 :class="{ on: colorMode === 'table-class' }"
                 :aria-pressed="colorMode === 'table-class'"
                 :disabled="!colorHasClass"
-                :title="
-                  colorHasClass ? '台面分色' : '该点云不含台面/分类属性'
-                "
+                :title="colorHasClass ? '台面分色' : '该点云不含台面/分类属性'"
                 @click="colorMode = 'table-class'"
               >
                 台面分色
@@ -138,10 +154,12 @@
               aria-label="台面分色图例"
             >
               <span class="pc-legend-item">
-                <i class="pc-legend-dot is-table" />台面
+                <i class="pc-legend-dot is-table" />
+                台面
               </span>
               <span class="pc-legend-item">
-                <i class="pc-legend-dot is-body" />主体
+                <i class="pc-legend-dot is-body" />
+                主体
               </span>
             </div>
           </div>
@@ -197,6 +215,81 @@
               </button>
             </div>
           </div>
+
+          <!-- 叠加层：轨迹 / 高斯（按上传时的勾选提供） -->
+          <div
+            v-if="trajectoryPoints.length || attachIncludeGaussian"
+            class="pc-display-row"
+          >
+            <div class="pc-segmented" role="group" aria-label="叠加显示">
+              <button
+                v-if="trajectoryPoints.length"
+                type="button"
+                :class="{ on: trajectoryVisible }"
+                :aria-pressed="trajectoryVisible"
+                @click="trajectoryVisible = !trajectoryVisible"
+              >
+                轨迹
+              </button>
+              <button
+                v-if="attachIncludeGaussian"
+                type="button"
+                :class="{ on: gaussianVisible }"
+                :aria-pressed="gaussianVisible"
+                @click="gaussianVisible = !gaussianVisible"
+              >
+                高斯
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 全景图叠加层：点击轨迹控制点后铺在页面上，可上一个/下一个/关闭 -->
+      <div v-if="panoramaOverlayVisible" class="pc-panorama-overlay">
+        <button
+          class="pc-panorama-close"
+          type="button"
+          aria-label="关闭全景图"
+          title="关闭"
+          @click="panoramaOverlayVisible = false"
+        >
+          <el-icon><Close /></el-icon>
+        </button>
+        <button
+          class="pc-panorama-nav is-prev"
+          type="button"
+          aria-label="上一个轨迹点"
+          title="上一个轨迹点"
+          @click="stepTrajectory(-1)"
+        >
+          <el-icon><ArrowLeft /></el-icon>
+        </button>
+        <button
+          class="pc-panorama-nav is-next"
+          type="button"
+          aria-label="下一个轨迹点"
+          title="下一个轨迹点"
+          @click="stepTrajectory(1)"
+        >
+          <el-icon><ArrowRight /></el-icon>
+        </button>
+        <PanoramaViewPanel
+          ref="panoramaRef"
+          class="pc-panorama-panel"
+          :project-id="projectId"
+          :scan-file-id="fileId"
+          @image-info-change="onPanoramaImageInfo"
+        />
+        <div class="pc-panorama-label">
+          {{
+            currentTrajectoryPoint
+              ? trajectoryPointLabel(
+                  currentTrajectoryPoint,
+                  selectedTrajectoryIndex ?? 0,
+                )
+              : ''
+          }}
         </div>
       </div>
 
@@ -330,7 +423,20 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Aim, Close, FullScreen, RefreshLeft } from '@element-plus/icons-vue'
+import {
+  Aim,
+  ArrowLeft,
+  ArrowRight,
+  Close,
+  FullScreen,
+  RefreshLeft,
+} from '@element-plus/icons-vue'
+import PanoramaViewPanel from '@/views/result/components/PanoramaViewPanel.vue'
+import ScanGaussTrajectoryOverlay from './components/ScanGaussTrajectoryOverlay.vue'
+import { getProjectFilesByProjectId, getGaussAssetUrl } from '@/api/fileManage'
+import { getScanPreview, type TrajectoryPoint } from '@/api/calibration'
+import { getScanCalibration } from '@/api/scan'
+import { formatToken, getOrganizationId, getToken } from '@/utils/auth'
 import * as THREE from 'three'
 import PointCloudViewer from '@/views/twoScreen/components/PointCloudViewer.vue'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
@@ -400,6 +506,7 @@ type PointCloudViewerExpose = InstanceType<typeof PointCloudViewer> & {
   getIntensityHistogram?: (bins?: number) => number[]
   setTilesErrorTargetOverride?: (value: number | null) => void
   requestRender?: () => void
+  syncFromTrajectory?: (point: TrajectoryPoint) => void
 }
 
 const pointcloudViewerRef = ref<PointCloudViewerExpose | null>(null)
@@ -1237,6 +1344,189 @@ const fileId = computed(() => {
 })
 
 const fileName = computed(() => String(route.query.fileName || ''))
+
+// ==================== 附加视图：全景图（随轨迹）/ 高斯（按上传勾选） ====================
+const attachIncludePanorama = ref(false)
+const attachIncludeGaussian = ref(false)
+const gaussFileId = ref<number | null>(null)
+const gaussAssetPath = ref('meta.lcc')
+const trajectoryPoints = ref<TrajectoryPoint[]>([])
+const selectedTrajectoryIndex = ref<number | null>(null)
+const currentTrajectoryPoint = ref<TrajectoryPoint | null>(null)
+const currentImageInfo = ref<any | null>(null)
+const attachViewsLoaded = ref(false)
+const panoramaOverlayVisible = ref(false)
+const panoramaRef = ref<InstanceType<typeof PanoramaViewPanel> | null>(null)
+const overlayRef = ref<InstanceType<typeof ScanGaussTrajectoryOverlay> | null>(
+  null,
+)
+const trajectoryVisible = ref(true)
+const gaussianVisible = ref(true)
+
+/** 叠加层相机位姿：完全跟随点云相机（与混合模式一致）。 */
+const getOverlayCameraPose = () =>
+  pointcloudViewerRef.value?.getCameraPose?.() ?? null
+
+/** 高斯资源 URL（附鉴权参数），供 LCCRender 叠加加载。 */
+const gaussDataPath = computed(() => {
+  if (!projectId.value || !gaussFileId.value) return ''
+  const base = `${window.location.origin}${getGaussAssetUrl(
+    projectId.value,
+    gaussFileId.value,
+    gaussAssetPath.value,
+  )}`
+  const token = getToken()
+  const orgId = getOrganizationId()
+  if (!token?.accessToken && !orgId) return base
+  const url = new URL(base)
+  if (token?.accessToken) {
+    url.searchParams.set('token', formatToken(token.accessToken))
+  }
+  if (orgId) url.searchParams.set('orgId', String(orgId))
+  return url.toString()
+})
+
+function trajectoryPointLabel(point: TrajectoryPoint, index: number) {
+  const time = Number.isFinite(point.timestamp)
+    ? new Date(point.timestamp).toLocaleTimeString('zh-CN', { hour12: false })
+    : ''
+  return `#${index + 1}${time ? ` · ${time}` : ''}`
+}
+
+/**
+ * 选中某个轨迹控制点：切点云相机到该点位姿、加载对应全景图。
+ * openPanorama=true 时把全景图叠加层铺到页面上（点击控制点时）。
+ */
+function onTrajectorySelect(index: number, openPanorama = false) {
+  const point = trajectoryPoints.value[Number(index)]
+  if (!point) return
+  selectedTrajectoryIndex.value = Number(index)
+  currentTrajectoryPoint.value = point
+  pointcloudViewerRef.value?.syncFromTrajectory?.(point)
+  if (openPanorama) panoramaOverlayVisible.value = true
+  if (panoramaOverlayVisible.value) {
+    // 等叠加层里的全景图组件挂载后再加载影像。
+    void nextTick(() => {
+      if (panoramaOverlayVisible.value && currentTrajectoryPoint.value) {
+        void panoramaRef.value?.showTrajectoryImage?.(
+          currentTrajectoryPoint.value,
+        )
+      }
+    })
+  }
+}
+
+/** 上一个 / 下一个轨迹点（全景图叠加层打开时可用）。 */
+function stepTrajectory(delta: number) {
+  const total = trajectoryPoints.value.length
+  if (!total) return
+  const current = selectedTrajectoryIndex.value ?? 0
+  const next = (current + delta + total) % total
+  onTrajectorySelect(next, true)
+}
+
+/** 在视图里点击圆形轨迹点：命中则切到该点位姿并打开全景图叠加层。 */
+function onStageClick(event: MouseEvent) {
+  if (!trajectoryVisible.value || !trajectoryPoints.value.length) return
+  if (!(event.target instanceof HTMLCanvasElement)) return
+  const index = overlayRef.value?.pickTrajectoryIndex?.(
+    event.clientX,
+    event.clientY,
+  )
+  if (index === null || index === undefined) return
+  onTrajectorySelect(index, true)
+}
+
+/**
+ * 初始视角：等点云真正加载完成（loaded-change=true）且「附加视图」信息就绪后，
+ * 随机取一个轨迹控制点作为默认视角；没有控制点则回退适配视图。
+ * 注意：必须等 loaded，否则 syncFromTrajectory 会因点云未加载而直接返回。
+ */
+let initialViewApplied = false
+function applyInitialView() {
+  if (initialViewApplied) return
+  if (!pointcloudLoadedState.value || !attachViewsLoaded.value) return
+  const points = trajectoryPoints.value
+  initialViewApplied = true
+  if (points.length) {
+    const index = Math.floor(Math.random() * points.length)
+    console.info('[scan-preview] 初始视角=随机控制点位姿', index)
+    onTrajectorySelect(index)
+    return
+  }
+  console.info('[scan-preview] 初始视角=适配视图（无控制点）')
+  pointcloudViewerRef.value?.resetView?.()
+}
+
+function onPanoramaImageInfo(info: any) {
+  currentImageInfo.value = info
+}
+
+/** 作用：读取当前点云的「全景图 / 高斯」勾选，并按需加载轨迹与解析高斯文件。 */
+async function loadScanAttachViews() {
+  if (!projectId.value || !fileId.value) return
+  attachViewsLoaded.value = false
+  initialViewApplied = false
+  try {
+    const [filesRes, calibrationRes] = await Promise.all([
+      getProjectFilesByProjectId(projectId.value),
+      getScanCalibration(projectId.value, fileId.value).catch(() => null),
+    ])
+    const groups = filesRes.data || []
+    const allFiles = groups.flatMap((group) => group.files)
+    const scan = allFiles.find((file) => file.id === fileId.value)
+    attachIncludePanorama.value = Boolean(scan?.includePanorama)
+    attachIncludeGaussian.value = Boolean(scan?.includeGaussian)
+    if (attachIncludeGaussian.value) {
+      // 优先使用「扫描↔高斯」绑定（与混合模式同一来源），否则回退到同幢同层匹配。
+      const boundGaussId = calibrationRes?.data?.hasGaussBinding
+        ? (calibrationRes.data.gaussFileId ?? null)
+        : null
+      if (boundGaussId) {
+        gaussFileId.value = boundGaussId
+      } else {
+        const building = String(scan?.buildingName ?? '')
+          .trim()
+          .toLowerCase()
+        const floor = String(scan?.floorName ?? '')
+          .trim()
+          .toLowerCase()
+        const gaussFiles =
+          groups.find((group) => group.type === 'gauss')?.files ?? []
+        const matched =
+          gaussFiles.find(
+            (file) =>
+              String(file.buildingName ?? '')
+                .trim()
+                .toLowerCase() === building &&
+              String(file.floorName ?? '')
+                .trim()
+                .toLowerCase() === floor,
+          ) ?? gaussFiles[0]
+        gaussFileId.value = matched?.id ?? null
+      }
+      if (!gaussFileId.value) {
+        console.warn('[scan-preview] 已勾选高斯但未找到绑定/匹配的高斯文件', {
+          projectId: projectId.value,
+          fileId: fileId.value,
+        })
+      }
+    }
+    // 轨迹/控制点与「是否勾选全景图」解耦：只要接口返回轨迹就加载，
+    // 用于点云里显示圆形控制点、点击切视角、以及作为默认视角。
+    const preview = await getScanPreview(projectId.value, fileId.value).catch(
+      () => null,
+    )
+    trajectoryPoints.value = preview?.data?.trajectory?.points ?? []
+    attachViewsLoaded.value = true
+    applyInitialView()
+  } catch {
+    attachIncludePanorama.value = false
+    attachIncludeGaussian.value = false
+    attachViewsLoaded.value = true
+    applyInitialView()
+  }
+}
 const clipBoundsDisabledReason = computed(() => {
   if (showBounds.value) return ''
   if (errorMessage.value) return '点云加载失败，无法启用裁切框'
@@ -1864,6 +2154,7 @@ function handlePointcloudWorldReady() {
   scheduleColorAvailabilityRefresh()
   // 与参考页一致：点云 LOD errorTarget = 32
   pointcloudViewerRef.value?.setTilesErrorTargetOverride?.(32)
+  applyInitialView()
 }
 
 /** 把当前着色模式/色带/范围下发给渲染器 */
@@ -1981,10 +2272,17 @@ watch(
   () => {
     if (route.name !== 'PreviewScan') return
     void loadPreview()
+    void loadScanAttachViews()
   },
 )
 
 watch(backgroundTheme, () => applyBackgroundTheme())
+
+// 点云加载完成后套用初始视角（也可能在 loadScanAttachViews 里提前触发）。
+watch(pointcloudLoadedState, (loaded) => {
+  if (loaded) applyInitialView()
+})
+
 watch(showGrid, (value) => pointcloudViewerRef.value?.setShowGrid?.(value))
 watch(pointSize, (value) => pointcloudViewerRef.value?.setPointSize?.(value))
 watch(edlEnabled, (value) => pointcloudViewerRef.value?.setEdlEnabled?.(value))
@@ -2003,6 +2301,7 @@ function syncFullscreenState() {
 
 onMounted(() => {
   void loadPreview()
+  void loadScanAttachViews()
   const stage = stageRef.value
   stage?.addEventListener('pointerdown', onStagePointerDown)
   stage?.addEventListener('pointerup', onStagePointerUp)
@@ -2368,6 +2667,13 @@ onBeforeUnmount(() => {
 .pc-viewer :deep(.pointcloud-viewport) {
   width: 100%;
   height: 100%;
+}
+
+.pc-gauss-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
 }
 
 .pc-viewport-toolbar {
@@ -2878,5 +3184,90 @@ onBeforeUnmount(() => {
     right: 12px;
     bottom: 14px;
   }
+}
+
+/* ==================== 全景图叠加层 ==================== */
+.pc-panorama-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgb(6 10 18 / 82%);
+  backdrop-filter: blur(3px);
+}
+
+.pc-panorama-panel {
+  width: min(74vw, 1120px);
+  height: min(74vh, 740px);
+  overflow: hidden;
+  background: #0b1020;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 55%);
+}
+
+.pc-panorama-close {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  color: #fff;
+  cursor: pointer;
+  background: rgb(20 26 38 / 55%);
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 50%;
+  transition: background 0.15s ease;
+}
+
+.pc-panorama-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  color: #fff;
+  cursor: pointer;
+  background: rgb(20 26 38 / 40%);
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 50%;
+  opacity: 0.65;
+  transform: translateY(-50%);
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
+}
+
+.pc-panorama-nav.is-prev {
+  left: 24px;
+}
+
+.pc-panorama-nav.is-next {
+  right: 24px;
+}
+
+.pc-panorama-close:hover,
+.pc-panorama-nav:hover {
+  background: rgb(30 40 58 / 80%);
+  opacity: 1;
+}
+
+.pc-panorama-label {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  z-index: 2;
+  padding: 4px 12px;
+  font-size: var(--font-size-sm);
+  color: #fff;
+  background: rgb(20 26 38 / 65%);
+  border-radius: 999px;
+  transform: translateX(-50%);
 }
 </style>
