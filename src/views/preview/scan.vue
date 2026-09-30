@@ -8,20 +8,308 @@
         </small>
       </span>
 
-      <div class="pc-header-controls" role="group" aria-label="预览背景">
-        <span class="pc-header-label">背景</span>
-        <div class="pc-segmented">
-          <button
-            v-for="option in backgroundOptions"
-            :key="option.value"
-            type="button"
-            :class="{ on: backgroundTheme === option.value }"
-            :aria-pressed="backgroundTheme === option.value"
-            @click="backgroundTheme = option.value"
+      <div class="pc-header-tools" role="toolbar" aria-label="预览工具">
+        <el-tooltip content="背景" placement="bottom" :show-after="150">
+          <el-popover
+            placement="bottom-end"
+            :width="164"
+            trigger="click"
+            popper-class="pc-popover"
           >
-            {{ option.label }}
+            <template #reference>
+              <button class="pc-icon-btn" type="button" aria-label="背景">
+                <span class="pc-icon-glyph" :style="glyph(ICON_URL.bg)" />
+              </button>
+            </template>
+            <div class="pc-bg-grid">
+              <button
+                v-for="option in backgroundOptions"
+                :key="option.value"
+                class="pc-bg-cell"
+                :class="[
+                  `is-${option.value}`,
+                  { on: backgroundTheme === option.value },
+                ]"
+                type="button"
+                :title="option.label"
+                :aria-label="option.label"
+                @click="backgroundTheme = option.value"
+              />
+            </div>
+          </el-popover>
+        </el-tooltip>
+
+        <span class="pc-tool-divider" />
+
+        <el-tooltip content="点云着色" placement="bottom" :show-after="150">
+          <el-popover
+            placement="bottom-end"
+            :width="250"
+            trigger="click"
+            popper-class="pc-popover"
+          >
+            <template #reference>
+              <button class="pc-icon-btn" type="button" aria-label="点云着色">
+                <span class="pc-icon-glyph" :style="glyph(ICON_URL.color)" />
+              </button>
+            </template>
+            <div class="pc-pop">
+              <div class="pc-pop-title">点云着色</div>
+              <div class="pc-pop-seg">
+                <button
+                  v-for="opt in colorModeControls"
+                  :key="opt.value"
+                  type="button"
+                  :class="{ on: colorMode === opt.value }"
+                  :disabled="opt.disabled"
+                  :title="opt.title"
+                  @click="colorMode = opt.value"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+              <div v-if="colorMode === 'intensity'" class="pc-pop-block">
+                <div class="pc-pop-sub">色带</div>
+                <div class="pc-pop-seg">
+                  <button
+                    v-for="item in RAMP_LABELS"
+                    :key="item.key"
+                    type="button"
+                    :class="{ on: colorRamp === item.key }"
+                    @click="colorRamp = item.key"
+                  >
+                    {{ item.label }}
+                  </button>
+                </div>
+              </div>
+              <div
+                v-if="colorMode === 'table-class'"
+                class="pc-category-legend"
+              >
+                <span class="pc-legend-item">
+                  <i class="pc-legend-dot is-table" />
+                  台面
+                </span>
+                <span class="pc-legend-item">
+                  <i class="pc-legend-dot is-body" />
+                  主体
+                </span>
+              </div>
+            </div>
+          </el-popover>
+        </el-tooltip>
+
+        <el-tooltip content="点大小与数量" placement="bottom" :show-after="150">
+          <el-popover
+            placement="bottom-end"
+            :width="250"
+            trigger="click"
+            popper-class="pc-popover"
+          >
+            <template #reference>
+              <button
+                class="pc-icon-btn"
+                type="button"
+                aria-label="点大小与数量"
+              >
+                <span class="pc-icon-glyph" :style="glyph(ICON_URL.size)" />
+              </button>
+            </template>
+            <div class="pc-pop">
+              <div class="pc-pop-slider">
+                <div class="pc-pop-slider-head">
+                  <span>点大小</span>
+                  <em>{{ pointSize.toFixed(1) }}</em>
+                </div>
+                <el-slider
+                  v-model="pointSize"
+                  :min="1"
+                  :max="5"
+                  :step="0.1"
+                  size="small"
+                />
+              </div>
+              <div class="pc-pop-slider">
+                <div class="pc-pop-slider-head">
+                  <span>点数量</span>
+                  <em>{{ pointRatio }}%</em>
+                </div>
+                <el-slider
+                  v-model="pointRatio"
+                  :min="1"
+                  :max="100"
+                  :step="1"
+                  size="small"
+                />
+              </div>
+            </div>
+          </el-popover>
+        </el-tooltip>
+
+        <span class="pc-tool-divider" />
+
+        <el-tooltip content="显示增强" placement="bottom" :show-after="150">
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': edlEnabled }"
+            type="button"
+            aria-label="显示增强"
+            @click="edlEnabled = !edlEnabled"
+          >
+            <span class="pc-icon-glyph" :style="glyph(ICON_URL.edl)" />
           </button>
-        </div>
+        </el-tooltip>
+        <el-tooltip content="坐标轴" placement="bottom" :show-after="150">
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': showAxes }"
+            type="button"
+            aria-label="坐标轴"
+            @click="showAxes = !showAxes"
+          >
+            <span class="pc-icon-glyph" :style="glyph(ICON_URL.axes)" />
+          </button>
+        </el-tooltip>
+        <el-tooltip content="网格" placement="bottom" :show-after="150">
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': showGrid }"
+            type="button"
+            aria-label="网格"
+            @click="showGrid = !showGrid"
+          >
+            <span class="pc-icon-glyph" :style="glyph(ICON_URL.grid)" />
+          </button>
+        </el-tooltip>
+        <el-tooltip content="剖切" placement="bottom" :show-after="150">
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': showBounds }"
+            type="button"
+            aria-label="剖切"
+            @click="onBoundsButtonClick"
+          >
+            <span class="pc-icon-glyph" :style="glyph(ICON_URL.clip)" />
+          </button>
+        </el-tooltip>
+
+        <span class="pc-tool-divider" />
+
+        <el-tooltip content="测量" placement="bottom" :show-after="150">
+          <el-popover
+            placement="bottom-end"
+            :width="212"
+            trigger="click"
+            popper-class="pc-popover"
+          >
+            <template #reference>
+              <button
+                class="pc-icon-btn"
+                :class="{ 'is-active': analysisMode !== 'none' }"
+                type="button"
+                aria-label="测量"
+              >
+                <el-icon><ScaleToOriginal /></el-icon>
+              </button>
+            </template>
+            <div class="pc-pop">
+              <div class="pc-pop-title">测量</div>
+              <div class="pc-pop-seg">
+                <button
+                  v-for="item in measureActions"
+                  :key="item.mode"
+                  type="button"
+                  :class="{ on: analysisMode === item.mode }"
+                  :disabled="!pointcloudLoadedState"
+                  :title="item.title"
+                  @click="selectAnalysisMode(item.mode)"
+                >
+                  {{ item.label }}
+                </button>
+              </div>
+              <button
+                class="pc-pop-clear"
+                type="button"
+                :disabled="!pointcloudLoadedState"
+                @click="clearAnalysis"
+              >
+                <el-icon><Delete /></el-icon>
+                清除测量
+              </button>
+            </div>
+          </el-popover>
+        </el-tooltip>
+        <el-tooltip content="重置视角" placement="bottom" :show-after="150">
+          <button
+            class="pc-icon-btn"
+            type="button"
+            aria-label="重置视角"
+            @click="resetView"
+          >
+            <el-icon><Aim /></el-icon>
+          </button>
+        </el-tooltip>
+        <el-tooltip
+          :content="isFullscreen ? '退出全屏' : '全屏'"
+          placement="bottom"
+          :show-after="150"
+        >
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': isFullscreen }"
+            type="button"
+            :aria-label="isFullscreen ? '退出全屏' : '进入全屏'"
+            @click="toggleFullscreen"
+          >
+            <el-icon><FullScreen /></el-icon>
+          </button>
+        </el-tooltip>
+
+        <span class="pc-tool-divider" />
+
+        <el-tooltip content="点云" placement="bottom" :show-after="150">
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': pointcloudVisible }"
+            type="button"
+            aria-label="点云"
+            @click="pointcloudVisible = !pointcloudVisible"
+          >
+            <span class="pc-icon-glyph" :style="glyph(ICON_URL.pointcloud)" />
+          </button>
+        </el-tooltip>
+        <el-tooltip
+          v-if="attachIncludeGaussian"
+          content="高斯"
+          placement="bottom"
+          :show-after="150"
+        >
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': gaussianVisible }"
+            type="button"
+            aria-label="高斯"
+            @click="gaussianVisible = !gaussianVisible"
+          >
+            <span class="pc-icon-glyph" :style="glyph(ICON_URL.gauss)" />
+          </button>
+        </el-tooltip>
+        <el-tooltip
+          v-if="trajectoryPoints.length"
+          content="轨迹"
+          placement="bottom"
+          :show-after="150"
+        >
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': trajectoryVisible }"
+            type="button"
+            aria-label="轨迹"
+            @click="trajectoryVisible = !trajectoryVisible"
+          >
+            <span class="pc-icon-glyph" :style="glyph(ICON_URL.trajectory)" />
+          </button>
+        </el-tooltip>
       </div>
 
       <button
@@ -31,7 +319,7 @@
         title="关闭预览"
         @click="handleClose"
       >
-        <el-icon><Close /></el-icon>
+        <span class="pc-icon-glyph" :style="glyph(ICON_URL.exit)" />
       </button>
     </header>
 
@@ -42,6 +330,7 @@
       @click="onStageClick"
     >
       <PointCloudViewer
+        v-show="pointcloudVisible"
         ref="pointcloudViewerRef"
         class="pc-viewer"
         :is-preset-mode="true"
@@ -66,184 +355,10 @@
         :gauss-data-path="gaussDataPath"
         :trajectory-points="trajectoryPoints"
         :selected-index="selectedTrajectoryIndex"
+        :clip-box="overlayClipBox"
+        :clip-axis="activeClipAxis"
+        :clip-invert="activeClipInvert"
       />
-
-      <div class="pc-viewport-toolbar">
-        <div class="pc-toolbar-cluster">
-          <button
-            type="button"
-            aria-label="重置视角"
-            title="重置视角"
-            @click="resetView"
-          >
-            <el-icon><Aim /></el-icon>
-          </button>
-          <button
-            type="button"
-            :class="{ 'is-active': isFullscreen }"
-            :aria-label="isFullscreen ? '退出全屏' : '进入全屏'"
-            :title="isFullscreen ? '退出全屏' : '进入全屏'"
-            @click="toggleFullscreen"
-          >
-            <el-icon><FullScreen /></el-icon>
-          </button>
-        </div>
-
-        <div class="pc-display-panel">
-          <div class="pc-display-row">
-            <div
-              class="pc-segmented pc-color-modes"
-              role="group"
-              aria-label="点云着色"
-            >
-              <button
-                type="button"
-                :class="{ on: colorMode === 'rgb' }"
-                :aria-pressed="colorMode === 'rgb'"
-                @click="colorMode = 'rgb'"
-              >
-                真彩
-              </button>
-              <button
-                type="button"
-                :class="{ on: colorMode === 'table-class' }"
-                :aria-pressed="colorMode === 'table-class'"
-                :disabled="!colorHasClass"
-                :title="colorHasClass ? '台面分色' : '该点云不含台面/分类属性'"
-                @click="colorMode = 'table-class'"
-              >
-                台面分色
-              </button>
-              <button
-                type="button"
-                :class="{ on: colorMode === 'intensity' }"
-                :aria-pressed="colorMode === 'intensity'"
-                :disabled="!colorHasIntensity"
-                :title="colorHasIntensity ? '强度' : '该点云不含强度属性'"
-                @click="colorMode = 'intensity'"
-              >
-                强度
-              </button>
-            </div>
-          </div>
-
-          <!-- 色带（选择强度时可用） -->
-          <div v-if="colorMode === 'intensity'" class="pc-display-row">
-            <div
-              class="pc-segmented pc-ramp-modes"
-              role="group"
-              aria-label="色带"
-            >
-              <button
-                v-for="item in RAMP_LABELS"
-                :key="item.key"
-                type="button"
-                :class="{ on: colorRamp === item.key }"
-                @click="colorRamp = item.key"
-              >
-                {{ item.label }}
-              </button>
-            </div>
-          </div>
-
-          <!-- 台面分色图例 -->
-          <div v-if="colorMode === 'table-class'" class="pc-display-row">
-            <div
-              class="pc-category-legend"
-              role="group"
-              aria-label="台面分色图例"
-            >
-              <span class="pc-legend-item">
-                <i class="pc-legend-dot is-table" />
-                台面
-              </span>
-              <span class="pc-legend-item">
-                <i class="pc-legend-dot is-body" />
-                主体
-              </span>
-            </div>
-          </div>
-
-          <div class="pc-display-row">
-            <label class="pc-size-control" title="点大小">
-              <span>点大小</span>
-              <input
-                v-model.number="pointSize"
-                type="range"
-                min="1"
-                max="5"
-                step="0.1"
-                aria-label="点大小"
-              />
-              <output>{{ pointSize.toFixed(1) }}</output>
-            </label>
-          </div>
-
-          <div class="pc-display-row">
-            <div class="pc-segmented" role="group" aria-label="场景辅助显示">
-              <button
-                type="button"
-                :class="{ on: edlEnabled }"
-                :aria-pressed="edlEnabled"
-                @click="edlEnabled = !edlEnabled"
-              >
-                显示增强
-              </button>
-              <button
-                type="button"
-                :class="{ on: showAxes }"
-                :aria-pressed="showAxes"
-                @click="showAxes = !showAxes"
-              >
-                坐标轴
-              </button>
-              <button
-                type="button"
-                :class="{ on: showGrid }"
-                :aria-pressed="showGrid"
-                @click="showGrid = !showGrid"
-              >
-                网格
-              </button>
-              <button
-                type="button"
-                :class="{ on: showBounds }"
-                :aria-pressed="showBounds"
-                @click="onBoundsButtonClick"
-              >
-                剖切
-              </button>
-            </div>
-          </div>
-
-          <!-- 叠加层：轨迹 / 高斯（按上传时的勾选提供） -->
-          <div
-            v-if="trajectoryPoints.length || attachIncludeGaussian"
-            class="pc-display-row"
-          >
-            <div class="pc-segmented" role="group" aria-label="叠加显示">
-              <button
-                v-if="trajectoryPoints.length"
-                type="button"
-                :class="{ on: trajectoryVisible }"
-                :aria-pressed="trajectoryVisible"
-                @click="trajectoryVisible = !trajectoryVisible"
-              >
-                轨迹
-              </button>
-              <button
-                v-if="attachIncludeGaussian"
-                type="button"
-                :class="{ on: gaussianVisible }"
-                :aria-pressed="gaussianVisible"
-                @click="gaussianVisible = !gaussianVisible"
-              >
-                高斯
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <!-- 全景图叠加层：点击轨迹控制点后铺在页面上，可上一个/下一个/关闭 -->
       <div v-if="panoramaOverlayVisible" class="pc-panorama-overlay">
@@ -364,6 +479,48 @@
         <button type="button" @click="clearAnalysis">清除</button>
       </div>
 
+      <!-- 剖切面板：轴 / 反向 / 位置滑杆（在视图里拖动箭头手柄同样生效） -->
+      <div v-if="showBounds" class="pc-clip-bar" role="group" aria-label="剖切">
+        <span class="pc-clip-bar__title">剖切</span>
+        <div class="pc-clip-bar__axes">
+          <button
+            v-for="axis in CLIP_AXES"
+            :key="axis"
+            type="button"
+            :class="{ on: activeClipAxis === axis }"
+            @click="onClipAxisChange(axis)"
+          >
+            {{ axis.toUpperCase() }}
+          </button>
+        </div>
+        <button
+          type="button"
+          class="pc-clip-bar__flip"
+          :class="{ on: activeClipInvert }"
+          @click="toggleClipInvert"
+        >
+          反向
+        </button>
+        <input
+          v-model.number="clipUiPosition"
+          class="pc-clip-bar__slider"
+          type="range"
+          :min="clipUiRange.min"
+          :max="clipUiRange.max"
+          :step="clipUiStep"
+          aria-label="剖切位置"
+          @input="onClipSliderInput"
+        />
+        <span class="pc-clip-bar__value">{{ clipUiPercent }}%</span>
+        <button
+          type="button"
+          class="pc-clip-bar__close"
+          @click="onBoundsButtonClick"
+        >
+          关闭
+        </button>
+      </div>
+
       <div class="pc-measure-badges">
         <div
           v-for="badge in measureBadges"
@@ -394,17 +551,6 @@
         {{ pointcloudLoadedState ? '点云已加载' : '正在加载点云' }}
       </div>
 
-      <div class="pc-measurement-dock">
-        <MeasurementToolbar
-          v-model:collapsed="analysisToolbarCollapsed"
-          :mode="analysisMode"
-          :disabled="!pointcloudLoadedState"
-          orientation="vertical"
-          @update:mode="selectAnalysisMode"
-          @clear="clearAnalysis"
-        />
-      </div>
-
       <div v-if="errorMessage" class="pc-error-overlay">
         <div class="pc-error-card">
           <div class="pc-error-title">预览失败</div>
@@ -428,8 +574,10 @@ import {
   ArrowLeft,
   ArrowRight,
   Close,
+  Delete,
   FullScreen,
   RefreshLeft,
+  ScaleToOriginal,
 } from '@element-plus/icons-vue'
 import PanoramaViewPanel from '@/views/result/components/PanoramaViewPanel.vue'
 import ScanGaussTrajectoryOverlay from './components/ScanGaussTrajectoryOverlay.vue'
@@ -442,7 +590,6 @@ import PointCloudViewer from '@/views/twoScreen/components/PointCloudViewer.vue'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
-import MeasurementToolbar from './MeasurementToolbar.vue'
 import PointcloudAxesTriad from './PointcloudAxesTriad.vue'
 import PointcloudViewCube from './PointcloudViewCube.vue'
 
@@ -452,6 +599,25 @@ defineOptions({
 
 const route = useRoute()
 const router = useRouter()
+
+/** 工具栏图标（来自 public/dianyun，统一用 mask + currentColor 着色）。 */
+const ICON_URL = {
+  bg: 'url(/dianyun/beijingyanse.svg)',
+  color: 'url(/dianyun/zhuose.svg)',
+  gauss: 'url(/dianyun/gaosihunhe.svg)',
+  size: 'url(/dianyun/dianliang.svg)',
+  edl: 'url(/dianyun/zengqiang.svg)',
+  axes: 'url(/dianyun/zuobiaozhou.svg)',
+  grid: 'url(/dianyun/wanggeguan.svg)',
+  clip: 'url(/dianyun/shitupouqiehe.svg)',
+  pointcloud: 'url(/dianyun/dianyun.svg)',
+  trajectory: 'url(/dianyun/a-30Hguiji.svg)',
+  exit: 'url(/dianyun/tuichu.svg)',
+} as const
+
+function glyph(url: string): Record<string, string> {
+  return { '--glyph': url }
+}
 
 type ClipAxisKey = 'x' | 'y' | 'z'
 type ClipBoxOffsets = {
@@ -507,6 +673,7 @@ type PointCloudViewerExpose = InstanceType<typeof PointCloudViewer> & {
   setTilesErrorTargetOverride?: (value: number | null) => void
   requestRender?: () => void
   syncFromTrajectory?: (point: TrajectoryPoint) => void
+  setPointRatio?: (ratio: number) => void
 }
 
 const pointcloudViewerRef = ref<PointCloudViewerExpose | null>(null)
@@ -515,6 +682,20 @@ const loadToken = ref(0)
 const showBounds = ref(false)
 const activeClipAxis = ref<ClipAxisKey>('z')
 const activeClipInvert = ref(false)
+const clipBoxTick = ref(0)
+const clipUiRange = ref({ min: 0, max: 1 })
+const clipUiPosition = ref(0)
+const CLIP_AXES: ClipAxisKey[] = ['x', 'y', 'z']
+const clipUiStep = computed(() => {
+  const span = clipUiRange.value.max - clipUiRange.value.min
+  return span > 0 ? span / 400 : 0.001
+})
+const clipUiPercent = computed(() => {
+  const { min, max } = clipUiRange.value
+  if (!(max > min)) return 0
+  const t = (clipUiPosition.value - min) / (max - min)
+  return Math.round(Math.min(1, Math.max(0, t)) * 100)
+})
 const pointcloudLoadedState = ref(false)
 const pointcloudWorldReady = ref(false)
 
@@ -564,6 +745,29 @@ const RAMP_LABELS: Array<{ key: ScanColorRamp; label: string }> = [
   { key: 'spectrum', label: '彩虹' },
   { key: 'viridis', label: '紫黄' },
 ]
+
+const colorModeControls = computed<
+  Array<{
+    value: ScanColorMode
+    label: string
+    disabled: boolean
+    title: string
+  }>
+>(() => [
+  { value: 'rgb', label: '真彩', disabled: false, title: '真彩' },
+  {
+    value: 'intensity',
+    label: '强度',
+    disabled: !colorHasIntensity.value,
+    title: colorHasIntensity.value ? '强度' : '该点云不含强度属性',
+  },
+  {
+    value: 'table-class',
+    label: '点云分类',
+    disabled: !colorHasClass.value,
+    title: colorHasClass.value ? '点云分类' : '该点云不含分类属性',
+  },
+])
 
 // 与 PointCloudViewer 里点云实际使用的色带保持完全一致的取色
 const RAMP_VIRIDIS_STOPS: Array<[number, number, number]> = [
@@ -633,7 +837,16 @@ const colorRangeLabel = (value: number) =>
 // 测量工具
 type AnalysisMode = 'none' | 'distance' | 'locate' | 'area'
 const analysisMode = ref<AnalysisMode>('none')
-const analysisToolbarCollapsed = ref(true)
+/** 顶部工具栏「测量」下拉里的模式项。 */
+const measureActions: Array<{
+  mode: Exclude<AnalysisMode, 'none'>
+  label: string
+  title: string
+}> = [
+  { mode: 'distance', label: '测距', title: '全局测距' },
+  { mode: 'locate', label: '定位', title: '全局定位' },
+  { mode: 'area', label: '面积', title: '面积测量' },
+]
 type MeasureBadge = {
   id: string
   title: string
@@ -1332,6 +1545,8 @@ let clipDragState: null | {
   max: number
 } = null
 let clipBoundDom: HTMLCanvasElement | null = null
+/** 抓住剖切箭头后，屏蔽随之而来的 stage click（避免误开全景图）。 */
+let ignoreNextStageClick = false
 
 const projectId = computed(() => {
   const value = Number(route.query.projectId)
@@ -1362,10 +1577,37 @@ const overlayRef = ref<InstanceType<typeof ScanGaussTrajectoryOverlay> | null>(
 )
 const trajectoryVisible = ref(true)
 const gaussianVisible = ref(true)
+const pointcloudVisible = ref(true)
+const pointRatio = ref(100)
 
 /** 叠加层相机位姿：完全跟随点云相机（与混合模式一致）。 */
 const getOverlayCameraPose = () =>
   pointcloudViewerRef.value?.getCameraPose?.() ?? null
+
+/**
+ * 传给高斯叠加层的裁切盒（世界坐标）。高斯（LCC）支持 setClipBox，
+ * 剖切时用它把高斯一起裁掉，效果与「分析」页的裁切框一致。
+ */
+const overlayClipBox = computed(() => {
+  void clipBoxTick.value
+  void clipUiPosition.value
+  void activeClipAxis.value
+  void activeClipInvert.value
+  if (!showBounds.value) return null
+  const box = getCurrentClipBox()
+  if (!box || box.isEmpty()) return null
+  return {
+    min: box.min.toArray() as [number, number, number],
+    max: box.max.toArray() as [number, number, number],
+  }
+})
+
+/** 兜底：进入页面时点云/布局就绪后，再让叠加层重试加载高斯。 */
+function retryOverlayGaussian() {
+  void nextTick(() => {
+    ;(overlayRef.value as any)?.reloadGaussian?.()
+  })
+}
 
 /** 高斯资源 URL（附鉴权参数），供 LCCRender 叠加加载。 */
 const gaussDataPath = computed(() => {
@@ -1427,6 +1669,10 @@ function stepTrajectory(delta: number) {
 
 /** 在视图里点击圆形轨迹点：命中则切到该点位姿并打开全景图叠加层。 */
 function onStageClick(event: MouseEvent) {
+  if (ignoreNextStageClick) {
+    ignoreNextStageClick = false
+    return
+  }
   if (!trajectoryVisible.value || !trajectoryPoints.value.length) return
   if (!(event.target instanceof HTMLCanvasElement)) return
   const index = overlayRef.value?.pickTrajectoryIndex?.(
@@ -1519,6 +1765,7 @@ async function loadScanAttachViews() {
     )
     trajectoryPoints.value = preview?.data?.trajectory?.points ?? []
     attachViewsLoaded.value = true
+    retryOverlayGaussian()
     applyInitialView()
   } catch {
     attachIncludePanorama.value = false
@@ -1583,6 +1830,7 @@ function getClipOffsetKey(axis: ClipAxisKey, invert: boolean) {
 
 function invalidateClipBounds() {
   clipBoundsRevision += 1
+  clipBoxTick.value += 1
 }
 
 function clampClipOffsets(state: ClipBoxState) {
@@ -1677,6 +1925,44 @@ function setClipFacePosition(
   if (invert) state.offsets[key] = baseMax - clamped
   else state.offsets[key] = clamped - baseMin
   clampClipOffsets(state)
+}
+
+/** 把当前剖切面的范围/位置同步到面板控件。 */
+function syncClipUi() {
+  if (!showBounds.value) return
+  clipUiRange.value = getClipFaceRange(
+    activeClipAxis.value,
+    activeClipInvert.value,
+  )
+  clipUiPosition.value = getClipFacePosition(
+    activeClipAxis.value,
+    activeClipInvert.value,
+  )
+}
+
+function onClipAxisChange(axis: ClipAxisKey) {
+  if (activeClipAxis.value === axis) return
+  activeClipAxis.value = axis
+  syncClipUi()
+  updateBoundsHelpers()
+  applyClippingState()
+}
+
+function toggleClipInvert() {
+  activeClipInvert.value = !activeClipInvert.value
+  syncClipUi()
+  updateBoundsHelpers()
+  applyClippingState()
+}
+
+function onClipSliderInput() {
+  setClipFacePosition(
+    activeClipAxis.value,
+    activeClipInvert.value,
+    clipUiPosition.value,
+  )
+  applyClippingState()
+  scheduleBoundsHelpersUpdate()
 }
 
 function requestPointcloudRender() {
@@ -1871,6 +2157,7 @@ function scheduleBoundsHelpersUpdate() {
   requestAnimationFrame(() => {
     boundsHelpersUpdateScheduled = false
     updateBoundsHelpers()
+    syncClipUi()
   })
 }
 
@@ -1890,6 +2177,7 @@ function onShowBoundsChange() {
     clipBoxState = null
   }
   updateBoundsHelpers()
+  syncClipUi()
   applyClippingState()
 }
 
@@ -1928,33 +2216,14 @@ function pickClipOverlay(
   | null
   | { kind: 'handle'; axis: ClipAxisKey; invert: boolean }
   | { kind: 'bounds' } {
-  const camera = getViewerCamera()
-  if (!camera || !clipBoxHelper || !showBounds.value) return null
-  const ndc = getPointerNdc(ev)
-  if (!ndc) return null
-
-  if (clipRaycaster.params.Line) {
-    clipRaycaster.params.Line.threshold = 0.2
-  } else {
-    ;(clipRaycaster.params as any).Line = { threshold: 0.2 }
-  }
-  clipRaycaster.setFromCamera(ndc, camera)
-
-  if (clipHandlePickers.length) {
-    const handleHits = clipRaycaster.intersectObjects(clipHandlePickers, true)
-    const handleHit = handleHits[0] as any
-    if (handleHit?.object?.userData?.__viewerClipHandle) {
-      return {
-        kind: 'handle',
-        axis: handleHit.object.userData.axis,
-        invert: !!handleHit.object.userData.invert,
-      }
-    }
-  }
-
-  const lineHits = clipRaycaster.intersectObject(clipBoxHelper, true)
-  if (!lineHits.length) return null
-  return { kind: 'bounds' }
+  if (!showBounds.value) return null
+  // 裁切箭头画在高斯叠加层（独立渲染器，不被全局裁切面裁掉），由其负责拾取。
+  const hit = (overlayRef.value as any)?.pickClipHandle?.(
+    ev.clientX,
+    ev.clientY,
+  ) as { axis: ClipAxisKey; invert: boolean } | null
+  if (hit) return { kind: 'handle', axis: hit.axis, invert: !!hit.invert }
+  return null
 }
 
 function buildClipDragPlane(axisKey: ClipAxisKey, anchor: THREE.Vector3) {
@@ -2069,6 +2338,7 @@ function onViewerPointerDown(event: PointerEvent) {
   const overlayHit = pickClipOverlay(event)
   if (overlayHit?.kind === 'handle') {
     consumePointerEvent(event)
+    ignoreNextStageClick = true
     beginClipDrag(event, overlayHit)
     return
   }
@@ -2154,6 +2424,10 @@ function handlePointcloudWorldReady() {
   scheduleColorAvailabilityRefresh()
   // 与参考页一致：点云 LOD errorTarget = 32
   pointcloudViewerRef.value?.setTilesErrorTargetOverride?.(32)
+  pointcloudViewerRef.value?.setPointRatio?.(
+    Math.max(1, Math.min(100, Number(pointRatio.value) || 100)) / 100,
+  )
+  retryOverlayGaussian()
   applyInitialView()
 }
 
@@ -2285,6 +2559,10 @@ watch(pointcloudLoadedState, (loaded) => {
 
 watch(showGrid, (value) => pointcloudViewerRef.value?.setShowGrid?.(value))
 watch(pointSize, (value) => pointcloudViewerRef.value?.setPointSize?.(value))
+watch(pointRatio, (value) => {
+  const ratio = Math.max(1, Math.min(100, Number(value) || 100)) / 100
+  pointcloudViewerRef.value?.setPointRatio?.(ratio)
+})
 watch(edlEnabled, (value) => pointcloudViewerRef.value?.setEdlEnabled?.(value))
 watch([colorMode, colorRamp], () => {
   applyColorMode()
@@ -2599,16 +2877,63 @@ onBeforeUnmount(() => {
   color: #6b7280;
 }
 
-.pc-header-controls {
+.pc-header-tools {
   display: flex;
   flex: 0 0 auto;
-  gap: 8px;
+  gap: 2px;
   align-items: center;
 }
 
-.pc-header-label {
-  font-size: var(--font-size-xs);
-  color: #6b7280;
+.pc-tool-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: #cfd7e8;
+}
+
+.pc-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: #4b5563;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.pc-icon-btn:hover {
+  color: #4e66cc;
+  background: rgb(255 255 255 / 80%);
+  border-color: #cfd7e8;
+}
+
+.pc-icon-btn.is-active {
+  color: #fff;
+  background: #4e66cc;
+  border-color: #4e66cc;
+  box-shadow: 0 2px 6px rgb(78 102 204 / 35%);
+}
+
+.pc-icon-glyph {
+  display: inline-block;
+  width: 19px;
+  height: 19px;
+  background-color: currentColor;
+  -webkit-mask-image: var(--glyph);
+  mask-image: var(--glyph);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
 .pc-close {
@@ -2674,180 +2999,6 @@ onBeforeUnmount(() => {
   inset: 0;
   z-index: 5;
   pointer-events: none;
-}
-
-.pc-viewport-toolbar {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
-  max-width: calc(100% - 140px);
-  pointer-events: none;
-}
-
-.pc-toolbar-cluster {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  pointer-events: auto;
-}
-
-.pc-toolbar-cluster button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  color: var(--viewer-ink);
-  cursor: pointer;
-  background: var(--viewer-chrome);
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: var(--radius-xs);
-}
-
-.pc-toolbar-cluster button:hover,
-.pc-toolbar-cluster button.is-active {
-  color: var(--viewer-accent);
-  background: rgb(24 42 72 / 88%);
-  border-color: rgb(115 162 243 / 55%);
-}
-
-.pc-display-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: max-content;
-  max-width: min(720px, calc(100vw - 140px));
-  padding: 8px 10px;
-  background: rgb(26 29 36 / 90%);
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: var(--radius-sm);
-  backdrop-filter: blur(6px);
-  pointer-events: auto;
-}
-
-.pc-display-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.pc-segmented {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px;
-  background: rgb(255 255 255 / 10%);
-  border-radius: var(--radius-sm);
-}
-
-.pc-segmented button {
-  min-width: 0;
-  padding: 4px 8px;
-  font-size: var(--font-size-sm);
-  line-height: 20px;
-  color: rgb(255 255 255 / 72%);
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-xs);
-}
-
-.pc-segmented button:hover:not(:disabled) {
-  color: var(--viewer-ink);
-}
-
-.pc-segmented button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.pc-segmented button.on {
-  color: var(--viewer-accent);
-  background: rgb(255 255 255 / 14%);
-  box-shadow: 0 0 0 1px rgb(255 255 255 / 12%);
-}
-
-.pc-ramp-modes button {
-  min-width: 44px;
-}
-
-/* 台面分色图例 */
-.pc-category-legend {
-  display: inline-flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.pc-legend-item {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  font-size: var(--font-size-xs);
-  color: rgb(255 255 255 / 78%);
-}
-
-.pc-legend-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-}
-
-.pc-legend-dot.is-table {
-  background: #db5c38;
-}
-
-.pc-legend-dot.is-body {
-  background: #3d94e6;
-}
-
-.pc-header-controls .pc-segmented {
-  background: rgb(255 255 255 / 55%);
-}
-
-.pc-header-controls .pc-segmented button {
-  padding: 6px 12px;
-  font-size: var(--font-size-xs);
-  color: #3d4450;
-}
-
-.pc-header-controls .pc-segmented button.on {
-  font-weight: 600;
-  color: #4e66cc;
-  background: #fff;
-  box-shadow: 0 0 0 1px #cfd7e8;
-}
-
-.pc-size-control {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  min-width: 164px;
-  height: 34px;
-  padding: 3px 7px;
-  font-size: var(--font-size-xs);
-  color: rgb(255 255 255 / 72%);
-  background: rgb(255 255 255 / 10%);
-  border-radius: var(--radius-sm);
-}
-
-.pc-size-control input {
-  flex: 1 1 auto;
-  min-width: 60px;
-  height: 4px;
-  accent-color: var(--viewer-accent);
-  cursor: pointer;
-}
-
-.pc-size-control output {
-  min-width: 24px;
-  color: var(--viewer-muted);
-  font-variant-numeric: tabular-nums;
 }
 
 .pc-axes-triad {
@@ -3007,6 +3158,101 @@ onBeforeUnmount(() => {
   background: rgb(248 113 113 / 16%);
 }
 
+/* 剖切面板 */
+.pc-clip-bar {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  z-index: 82;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  height: 42px;
+  padding: 0 12px;
+  color: #f8fafc;
+  white-space: nowrap;
+  background: rgb(8 17 29 / 88%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 28%);
+  backdrop-filter: blur(14px);
+  transform: translateX(-50%);
+}
+
+.pc-clip-bar__title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.pc-clip-bar__axes {
+  display: inline-flex;
+  padding: 2px;
+  background: rgb(255 255 255 / 10%);
+  border-radius: 8px;
+}
+
+.pc-clip-bar__axes button {
+  min-width: 28px;
+  padding: 3px 6px;
+  font-size: var(--font-size-xs);
+  color: rgb(226 232 240 / 78%);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.pc-clip-bar__axes button.on {
+  font-weight: 700;
+  color: #fff;
+  background: #4e66cc;
+}
+
+.pc-clip-bar__flip {
+  padding: 4px 9px;
+  font-size: var(--font-size-xs);
+  color: #cbd5e1;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 6px;
+}
+
+.pc-clip-bar__flip.on {
+  color: #fff;
+  background: rgb(78 102 204 / 70%);
+  border-color: rgb(115 162 243 / 60%);
+}
+
+.pc-clip-bar__slider {
+  width: 180px;
+  height: 4px;
+  accent-color: var(--viewer-accent);
+  cursor: pointer;
+}
+
+.pc-clip-bar__value {
+  min-width: 34px;
+  font-size: var(--font-size-xs);
+  color: #cbd5e1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-clip-bar__close {
+  padding: 4px 9px;
+  font-size: var(--font-size-xs);
+  color: #f8fafc;
+  cursor: pointer;
+  background: rgb(255 255 255 / 12%);
+  border: 0;
+  border-radius: 6px;
+}
+
+.pc-clip-bar__close:hover {
+  background: rgb(255 255 255 / 22%);
+}
+
 .pc-measure-badges {
   position: absolute;
   inset: 0;
@@ -3135,13 +3381,6 @@ onBeforeUnmount(() => {
   background: #f59e0b;
 }
 
-.pc-measurement-dock {
-  position: absolute;
-  top: 120px;
-  right: 20px;
-  z-index: 80;
-}
-
 .pc-error-overlay {
   position: absolute;
   inset: 0;
@@ -3175,14 +3414,17 @@ onBeforeUnmount(() => {
     padding-left: 14px;
   }
 
-  .pc-header-label {
-    display: none;
+  .pc-header-tools {
+    gap: 0;
   }
 
-  .pc-measurement-dock {
-    top: auto;
-    right: 12px;
-    bottom: 14px;
+  .pc-icon-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  .pc-tool-divider {
+    margin: 0 3px;
   }
 }
 
@@ -3269,5 +3511,193 @@ onBeforeUnmount(() => {
   background: rgb(20 26 38 / 65%);
   border-radius: 999px;
   transform: translateX(-50%);
+}
+</style>
+
+<style lang="scss">
+/* 头部图标下拉/弹出层（Teleport 到 body，需全局样式） */
+.pc-popover.el-popover.el-popper {
+  padding: 12px;
+  border: 1px solid #e2e8f4;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgb(24 39 79 / 16%);
+}
+
+.pc-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pc-pop-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1d24;
+}
+
+.pc-pop-sub {
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.pc-pop-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.pc-pop-seg {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: #f1f4fa;
+  border-radius: 8px;
+}
+
+.pc-pop-seg button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: #4b5563;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.pc-pop-seg button:hover:not(:disabled) {
+  color: #4e66cc;
+}
+
+.pc-pop-seg button.on {
+  font-weight: 600;
+  color: #4e66cc;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(78 102 204 / 20%);
+}
+
+.pc-pop-seg button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.pc-pop-slider-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.pc-pop-slider-head em {
+  font-style: normal;
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-pop-clear {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 7px 8px;
+  font-size: 12px;
+  color: #b4424a;
+  cursor: pointer;
+  background: #fdf2f3;
+  border: 0;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.pc-pop-clear:hover:not(:disabled) {
+  background: #fbe4e6;
+}
+
+.pc-pop-clear:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pc-category-legend {
+  display: inline-flex;
+  gap: 14px;
+  align-items: center;
+  padding: 8px 10px;
+  background: #f1f4fa;
+  border-radius: 8px;
+}
+
+.pc-legend-item {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.pc-legend-dot {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+}
+
+.pc-legend-dot.is-table {
+  background: #db5c38;
+}
+
+.pc-legend-dot.is-body {
+  background: #3d94e6;
+}
+
+/* 背景：极简色块选择 */
+.pc-bg-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.pc-bg-cell {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  cursor: pointer;
+  border: 1px solid rgb(0 0 0 / 14%);
+  border-radius: 50%;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.pc-bg-cell:hover {
+  transform: translateY(-1px);
+}
+
+.pc-bg-cell.on {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px #4e66cc;
+}
+
+.pc-bg-cell.is-gradient {
+  background: linear-gradient(160deg, #14315c, #0a1220);
+}
+
+.pc-bg-cell.is-deep {
+  background: #0c1224;
+}
+
+.pc-bg-cell.is-light {
+  background: #e8eef6;
+}
+
+.pc-bg-cell.is-black {
+  background: #000;
 }
 </style>
