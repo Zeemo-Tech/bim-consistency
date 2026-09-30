@@ -29,3 +29,12 @@ build/*.js
 
 .cert/
 .playwright-mcp
+
+# Local AI agent tooling (Impeccable skill + engine, kept local only)
+.opencode/
+
+# impeccable-ignore-start
+# Impeccable design tooling + context artifacts, kept local only.
+**/.impeccable/
+**/PRODUCT.md
+# impeccable-ignore-end
