@@ -33,6 +33,7 @@
                 type="button"
                 :title="option.label"
                 :aria-label="option.label"
+                :aria-pressed="backgroundTheme === option.value"
                 @click="backgroundTheme = option.value"
               />
             </div>
@@ -61,6 +62,7 @@
                   :key="opt.value"
                   type="button"
                   :class="{ on: colorMode === opt.value }"
+                  :aria-pressed="colorMode === opt.value"
                   :disabled="opt.disabled"
                   :title="opt.title"
                   @click="colorMode = opt.value"
@@ -76,6 +78,7 @@
                     :key="item.key"
                     type="button"
                     :class="{ on: colorRamp === item.key }"
+                    :aria-pressed="colorRamp === item.key"
                     @click="colorRamp = item.key"
                   >
                     {{ item.label }}
@@ -127,6 +130,7 @@
                   :max="5"
                   :step="0.1"
                   size="small"
+                  aria-label="点大小"
                 />
               </div>
               <div class="pc-pop-slider">
@@ -140,6 +144,7 @@
                   :max="100"
                   :step="1"
                   size="small"
+                  aria-label="点数量"
                 />
               </div>
             </div>
@@ -152,6 +157,7 @@
           <button
             class="pc-icon-btn"
             :class="{ 'is-active': edlEnabled }"
+            :aria-pressed="edlEnabled"
             type="button"
             aria-label="显示增强"
             @click="edlEnabled = !edlEnabled"
@@ -163,6 +169,7 @@
           <button
             class="pc-icon-btn"
             :class="{ 'is-active': showAxes }"
+            :aria-pressed="showAxes"
             type="button"
             aria-label="坐标轴"
             @click="showAxes = !showAxes"
@@ -174,6 +181,7 @@
           <button
             class="pc-icon-btn"
             :class="{ 'is-active': showGrid }"
+            :aria-pressed="showGrid"
             type="button"
             aria-label="网格"
             @click="showGrid = !showGrid"
@@ -185,11 +193,28 @@
           <button
             class="pc-icon-btn"
             :class="{ 'is-active': showBounds }"
+            :aria-pressed="showBounds"
             type="button"
             aria-label="剖切"
             @click="onBoundsButtonClick"
           >
             <span class="pc-icon-glyph" :style="glyph(ICON_URL.clip)" />
+          </button>
+        </el-tooltip>
+
+        <span class="pc-tool-divider" />
+
+        <el-tooltip content="第一人称漫游" placement="bottom" :show-after="150">
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': firstPersonActive }"
+            :aria-pressed="firstPersonActive"
+            :disabled="!pointcloudLoadedState"
+            type="button"
+            aria-label="第一人称漫游"
+            @click="toggleFirstPerson"
+          >
+            <el-icon><View /></el-icon>
           </button>
         </el-tooltip>
 
@@ -206,6 +231,7 @@
               <button
                 class="pc-icon-btn"
                 :class="{ 'is-active': analysisMode !== 'none' }"
+                :aria-pressed="analysisMode !== 'none'"
                 type="button"
                 aria-label="测量"
               >
@@ -220,6 +246,7 @@
                   :key="item.mode"
                   type="button"
                   :class="{ on: analysisMode === item.mode }"
+                  :aria-pressed="analysisMode === item.mode"
                   :disabled="!pointcloudLoadedState"
                   :title="item.title"
                   @click="selectAnalysisMode(item.mode)"
@@ -227,6 +254,15 @@
                   {{ item.label }}
                 </button>
               </div>
+              <button
+                class="pc-pop-clear"
+                type="button"
+                :disabled="!pointcloudLoadedState || !canUndoMeasurement"
+                @click="undoMeasurement"
+              >
+                <el-icon><RefreshLeft /></el-icon>
+                撤销上一步
+              </button>
               <button
                 class="pc-pop-clear"
                 type="button"
@@ -239,12 +275,73 @@
             </div>
           </el-popover>
         </el-tooltip>
+        <el-tooltip
+          v-if="trajectoryPoints.length"
+          :content="
+            trajectoryClickMode === 'panorama'
+              ? '点击轨迹点：打开全景图'
+              : '点击轨迹点：切换视角'
+          "
+          placement="bottom"
+          :show-after="150"
+        >
+          <el-popover
+            placement="bottom-end"
+            :width="220"
+            trigger="click"
+            popper-class="pc-popover"
+          >
+            <template #reference>
+              <button
+                class="pc-icon-btn"
+                :class="{ 'is-active': trajectoryClickMode === 'view' }"
+                :aria-pressed="trajectoryClickMode === 'view'"
+                type="button"
+                aria-label="轨迹点点击行为"
+              >
+                <el-icon><Compass /></el-icon>
+              </button>
+            </template>
+            <div class="pc-pop">
+              <div class="pc-pop-title">点击轨迹点</div>
+              <div class="pc-pop-seg">
+                <button
+                  type="button"
+                  :class="{ on: trajectoryClickMode === 'panorama' }"
+                  :aria-pressed="trajectoryClickMode === 'panorama'"
+                  :disabled="!attachIncludePanorama"
+                  :title="
+                    attachIncludePanorama ? '打开全景图' : '该点云未包含全景图'
+                  "
+                  @click="trajectoryClickMode = 'panorama'"
+                >
+                  打开全景图
+                </button>
+                <button
+                  type="button"
+                  :class="{ on: trajectoryClickMode === 'view' }"
+                  :aria-pressed="trajectoryClickMode === 'view'"
+                  @click="trajectoryClickMode = 'view'"
+                >
+                  切换视角
+                </button>
+              </div>
+              <p class="pc-pop-hint">
+                {{
+                  attachIncludePanorama
+                    ? '选择点击圆形轨迹点时的默认动作'
+                    : '该点云未包含全景图，点击轨迹点仅切换视角'
+                }}
+              </p>
+            </div>
+          </el-popover>
+        </el-tooltip>
         <el-tooltip content="重置视角" placement="bottom" :show-after="150">
           <button
             class="pc-icon-btn"
             type="button"
             aria-label="重置视角"
-            @click="resetView"
+            @click="resetToTrajectoryView"
           >
             <el-icon><Aim /></el-icon>
           </button>
@@ -271,6 +368,7 @@
           <button
             class="pc-icon-btn"
             :class="{ 'is-active': pointcloudVisible }"
+            :aria-pressed="pointcloudVisible"
             type="button"
             aria-label="点云"
             @click="pointcloudVisible = !pointcloudVisible"
@@ -287,6 +385,7 @@
           <button
             class="pc-icon-btn"
             :class="{ 'is-active': gaussianVisible }"
+            :aria-pressed="gaussianVisible"
             type="button"
             aria-label="高斯"
             @click="gaussianVisible = !gaussianVisible"
@@ -303,6 +402,7 @@
           <button
             class="pc-icon-btn"
             :class="{ 'is-active': trajectoryVisible }"
+            :aria-pressed="trajectoryVisible"
             type="button"
             aria-label="轨迹"
             @click="trajectoryVisible = !trajectoryVisible"
@@ -343,6 +443,7 @@
         :tiles-resolution-scale="0.72"
         @loaded-change="handlePointcloudLoadedChange"
         @world-ready="handlePointcloudWorldReady"
+        @first-person-change="handleFirstPersonChange"
       />
 
       <!-- 叠加层：高斯 + 轨迹，按点云坐标系叠加（跟随点云相机） -->
@@ -475,7 +576,14 @@
           {{ analysisSummary }}
         </span>
         <span v-else class="pc-analysis-hint">{{ analysisHint }}</span>
-        <span class="pc-analysis-exit">Esc 退出测量</span>
+        <span class="pc-analysis-exit">Esc 退出 · Ctrl+Z 撤销</span>
+        <button
+          type="button"
+          :disabled="!canUndoMeasurement"
+          @click="undoMeasurement"
+        >
+          撤销
+        </button>
         <button type="button" @click="clearAnalysis">清除</button>
       </div>
 
@@ -546,12 +654,89 @@
         </div>
       </div>
 
-      <div class="pc-status" role="status">
-        <i :class="{ loading: !pointcloudLoadedState }" aria-hidden="true" />
-        {{ pointcloudLoadedState ? '点云已加载' : '正在加载点云' }}
+      <div
+        v-if="firstPersonActive"
+        class="pc-fp-controls"
+        role="group"
+        aria-label="第一人称移动控制"
+      >
+        <p class="pc-fp-hint">拖拽看向 · WASD 移动 · Esc 退出</p>
+        <div class="pc-fp-pad">
+          <button
+            class="pc-fp-key is-up"
+            type="button"
+            aria-label="前进"
+            title="前进 (W)"
+            @pointerdown.prevent="fpMove('up', true)"
+            @pointerup="fpMove('up', false)"
+            @pointerleave="fpMove('up', false)"
+            @pointercancel="fpMove('up', false)"
+          >
+            <el-icon><ArrowUp /></el-icon>
+          </button>
+          <button
+            class="pc-fp-key is-left"
+            type="button"
+            aria-label="左移"
+            title="左移 (A)"
+            @pointerdown.prevent="fpMove('left', true)"
+            @pointerup="fpMove('left', false)"
+            @pointerleave="fpMove('left', false)"
+            @pointercancel="fpMove('left', false)"
+          >
+            <el-icon><ArrowLeft /></el-icon>
+          </button>
+          <button
+            class="pc-fp-key is-right"
+            type="button"
+            aria-label="右移"
+            title="右移 (D)"
+            @pointerdown.prevent="fpMove('right', true)"
+            @pointerup="fpMove('right', false)"
+            @pointerleave="fpMove('right', false)"
+            @pointercancel="fpMove('right', false)"
+          >
+            <el-icon><ArrowRight /></el-icon>
+          </button>
+          <button
+            class="pc-fp-key is-down"
+            type="button"
+            aria-label="后退"
+            title="后退 (S)"
+            @pointerdown.prevent="fpMove('down', true)"
+            @pointerup="fpMove('down', false)"
+            @pointerleave="fpMove('down', false)"
+            @pointercancel="fpMove('down', false)"
+          >
+            <el-icon><ArrowDown /></el-icon>
+          </button>
+        </div>
+        <button
+          class="pc-fp-collision"
+          type="button"
+          :class="{ on: collisionEnabled }"
+          :aria-pressed="collisionEnabled"
+          title="开启后相机不会穿入点云内部"
+          @click="collisionEnabled = !collisionEnabled"
+        >
+          碰撞保护
+        </button>
       </div>
 
-      <div v-if="errorMessage" class="pc-error-overlay">
+      <div class="pc-status" role="status">
+        <i :class="{ loading: !pointcloudLoadedState }" aria-hidden="true" />
+        <span>
+          {{
+            pointcloudLoadedState
+              ? '点云已加载'
+              : showLoadingHint
+                ? '正在加载点云，文件较大时可能需要一些时间…'
+                : '正在加载点云'
+          }}
+        </span>
+      </div>
+
+      <div v-if="errorMessage" class="pc-error-overlay" role="alert">
         <div class="pc-error-card">
           <div class="pc-error-title">预览失败</div>
           <div class="pc-error-message">{{ errorMessage }}</div>
@@ -566,18 +751,30 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   Aim,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   Close,
+  Compass,
   Delete,
   FullScreen,
   RefreshLeft,
   ScaleToOriginal,
+  View,
 } from '@element-plus/icons-vue'
 import PanoramaViewPanel from '@/views/result/components/PanoramaViewPanel.vue'
 import ScanGaussTrajectoryOverlay from './components/ScanGaussTrajectoryOverlay.vue'
@@ -674,10 +871,21 @@ type PointCloudViewerExpose = InstanceType<typeof PointCloudViewer> & {
   requestRender?: () => void
   syncFromTrajectory?: (point: TrajectoryPoint) => void
   setPointRatio?: (ratio: number) => void
+  enterFirstPersonMode?: () => void
+  exitFirstPersonMode?: () => void
+  toggleFirstPersonMode?: () => void
+  isFirstPersonActive?: () => boolean
+  setFirstPersonMoveDirection?: (
+    direction: FpMoveDirection,
+    active: boolean,
+  ) => void
+  setCollisionEnabled?: (enabled: boolean) => void
 }
 
 const pointcloudViewerRef = ref<PointCloudViewerExpose | null>(null)
 const errorMessage = ref('')
+const showLoadingHint = ref(false)
+let loadingHintTimer: ReturnType<typeof setTimeout> | null = null
 const loadToken = ref(0)
 const showBounds = ref(false)
 const activeClipAxis = ref<ClipAxisKey>('z')
@@ -720,6 +928,23 @@ const showGrid = ref(false)
 const edlEnabled = ref(true)
 const pointSize = ref(2.5)
 let scanMaxDim = 10
+
+// 第一人称漫游：进入后显示方向控制器，可开启碰撞保护
+type FpMoveDirection = 'up' | 'down' | 'left' | 'right'
+const firstPersonActive = ref(false)
+const collisionEnabled = ref(true)
+function toggleFirstPerson() {
+  pointcloudViewerRef.value?.toggleFirstPersonMode?.()
+}
+function handleFirstPersonChange(value: boolean) {
+  firstPersonActive.value = value
+}
+function fpMove(direction: FpMoveDirection, active: boolean) {
+  pointcloudViewerRef.value?.setFirstPersonMoveDirection?.(direction, active)
+}
+watch(collisionEnabled, (value) => {
+  pointcloudViewerRef.value?.setCollisionEnabled?.(value)
+})
 
 // 点云着色：真彩 / 台面分色 / 强度 + 色带 + 颜色轴
 type ScanColorMode = 'rgb' | 'table-class' | 'intensity'
@@ -860,11 +1085,31 @@ type MeasureBadge = {
   visible: boolean
 }
 const measureBadges = ref<MeasureBadge[]>([])
+type MeasurementType = 'point' | 'distance' | 'area'
+type MeasurementRecord = {
+  id: string
+  badgeId: string
+  type: MeasurementType
+  group: THREE.Group
+}
+const measurements = shallowRef<MeasurementRecord[]>([])
+const measureRevision = ref(0)
+const canUndoMeasurement = computed(
+  () =>
+    measureRevision.value >= 0 &&
+    (measurements.value.length > 0 ||
+      distanceStart !== null ||
+      areaPoints.length > 0),
+)
+function touchMeasureRevision() {
+  measureRevision.value += 1
+}
 let measureGroup: THREE.Group | null = null
 let areaPreviewGroup: THREE.Group | null = null
 let measureIdSeq = 0
 const measureCounts = { point: 0, distance: 0, area: 0 }
 let distanceStart: THREE.Vector3 | null = null
+let distanceStartGroup: THREE.Group | null = null
 let areaPoints: THREE.Vector3[] = []
 let measurePointerDown: { x: number; y: number } | null = null
 let badgeDrag: {
@@ -887,6 +1132,33 @@ function ensureMeasureGroup(): THREE.Group | null {
     scene.add(measureGroup)
   }
   return measureGroup
+}
+
+/** 作用：为一次测量创建独立分组，便于整条撤销/删除 */
+function createMeasurementGroup(): THREE.Group {
+  const group = new THREE.Group()
+  group.name = '__scan_measure_entry__'
+  group.renderOrder = 10000
+  ensureMeasureGroup()?.add(group)
+  return group
+}
+
+/** 作用：释放一个测量分组下的几何/贴图资源 */
+function disposeMeasurementGroup(obj: THREE.Object3D) {
+  obj.traverse((child: THREE.Object3D & { geometry?: any; material?: any }) => {
+    child.geometry?.dispose?.()
+    const mat = child.material
+    if (Array.isArray(mat)) mat.forEach((m: any) => m?.dispose?.())
+    else {
+      mat?.map?.dispose?.()
+      mat?.dispose?.()
+    }
+  })
+}
+
+function registerMeasurement(record: MeasurementRecord) {
+  measurements.value = [...measurements.value, record]
+  touchMeasureRevision()
 }
 
 function requestScanRender() {
@@ -1211,9 +1483,15 @@ function snapMeasurePoint(
 
 function handleMeasurePoint(point: THREE.Vector3) {
   if (analysisMode.value === 'locate') {
-    addMeasurementPin(point, '#22d3ee')
+    const group = createMeasurementGroup()
+    const pin = createMeasurementPinSprite('#22d3ee')
+    pin.position.copy(point)
+    group.add(pin)
+    scaleMeasurementPin(pin)
+    const id = `measure-${++measureIdSeq}`
+    registerMeasurement({ id, badgeId: id, type: 'point', group })
     addMeasureBadge({
-      id: `measure-${++measureIdSeq}`,
+      id,
       title: `定位 #${++measureCounts.point}`,
       mainLabel: '坐标',
       mainValue: '',
@@ -1227,12 +1505,20 @@ function handleMeasurePoint(point: THREE.Vector3) {
   } else if (analysisMode.value === 'distance') {
     if (!distanceStart) {
       distanceStart = point
-      addMeasurementPin(point, '#ff4040')
+      const group = createMeasurementGroup()
+      const pin = createMeasurementPinSprite('#ff4040')
+      pin.position.copy(point)
+      group.add(pin)
+      scaleMeasurementPin(pin)
+      distanceStartGroup = group
     } else {
       const start = distanceStart
-      const group = ensureMeasureGroup()
-      group?.add(createMeasureLine([start, point]))
-      addMeasurementPin(point, '#ff5a5a', 0.96)
+      const group = distanceStartGroup ?? createMeasurementGroup()
+      group.add(createMeasureLine([start, point]))
+      const endPin = createMeasurementPinSprite('#ff5a5a', 0.96)
+      endPin.position.copy(point)
+      group.add(endPin)
+      scaleMeasurementPin(endPin)
       const dx = point.x - start.x
       const dy = point.y - start.y
       const dz = point.z - start.z
@@ -1244,8 +1530,10 @@ function handleMeasurePoint(point: THREE.Vector3) {
             ? 0
             : 90
           : (Math.atan2(vertical, horizontal) * 180) / Math.PI
+      const id = `measure-${++measureIdSeq}`
+      registerMeasurement({ id, badgeId: id, type: 'distance', group })
       addMeasureBadge({
-        id: `measure-${++measureIdSeq}`,
+        id,
         title: `测距 #${++measureCounts.distance}`,
         mainLabel: '直线距离',
         mainValue: formatLength(start.distanceTo(point)),
@@ -1257,6 +1545,7 @@ function handleMeasurePoint(point: THREE.Vector3) {
         anchor: start.clone().add(point).multiplyScalar(0.5),
       })
       distanceStart = null
+      distanceStartGroup = null
     }
   } else if (analysisMode.value === 'area') {
     const camera = getViewerCamera() as THREE.PerspectiveCamera | null
@@ -1282,6 +1571,7 @@ function handleMeasurePoint(point: THREE.Vector3) {
     addMeasurementPin(point, '#ff4040', 1, areaPreviewGroup)
     updateAreaPreview()
   }
+  touchMeasureRevision()
   requestScanRender()
 }
 
@@ -1336,8 +1626,17 @@ function closeAreaMeasurement() {
   const points = [...areaPoints]
   const metrics = createPolygonMetrics(points)
   removeAreaPreviewLines()
-  const group = ensureMeasureGroup()
-  if (group) {
+  const group = createMeasurementGroup()
+  if (areaPreviewGroup) {
+    for (const child of [...areaPreviewGroup.children]) {
+      if ((child as any).isSprite) {
+        areaPreviewGroup.remove(child)
+        group.add(child)
+      }
+    }
+    areaPreviewGroup.parent?.remove(areaPreviewGroup)
+  }
+  {
     group.add(createMeasureLine([...points, points[0]], '#ff5a5a'))
     if (metrics) {
       const triangles = THREE.ShapeUtils.triangulateShape(metrics.projected, [])
@@ -1371,8 +1670,10 @@ function closeAreaMeasurement() {
     points
       .reduce((sum, p) => sum.add(p), new THREE.Vector3())
       .multiplyScalar(1 / points.length)
+  const id = `measure-${++measureIdSeq}`
+  registerMeasurement({ id, badgeId: id, type: 'area', group })
   addMeasureBadge({
-    id: `measure-${++measureIdSeq}`,
+    id,
     title: `面积 #${++measureCounts.area}`,
     mainLabel: '面积',
     mainValue: `${polygonArea(points).toFixed(2)} m²`,
@@ -1383,25 +1684,35 @@ function closeAreaMeasurement() {
   })
   areaPoints = []
   areaPreviewGroup = null
+  touchMeasureRevision()
   requestScanRender()
 }
 
 function selectAnalysisMode(mode: AnalysisMode) {
+  if (distanceStartGroup) {
+    distanceStartGroup.parent?.remove(distanceStartGroup)
+    disposeMeasurementGroup(distanceStartGroup)
+    distanceStartGroup = null
+  }
   analysisMode.value = analysisMode.value === mode ? 'none' : mode
   distanceStart = null
   areaPoints = []
   removeAreaPreview()
+  touchMeasureRevision()
 }
 
 function clearAnalysis() {
   analysisMode.value = 'none'
   distanceStart = null
+  distanceStartGroup = null
   areaPoints = []
   areaPreviewGroup = null
   measureBadges.value = []
+  measurements.value = []
   measureCounts.point = 0
   measureCounts.distance = 0
   measureCounts.area = 0
+  touchMeasureRevision()
   if (measureGroup) {
     measureGroup.parent?.remove(measureGroup)
     measureGroup.traverse((obj: any) => {
@@ -1418,12 +1729,81 @@ function clearAnalysis() {
   requestScanRender()
 }
 
+/** 作用：删除已完成的一条测量（几何 + 徽章） */
+function removeMeasurementRecord(record: MeasurementRecord) {
+  record.group.parent?.remove(record.group)
+  disposeMeasurementGroup(record.group)
+  measureBadges.value = measureBadges.value.filter(
+    (badge) => badge.id !== record.badgeId,
+  )
+  measurements.value = measurements.value.filter(
+    (item) => item.id !== record.id,
+  )
+}
+
+/** 作用：取消进行中的测距首点 */
+function cancelDistanceDraft() {
+  if (distanceStartGroup) {
+    distanceStartGroup.parent?.remove(distanceStartGroup)
+    disposeMeasurementGroup(distanceStartGroup)
+    distanceStartGroup = null
+  }
+  distanceStart = null
+  touchMeasureRevision()
+  requestScanRender()
+}
+
+/** 作用：回退进行中的面积点（删除最后放置的一个点） */
+function popAreaPoint() {
+  if (!areaPoints.length) return
+  areaPoints.pop()
+  if (areaPreviewGroup) {
+    const sprites = areaPreviewGroup.children.filter(
+      (child) => (child as any).isSprite,
+    )
+    const lastSprite = sprites[sprites.length - 1]
+    if (lastSprite) {
+      areaPreviewGroup.remove(lastSprite)
+      disposeMeasurementGroup(lastSprite)
+    }
+  }
+  if (!areaPoints.length) {
+    removeAreaPreview()
+  } else {
+    updateAreaPreview()
+  }
+  touchMeasureRevision()
+  requestScanRender()
+}
+
+/** 作用：撤销上一步：优先取消进行中的点，否则删除最后一条已完成测量 */
+function undoMeasurement() {
+  if (analysisMode.value === 'distance' && distanceStart) {
+    cancelDistanceDraft()
+    return
+  }
+  if (analysisMode.value === 'area' && areaPoints.length) {
+    popAreaPoint()
+    return
+  }
+  const last = measurements.value[measurements.value.length - 1]
+  if (!last) {
+    ElMessage.info('没有可撤销的测量')
+    return
+  }
+  removeMeasurementRecord(last)
+  touchMeasureRevision()
+  requestScanRender()
+}
+
 function onStagePointerDown(event: PointerEvent) {
+  if (firstPersonActive.value) return
   if (analysisMode.value === 'none') return
   measurePointerDown = { x: event.clientX, y: event.clientY }
 }
 
 function onStagePointerUp(event: PointerEvent) {
+  if (firstPersonActive.value) return
   if (analysisMode.value === 'none' || !measurePointerDown) return
   const dx = event.clientX - measurePointerDown.x
   const dy = event.clientY - measurePointerDown.y
@@ -1438,12 +1818,37 @@ function onStageDblClick() {
 }
 
 function onMeasureKeyDown(event: KeyboardEvent) {
+  const target = event.target
+  const inEditable =
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  if (
+    event.key.toLowerCase() === 'v' &&
+    !inEditable &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey
+  ) {
+    event.preventDefault()
+    toggleFirstPerson()
+    return
+  }
   if (event.key === 'Escape' && analysisMode.value !== 'none') {
     clearAnalysis()
     return
   }
   if (event.key === 'Enter' && analysisMode.value === 'area') {
     closeAreaMeasurement()
+    return
+  }
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === 'z' &&
+    analysisMode.value !== 'none'
+  ) {
+    event.preventDefault()
+    undoMeasurement()
   }
 }
 
@@ -1578,6 +1983,12 @@ const overlayRef = ref<InstanceType<typeof ScanGaussTrajectoryOverlay> | null>(
 const trajectoryVisible = ref(true)
 const gaussianVisible = ref(true)
 const pointcloudVisible = ref(true)
+/** 点击圆形轨迹点的默认行为：panorama=打开全景图，view=仅切换视角。 */
+const trajectoryClickMode = ref<'panorama' | 'view'>('panorama')
+// 未包含全景图的点云，点击轨迹点只能切换视角，自动回退到 view。
+watch(attachIncludePanorama, (has) => {
+  trajectoryClickMode.value = has ? 'panorama' : 'view'
+})
 const pointRatio = ref(100)
 
 /** 叠加层相机位姿：完全跟随点云相机（与混合模式一致）。 */
@@ -1667,7 +2078,7 @@ function stepTrajectory(delta: number) {
   onTrajectorySelect(next, true)
 }
 
-/** 在视图里点击圆形轨迹点：命中则切到该点位姿并打开全景图叠加层。 */
+/** 在视图里点击圆形轨迹点：命中则切到该点位姿，并按当前设置决定是否打开全景图叠加层。 */
 function onStageClick(event: MouseEvent) {
   if (ignoreNextStageClick) {
     ignoreNextStageClick = false
@@ -1680,12 +2091,14 @@ function onStageClick(event: MouseEvent) {
     event.clientY,
   )
   if (index === null || index === undefined) return
-  onTrajectorySelect(index, true)
+  const openPanorama =
+    trajectoryClickMode.value === 'panorama' && attachIncludePanorama.value
+  onTrajectorySelect(index, openPanorama)
 }
 
 /**
  * 初始视角：等点云真正加载完成（loaded-change=true）且「附加视图」信息就绪后，
- * 随机取一个轨迹控制点作为默认视角；没有控制点则回退适配视图。
+ * 固定取第一个轨迹控制点作为默认视角，保证每次打开一致、可复现；没有控制点则回退适配视图。
  * 注意：必须等 loaded，否则 syncFromTrajectory 会因点云未加载而直接返回。
  */
 let initialViewApplied = false
@@ -1695,12 +2108,9 @@ function applyInitialView() {
   const points = trajectoryPoints.value
   initialViewApplied = true
   if (points.length) {
-    const index = Math.floor(Math.random() * points.length)
-    console.info('[scan-preview] 初始视角=随机控制点位姿', index)
-    onTrajectorySelect(index)
+    onTrajectorySelect(0)
     return
   }
-  console.info('[scan-preview] 初始视角=适配视图（无控制点）')
   pointcloudViewerRef.value?.resetView?.()
 }
 
@@ -2391,6 +2801,7 @@ function syncScanThreeControls() {
 }
 
 function handlePointcloudLoadedChange(loaded: boolean) {
+  stopLoadingWatch()
   pointcloudLoadedState.value = loaded
   if (!loaded) {
     pointcloudWorldReady.value = false
@@ -2479,6 +2890,40 @@ const waitForViewerReady = async () => {
   return pointcloudViewerRef.value
 }
 
+function stopLoadingWatch() {
+  if (loadingHintTimer) {
+    clearTimeout(loadingHintTimer)
+    loadingHintTimer = null
+  }
+  showLoadingHint.value = false
+}
+
+function startLoadingWatch() {
+  stopLoadingWatch()
+  loadingHintTimer = setTimeout(() => {
+    showLoadingHint.value = true
+  }, 6000)
+}
+
+/** 作用：把底层错误转换为可诊断、可操作的用户提示，同时保留原始细节。 */
+function formatPreviewError(error: unknown): string {
+  const raw = String(
+    (error as { message?: unknown })?.message ?? error ?? '',
+  ).trim()
+  const lower = raw.toLowerCase()
+  const detail = raw ? `（${raw}）` : ''
+  if (/failed to fetch|networkerror|load failed|net::err/.test(lower)) {
+    return `网络异常，点云数据加载失败。请检查网络或服务是否可用后重试。${detail}`
+  }
+  if (/\b404\b|not found|tileset\.json/.test(lower)) {
+    return `未找到该点云数据（tileset.json）。文件可能已被删除或尚未处理完成。${detail}`
+  }
+  if (/webgl|gpu|context lost|out of memory/.test(lower)) {
+    return `显卡或 WebGL 初始化失败，建议关闭其他占用显存的页面后重试。${detail}`
+  }
+  return raw || '点云加载失败，请稍后重试。'
+}
+
 const loadPreview = async () => {
   const token = ++loadToken.value
   errorMessage.value = ''
@@ -2506,12 +2951,14 @@ const loadPreview = async () => {
   }
 
   viewer.setStatusText?.('自动加载点云中...')
+  startLoadingWatch()
 
   try {
     await viewer.loadPointcloudByScanId(projectId.value, fileId.value)
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (token !== loadToken.value) return
-    errorMessage.value = error?.message || '点云加载失败'
+    stopLoadingWatch()
+    errorMessage.value = formatPreviewError(error)
     pointcloudLoadedState.value = false
     pointcloudWorldReady.value = false
     invalidateClipBounds()
@@ -2521,6 +2968,24 @@ const loadPreview = async () => {
 }
 
 const resetView = () => {
+  pointcloudViewerRef.value?.resetView?.()
+}
+
+/** 重置视角：聚焦当前（或第一个）轨迹点视角；无轨迹时回退到整体适配视图。 */
+const resetToTrajectoryView = () => {
+  if (firstPersonActive.value) {
+    pointcloudViewerRef.value?.exitFirstPersonMode?.()
+  }
+  const points = trajectoryPoints.value
+  if (points.length) {
+    const current = selectedTrajectoryIndex.value
+    const index =
+      typeof current === 'number' && current >= 0 && current < points.length
+        ? current
+        : 0
+    onTrajectorySelect(index)
+    return
+  }
   pointcloudViewerRef.value?.resetView?.()
 }
 
@@ -2598,6 +3063,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   loadToken.value += 1
   cancelAnimationFrame(labelRaf)
+  stopLoadingWatch()
   const stage = stageRef.value
   stage?.removeEventListener('pointerdown', onStagePointerDown)
   stage?.removeEventListener('pointerup', onStagePointerUp)
@@ -2614,215 +3080,25 @@ onBeforeUnmount(() => {
 </script>
 
 <style lang="scss" scoped>
-.scan-preview-page {
-  position: relative;
-  width: 100%;
-  height: 100vh;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at top, rgba(57, 92, 135, 0.2), transparent 38%),
-    linear-gradient(180deg, #09111d 0%, #050a12 100%);
-}
-
-.scan-preview-viewer {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.scan-preview-toolbar {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  right: 16px;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 14px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 14px;
-  background: rgba(8, 15, 26, 0.72);
-  backdrop-filter: blur(14px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
-}
-
-.toolbar-left,
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.toolbar-right {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.file-title {
-  max-width: 420px;
-  overflow: hidden;
-  color: #f8fafc;
-  font-size: 15px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.toolbar-tool-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.toolbar-tool-btn--svg {
-  overflow: hidden;
-}
-
-.toolbar-tool-btn__svg {
-  width: 15px;
-  height: 15px;
-  display: block;
-  flex-shrink: 0;
-  pointer-events: none;
-  overflow: visible;
-  color: currentColor;
-}
-
-.scan-preview-toolbar :deep(.el-button.toolbar-tool-btn.is-on) {
-  background: rgba(64, 158, 255, 0.92);
-  border-color: rgba(64, 158, 255, 0.92);
-  color: #ffffff;
-}
-
-.scan-preview-toolbar :deep(.el-button.toolbar-tool-btn.is-on:hover) {
-  background: rgba(64, 158, 255, 0.98);
-  border-color: rgba(64, 158, 255, 0.98);
-}
-
-.scan-preview-toolbar
-  :deep(.el-button.toolbar-tool-btn.is-disabled:not(.is-on)) {
-  opacity: 0.55;
-}
-
-.error-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(4, 10, 18, 0.66);
-}
-
-.error-card {
-  width: min(480px, 100%);
-  padding: 24px;
-  border: 1px solid rgba(248, 113, 113, 0.24);
-  border-radius: 16px;
-  background: rgba(15, 23, 42, 0.96);
-  color: #e2e8f0;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
-}
-
-.error-title {
-  margin-bottom: 8px;
-  color: #f8fafc;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.error-message {
-  line-height: 1.6;
-}
-
-.error-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 18px;
-}
-
-.scan-preview-page :deep(.pointcloud-view-panel) {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: #1a1a1a;
-}
-
-.scan-preview-page :deep(.pointcloud-viewport) {
-  position: relative;
-  flex: 1;
-  width: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.scan-preview-page :deep(.pointcloud-viewport canvas) {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.scan-preview-page :deep(.panel-refresh-btn) {
-  display: none;
-}
-
-.scan-preview-page :deep(.empty-placeholder) {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #2c2c2c;
-  z-index: 1;
-}
-
-.scan-preview-page :deep(.placeholder-content) {
-  padding: 40px;
-  text-align: center;
-}
-
-.scan-preview-page :deep(.placeholder-icon) {
-  margin-bottom: 16px;
-  color: #64748b;
-  font-size: 64px;
-}
-
-.scan-preview-page :deep(.placeholder-text) {
-  margin: 0;
-  color: #f8fafc;
-  font-size: 14px;
-}
-
-@media (max-width: 768px) {
-  .scan-preview-toolbar {
-    top: 12px;
-    left: 12px;
-    right: 12px;
-    flex-direction: column;
-    align-items: stretch;
+@media (width <= 900px) {
+  .pc-header {
+    padding-left: 14px;
   }
 
-  .toolbar-left,
-  .toolbar-right {
-    width: 100%;
-    justify-content: space-between;
+  .pc-header-tools {
+    gap: 0;
   }
 
-  .file-title {
-    max-width: none;
-    flex: 1;
+  .pc-icon-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  .pc-tool-divider {
+    margin: 0 3px;
   }
 }
-</style>
 
-<style lang="scss" scoped>
-/* ==================== CloudBIM 风格点云预览布局 ==================== */
 .pointcloud-preview-page {
   --viewer-stage: #0c1224;
   --viewer-chrome: rgb(12 18 36 / 88%);
@@ -2891,6 +3167,18 @@ onBeforeUnmount(() => {
   background: #cfd7e8;
 }
 
+.pc-icon-btn:focus-visible,
+.pc-close:focus-visible,
+.pc-clip-bar button:focus-visible,
+.pc-clip-bar input:focus-visible,
+.pc-analysis-toolbar button:focus-visible,
+.pc-panorama-close:focus-visible,
+.pc-panorama-nav:focus-visible,
+.pc-int-axis__reset:focus-visible {
+  outline: 2px solid #6b83ff;
+  outline-offset: 2px;
+}
+
 .pc-icon-btn {
   display: inline-grid;
   place-items: center;
@@ -2921,18 +3209,25 @@ onBeforeUnmount(() => {
   box-shadow: 0 2px 6px rgb(78 102 204 / 35%);
 }
 
+.pc-icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.pc-icon-btn:disabled:hover {
+  color: #4b5563;
+  background: transparent;
+  border-color: transparent;
+}
+
 .pc-icon-glyph {
   display: inline-block;
   width: 19px;
   height: 19px;
-  background-color: currentColor;
-  -webkit-mask-image: var(--glyph);
+  background-color: currentcolor;
   mask-image: var(--glyph);
-  -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
-  -webkit-mask-position: center;
   mask-position: center;
-  -webkit-mask-size: contain;
   mask-size: contain;
 }
 
@@ -3016,7 +3311,7 @@ onBeforeUnmount(() => {
   z-index: 60;
 }
 
-/* 底部强度颜色轴：直方图 + 色带（对齐 cloudBIM-viewer）*/
+/* 底部强度颜色轴：直方图 + 色带（对齐 cloudBIM-viewer） */
 .pc-int-axis {
   position: absolute;
   right: 20px;
@@ -3102,8 +3397,8 @@ onBeforeUnmount(() => {
 .pc-int-axis__label {
   min-width: 34px;
   font-size: var(--font-size-xs);
-  color: rgb(255 255 255 / 82%);
   font-variant-numeric: tabular-nums;
+  color: rgb(255 255 255 / 82%);
   text-align: center;
 }
 
@@ -3115,8 +3410,8 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 12px;
   align-items: center;
-  min-height: 42px;
   max-width: calc(100% - 32px);
+  min-height: 42px;
   padding: 8px 10px 8px 14px;
   color: #f8fafc;
   white-space: nowrap;
@@ -3234,9 +3529,9 @@ onBeforeUnmount(() => {
 .pc-clip-bar__value {
   min-width: 34px;
   font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
   color: #cbd5e1;
   text-align: right;
-  font-variant-numeric: tabular-nums;
 }
 
 .pc-clip-bar__close {
@@ -3357,6 +3652,105 @@ onBeforeUnmount(() => {
   text-align: right;
 }
 
+.pc-fp-controls {
+  position: absolute;
+  right: 16px;
+  bottom: 18px;
+  z-index: 82;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+  user-select: none;
+}
+
+.pc-fp-hint {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: rgb(226 232 240 / 72%);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 55%);
+}
+
+.pc-fp-pad {
+  display: grid;
+  grid-template-areas:
+    '. up .'
+    'left . right'
+    '. down .';
+  gap: 8px;
+}
+
+.pc-fp-key {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  color: rgb(255 255 255 / 86%);
+  cursor: pointer;
+  background: rgb(8 17 29 / 78%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(10px);
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.1s ease;
+}
+
+.pc-fp-key:hover {
+  color: #fff;
+  background: #4e66cc;
+  border-color: #4e66cc;
+}
+
+.pc-fp-key:active {
+  transform: scale(0.94);
+}
+
+.pc-fp-key:focus-visible,
+.pc-fp-collision:focus-visible {
+  outline: 2px solid #6b83ff;
+  outline-offset: 2px;
+}
+
+.pc-fp-key.is-up {
+  grid-area: up;
+}
+
+.pc-fp-key.is-down {
+  grid-area: down;
+}
+
+.pc-fp-key.is-left {
+  grid-area: left;
+}
+
+.pc-fp-key.is-right {
+  grid-area: right;
+}
+
+.pc-fp-collision {
+  padding: 6px 12px;
+  font-size: var(--font-size-xs);
+  color: rgb(226 232 240 / 82%);
+  cursor: pointer;
+  background: rgb(8 17 29 / 72%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.pc-fp-collision.on {
+  color: #fff;
+  background: rgb(34 211 238 / 22%);
+  border-color: #22d3ee;
+}
+
 .pc-status {
   position: absolute;
   bottom: 118px;
@@ -3407,25 +3801,6 @@ onBeforeUnmount(() => {
   margin: 12px 0 20px;
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
-}
-
-@media (width <= 900px) {
-  .pc-header {
-    padding-left: 14px;
-  }
-
-  .pc-header-tools {
-    gap: 0;
-  }
-
-  .pc-icon-btn {
-    width: 30px;
-    height: 30px;
-  }
-
-  .pc-tool-divider {
-    margin: 0 3px;
-  }
 }
 
 /* ==================== 全景图叠加层 ==================== */
@@ -3512,6 +3887,8 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   transform: translateX(-50%);
 }
+
+/* ==================== CloudBIM 风格点云预览布局 ==================== */
 </style>
 
 <style lang="scss">
@@ -3541,9 +3918,23 @@ onBeforeUnmount(() => {
   color: #6b7280;
 }
 
+.pc-pop-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #909399;
+}
+
 .pc-pop-block {
   display: flex;
   flex-direction: column;
+}
+
+.pc-pop-seg button:focus-visible,
+.pc-pop-clear:focus-visible,
+.pc-bg-cell:focus-visible {
+  outline: 2px solid #6b83ff;
+  outline-offset: 2px;
 }
 
 .pc-pop-seg {
@@ -3595,8 +3986,8 @@ onBeforeUnmount(() => {
 
 .pc-pop-slider-head em {
   font-style: normal;
-  color: #6b7280;
   font-variant-numeric: tabular-nums;
+  color: #6b7280;
 }
 
 .pc-pop-clear {

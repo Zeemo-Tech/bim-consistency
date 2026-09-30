@@ -578,6 +578,12 @@ onBeforeUnmount(cleanup)
   background: rgb(255 255 255 / 12%);
 }
 
+.view-cube-home:focus-visible,
+.view-cube-roll button:focus-visible {
+  outline: 2px solid #6b83ff;
+  outline-offset: 1px;
+}
+
 .view-cube-roll svg {
   width: 16px;
   height: 16px;

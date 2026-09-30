@@ -8,6 +8,8 @@
       "
       class="scan-overlay-status"
       :class="`is-${gaussStatus}`"
+      role="status"
+      aria-live="polite"
     >
       高斯：{{ statusLabel }}
     </div>

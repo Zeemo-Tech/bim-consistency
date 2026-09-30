@@ -407,18 +407,20 @@ let initPromise: Promise<void> | null = null
 let rendererMode: 'webgpu' | 'webgl' | null = null
 let captureTarget: THREE.RenderTarget | null = null
 let cleaningUp = false
-const FIRST_PERSON_COLLISION_RADIUS = 0.35
+const FIRST_PERSON_COLLISION_RADIUS = 0.22
 const DEFAULT_FIRST_PERSON_EYE_HEIGHT = 1.65
 const FIRST_PERSON_MIN_EYE_HEIGHT = 1.45
 const FIRST_PERSON_MAX_EYE_HEIGHT = 1.85
-const FIRST_PERSON_GROUND_PROBE_DISTANCE = 8
+const FIRST_PERSON_GROUND_BAND = 0.7
+const FIRST_PERSON_STEP_CLEARANCE = 0.45
 const FIRST_PERSON_MAX_STEP_UP = 0.18
-const FIRST_PERSON_MAX_STEP_DOWN = 0.5
+const FIRST_PERSON_MAX_STEP_DOWN = 0.35
 const FIRST_PERSON_ROTATION_SENSITIVITY = 0.12
 const FIRST_PERSON_MAX_POINTER_DELTA = 48
 const FIRST_PERSON_MAX_PITCH = 55
-const FIRST_PERSON_GROUND_POINT_THRESHOLD = 0.45
+const FIRST_PERSON_GROUND_POINT_THRESHOLD = 0.28
 const FIRST_PERSON_MOVE_SPEED = 2.8
+const firstPersonCollisionEnabled = ref(true)
 let firstPersonEyeHeight: number | null = null
 const activeFirstPersonMoveDirections = new Set<MoveDirection>()
 let lastFirstPersonMoveAt = 0
@@ -1505,6 +1507,10 @@ const getResolvedFirstPersonEyeHeight = () =>
 const raycastPointcloudGroundHeight = (
   origin: THREE.Vector3,
   distance: number,
+  referenceY: number,
+  minDrop: number,
+  maxDrop: number,
+  pick: 'first' | 'lowest' = 'lowest',
 ) => {
   const pointcloudTarget = getPointcloudRoot()
   if (!pointcloudTarget || !pointcloudLoaded.value) return null
@@ -1519,34 +1525,61 @@ const raycastPointcloudGroundHeight = (
   } else {
     raycaster.params.Points.threshold = FIRST_PERSON_GROUND_POINT_THRESHOLD
   }
-  const hit = raycaster.intersectObject(pointcloudTarget, true)[0]
-  return hit?.point?.y ?? null
+  const hits = raycaster.intersectObject(pointcloudTarget, true)
+  if (pick === 'first') {
+    for (const hit of hits) {
+      const hitY = hit?.point?.y
+      if (typeof hitY !== 'number') continue
+      const drop = referenceY - hitY
+      if (drop < minDrop) continue
+      if (drop > maxDrop) break
+      return hitY
+    }
+    return null
+  }
+  // 取「脚下合理区间内最低的点」作为地面：垂直墙面在每个高度都有点，
+  // 若取第一个命中会被一路顶高；取最低点则稳定落在地面/台阶上。
+  let groundY: number | null = null
+  for (const hit of hits) {
+    const hitY = hit?.point?.y
+    if (typeof hitY !== 'number') continue
+    const drop = referenceY - hitY
+    if (drop < minDrop) continue
+    if (drop > maxDrop) break
+    groundY = hitY
+  }
+  return groundY
 }
 
-const samplePointcloudGroundHeight = (position: THREE.Vector3) => {
+const samplePointcloudGroundHeight = (
+  position: THREE.Vector3,
+  options?: { minDrop?: number; maxDrop?: number; pick?: 'first' | 'lowest' },
+) => {
+  if (!pointcloudLoaded.value) return null
+  const eyeHeight = getResolvedFirstPersonEyeHeight()
+  const minDrop =
+    options?.minDrop ?? Math.max(0.4, eyeHeight - FIRST_PERSON_GROUND_BAND)
+  const maxDrop = options?.maxDrop ?? eyeHeight + FIRST_PERSON_GROUND_BAND
+  if (maxDrop <= minDrop) return null
   const localOrigin = position.clone()
   localOrigin.y += 0.2
-  const localDistance = Math.max(
-    FIRST_PERSON_GROUND_PROBE_DISTANCE,
-    getResolvedFirstPersonEyeHeight() * 4,
+  return raycastPointcloudGroundHeight(
+    localOrigin,
+    maxDrop + 0.4,
+    position.y,
+    minDrop,
+    maxDrop,
+    options?.pick ?? 'lowest',
   )
-  const localGround = raycastPointcloudGroundHeight(localOrigin, localDistance)
-  if (localGround !== null) return localGround
-
-  const worldBox = getPointcloudWorldBox()
-  if (!worldBox) return null
-  const globalOrigin = new THREE.Vector3(
-    position.x,
-    worldBox.max.y + pointcloudMaxDim * 0.5,
-    position.z,
-  )
-  const globalDistance = Math.max(pointcloudMaxDim * 3, 30)
-  return raycastPointcloudGroundHeight(globalOrigin, globalDistance)
 }
 
 const refreshPointcloudFirstPersonEyeHeight = () => {
   if (!pointcloudCamera) return
-  const groundHeight = samplePointcloudGroundHeight(pointcloudCamera.position)
+  const groundHeight = samplePointcloudGroundHeight(pointcloudCamera.position, {
+    minDrop: 0.4,
+    maxDrop: Math.max(pointcloudMaxDim * 2, 50),
+    pick: 'first',
+  })
   if (groundHeight === null) {
     firstPersonEyeHeight = DEFAULT_FIRST_PERSON_EYE_HEIGHT
     return
@@ -1571,7 +1604,13 @@ const resolvePointcloudGroundFollowingPosition = (
 ) => {
   if (!firstPersonActive.value) return targetPosition
   if (!pointcloudCamera) return targetPosition
-  const groundHeight = samplePointcloudGroundHeight(targetPosition)
+  const groundHeight = options?.snapImmediately
+    ? samplePointcloudGroundHeight(targetPosition, {
+        minDrop: 0.4,
+        maxDrop: Math.max(pointcloudMaxDim * 2, 50),
+        pick: 'first',
+      })
+    : samplePointcloudGroundHeight(targetPosition)
   if (groundHeight === null) return targetPosition
 
   const desiredY = groundHeight + getResolvedFirstPersonEyeHeight()
@@ -1628,6 +1667,7 @@ const hasFirstPersonPointcloudCollision = (
   direction: THREE.Vector3,
 ) => {
   if (!firstPersonActive.value) return false
+  if (!firstPersonCollisionEnabled.value) return false
   const pointcloudTarget = pointcloudTilesetWrapper ?? pointcloudTileset?.group
   if (!pointcloudTarget || !pointcloudLoaded.value) return false
   const rayDirection = direction.clone().normalize()
@@ -1643,7 +1683,11 @@ const hasFirstPersonPointcloudCollision = (
   } else {
     raycaster.params.Points.threshold = FIRST_PERSON_COLLISION_RADIUS
   }
-  return raycaster.intersectObject(pointcloudTarget, true).length > 0
+  const hits = raycaster.intersectObject(pointcloudTarget, true)
+  // 只有明显高过脚底的点才算障碍；脚下的台阶/地面点直接迈过去，避免被卡住
+  const floorY = currentPosition.y - getResolvedFirstPersonEyeHeight()
+  const clearanceY = floorY + FIRST_PERSON_STEP_CLEARANCE
+  return hits.some((hit) => (hit?.point?.y ?? -Infinity) > clearanceY)
 }
 
 const movePointcloudCamera = (direction: MoveDirection) => {
@@ -3054,6 +3098,19 @@ defineExpose({
   exitFirstPersonMode,
   toggleFirstPersonMode,
   isFirstPersonActive: () => firstPersonActive.value,
+  setFirstPersonMoveDirection: (direction: MoveDirection, active: boolean) => {
+    if (!firstPersonActive.value) return
+    if (active) {
+      activeFirstPersonMoveDirections.add(direction)
+      lastFirstPersonMoveAt = 0
+      requestRender()
+    } else {
+      activeFirstPersonMoveDirections.delete(direction)
+    }
+  },
+  setCollisionEnabled: (enabled: boolean) => {
+    firstPersonCollisionEnabled.value = enabled !== false
+  },
   getPointcloudMaxDim: () => pointcloudMaxDim || 1,
   getAnnotationMarkerPosition: () => {
     if (!annotationMarker) return null
