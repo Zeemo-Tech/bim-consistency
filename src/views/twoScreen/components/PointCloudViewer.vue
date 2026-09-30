@@ -151,13 +151,36 @@ const unlitTSLMaterialCache = new WeakMap<any, { v0?: any; v1?: any }>()
 const pointsTSLMaterialCache = new WeakMap<any, { v0?: any; v1?: any }>()
 const originalMaterialByTSL = new WeakMap<any, any>()
 
+let pixelRatioCapOverride: number | null = null
+let tilesResolutionScaleOverride: number | null = null
+const RENDER_QUALITY_PRESETS = {
+  low: { pixelRatioCap: 0.85, resolutionScale: 0.5 },
+  medium: { pixelRatioCap: 1.25, resolutionScale: 0.72 },
+  high: { pixelRatioCap: 2, resolutionScale: 1 },
+} as const
+type RenderQualityLevel = keyof typeof RENDER_QUALITY_PRESETS
+
 const getResolvedPixelRatioCap = () => {
+  if (
+    pixelRatioCapOverride !== null &&
+    Number.isFinite(pixelRatioCapOverride) &&
+    pixelRatioCapOverride > 0
+  ) {
+    return Math.min(pixelRatioCapOverride, 2.5)
+  }
   const value = Number(props.pixelRatioCap)
   if (!Number.isFinite(value) || value <= 0) return dprCap
   return Math.min(value, dprCap)
 }
 
 const getResolvedTilesResolutionScale = () => {
+  if (
+    tilesResolutionScaleOverride !== null &&
+    Number.isFinite(tilesResolutionScaleOverride) &&
+    tilesResolutionScaleOverride > 0
+  ) {
+    return clamp(tilesResolutionScaleOverride, 0.25, 1)
+  }
   const value = Number(props.tilesResolutionScale)
   if (!Number.isFinite(value) || value <= 0) return 1
   return clamp(value, 0.5, 1)
@@ -420,6 +443,7 @@ const FIRST_PERSON_MAX_POINTER_DELTA = 48
 const FIRST_PERSON_MAX_PITCH = 55
 const FIRST_PERSON_GROUND_POINT_THRESHOLD = 0.28
 const FIRST_PERSON_MOVE_SPEED = 2.8
+let firstPersonMoveSpeed = FIRST_PERSON_MOVE_SPEED
 const firstPersonCollisionEnabled = ref(true)
 let firstPersonEyeHeight: number | null = null
 const activeFirstPersonMoveDirections = new Set<MoveDirection>()
@@ -1057,7 +1081,7 @@ const syncRendererSize = (
   const rect = containerEl.getBoundingClientRect()
   const w = Math.max(1, Math.floor(rect.width || 1))
   const h = Math.max(1, Math.floor(rect.height || 1))
-  const dpr = Math.min(window.devicePixelRatio || 1, dprCap)
+  const dpr = Math.min(window.devicePixelRatio || 1, getResolvedPixelRatioCap())
   const cw = Math.floor(w * dpr)
   const ch = Math.floor(h * dpr)
   if (renderer.domElement.width === cw && renderer.domElement.height === ch)
@@ -1696,7 +1720,7 @@ const movePointcloudCamera = (direction: MoveDirection) => {
   const currentRot = getCameraOrientation()
   if (!currentRot) return
 
-  const moveDistance = 0.8
+  const moveDistance = firstPersonMoveSpeed * 0.3
   const forward = rotationToDirection({
     lon: currentRot.lon,
     lat: 0,
@@ -1777,7 +1801,7 @@ const updateFirstPersonMovement = (timestamp: number) => {
     .normalize()
 
   const offset = new THREE.Vector3()
-  const moveDistance = FIRST_PERSON_MOVE_SPEED * deltaSeconds
+  const moveDistance = firstPersonMoveSpeed * deltaSeconds
   activeFirstPersonMoveDirections.forEach((direction) => {
     switch (direction) {
       case 'up':
@@ -3110,6 +3134,30 @@ defineExpose({
   },
   setCollisionEnabled: (enabled: boolean) => {
     firstPersonCollisionEnabled.value = enabled !== false
+  },
+  setFirstPersonMoveSpeed: (value: number) => {
+    const speed = Number(value)
+    if (Number.isFinite(speed) && speed > 0) {
+      firstPersonMoveSpeed = clamp(speed, 0.5, 12)
+    }
+  },
+  setRenderQuality: (level: RenderQualityLevel) => {
+    const preset =
+      RENDER_QUALITY_PRESETS[level] ?? RENDER_QUALITY_PRESETS.medium
+    pixelRatioCapOverride = preset.pixelRatioCap
+    tilesResolutionScaleOverride = preset.resolutionScale
+    if (pointcloudRenderer && pointcloudCamera && pointcloudViewportEl.value) {
+      const rect = pointcloudViewportEl.value.getBoundingClientRect()
+      const w = Math.max(1, Math.floor(rect.width || 1))
+      const h = Math.max(1, Math.floor(rect.height || 1))
+      const dpr = Math.min(window.devicePixelRatio || 1, preset.pixelRatioCap)
+      pointcloudRenderer.setPixelRatio(dpr)
+      pointcloudRenderer.setSize(w, h)
+      pointcloudCamera.aspect = w / h
+      pointcloudCamera.updateProjectionMatrix()
+      updateTilesetResolution()
+    }
+    requestRender()
   },
   getPointcloudMaxDim: () => pointcloudMaxDim || 1,
   getAnnotationMarkerPosition: () => {

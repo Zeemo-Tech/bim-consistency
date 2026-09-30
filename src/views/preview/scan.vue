@@ -151,6 +151,40 @@
           </el-popover>
         </el-tooltip>
 
+        <el-tooltip content="渲染质量" placement="bottom" :show-after="150">
+          <el-popover
+            placement="bottom-end"
+            :width="230"
+            trigger="click"
+            popper-class="pc-popover"
+          >
+            <template #reference>
+              <button class="pc-icon-btn" type="button" aria-label="渲染质量">
+                <el-icon><Setting /></el-icon>
+              </button>
+            </template>
+            <div class="pc-pop">
+              <div class="pc-pop-title">渲染质量</div>
+              <div class="pc-pop-seg">
+                <button
+                  v-for="opt in qualityOptions"
+                  :key="opt.value"
+                  type="button"
+                  :class="{ on: renderQuality === opt.value }"
+                  :aria-pressed="renderQuality === opt.value"
+                  :title="opt.title"
+                  @click="renderQuality = opt.value"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+              <p class="pc-pop-hint">
+                高画质更清晰、更吃性能；点云卡顿时建议用「中」或「低」。
+              </p>
+            </div>
+          </el-popover>
+        </el-tooltip>
+
         <span class="pc-tool-divider" />
 
         <el-tooltip content="显示增强" placement="bottom" :show-after="150">
@@ -359,6 +393,17 @@
             @click="toggleFullscreen"
           >
             <el-icon><FullScreen /></el-icon>
+          </button>
+        </el-tooltip>
+
+        <el-tooltip content="截图" placement="bottom" :show-after="150">
+          <button
+            class="pc-icon-btn"
+            type="button"
+            aria-label="截图"
+            @click="takeScreenshot"
+          >
+            <el-icon><Camera /></el-icon>
           </button>
         </el-tooltip>
 
@@ -711,6 +756,19 @@
             <el-icon><ArrowDown /></el-icon>
           </button>
         </div>
+        <div class="pc-fp-speed">
+          <span class="pc-fp-speed__label">
+            速度 {{ moveSpeed.toFixed(1) }}x
+          </span>
+          <el-slider
+            v-model="moveSpeed"
+            :min="0.5"
+            :max="8"
+            :step="0.5"
+            size="small"
+            aria-label="移动速度"
+          />
+        </div>
         <button
           class="pc-fp-collision"
           type="button"
@@ -768,12 +826,14 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  Camera,
   Close,
   Compass,
   Delete,
   FullScreen,
   RefreshLeft,
   ScaleToOriginal,
+  Setting,
   View,
 } from '@element-plus/icons-vue'
 import PanoramaViewPanel from '@/views/result/components/PanoramaViewPanel.vue'
@@ -880,6 +940,9 @@ type PointCloudViewerExpose = InstanceType<typeof PointCloudViewer> & {
     active: boolean,
   ) => void
   setCollisionEnabled?: (enabled: boolean) => void
+  setFirstPersonMoveSpeed?: (value: number) => void
+  setRenderQuality?: (level: RenderQuality) => void
+  forceCaptureDataUrl?: () => Promise<{ dataUrl: string } | null>
 }
 
 const pointcloudViewerRef = ref<PointCloudViewerExpose | null>(null)
@@ -945,6 +1008,41 @@ function fpMove(direction: FpMoveDirection, active: boolean) {
 watch(collisionEnabled, (value) => {
   pointcloudViewerRef.value?.setCollisionEnabled?.(value)
 })
+
+// 渲染质量档位 / 第一人称移动速度
+type RenderQuality = 'low' | 'medium' | 'high'
+const renderQuality = ref<RenderQuality>('medium')
+const qualityOptions: Array<{
+  value: RenderQuality
+  label: string
+  title: string
+}> = [
+  { value: 'low', label: '低', title: '牺牲清晰度换取流畅' },
+  { value: 'medium', label: '中', title: '平衡清晰度与性能' },
+  { value: 'high', label: '高', title: '最高清晰度，最吃性能' },
+]
+const moveSpeed = ref(2.8)
+watch(renderQuality, (value) => {
+  pointcloudViewerRef.value?.setRenderQuality?.(value)
+})
+watch(moveSpeed, (value) => {
+  pointcloudViewerRef.value?.setFirstPersonMoveSpeed?.(value)
+})
+
+/** 截图：抓取点云渲染画面并下载为 PNG。 */
+async function takeScreenshot() {
+  const result = await pointcloudViewerRef.value?.forceCaptureDataUrl?.()
+  const dataUrl = result?.dataUrl ?? ''
+  if (!dataUrl) {
+    ElMessage.warning('截图失败，请等待点云加载完成')
+    return
+  }
+  const link = document.createElement('a')
+  link.download = `${fileName.value || 'pointcloud'}-${Date.now()}.png`
+  link.href = dataUrl
+  link.click()
+  ElMessage.success('截图已保存')
+}
 
 // 点云着色：真彩 / 台面分色 / 强度 + 色带 + 颜色轴
 type ScanColorMode = 'rgb' | 'table-class' | 'intensity'
@@ -3728,6 +3826,21 @@ onBeforeUnmount(() => {
 
 .pc-fp-key.is-right {
   grid-area: right;
+}
+
+.pc-fp-speed {
+  width: 184px;
+  padding: 8px 12px 2px;
+  background: rgb(8 17 29 / 72%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(10px);
+}
+
+.pc-fp-speed__label {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: rgb(226 232 240 / 82%);
 }
 
 .pc-fp-collision {
