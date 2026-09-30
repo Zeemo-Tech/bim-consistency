@@ -148,6 +148,9 @@ export interface ProjectFileInfo {
   archiveSerial?: string
   archiveCode?: string
   linkedBimFileId?: number | null
+  /** 已绑定的高斯模型文件（仅 scan 由后端返回）。 */
+  gaussFileId?: number | null
+  gaussFileName?: string | null
   /** 扫描设备字典 id 与「全景图 / 高斯」勾选（仅 scan）。 */
   deviceId?: number | null
   includePanorama?: boolean

@@ -85,89 +85,216 @@
         :data="pagedFiles"
         row-key="id"
         tabindex="0"
+        :default-sort="{ prop: 'createdAt', order: 'descending' }"
         :aria-label="`${props.title}文件列表`"
+        @sort-change="handleSortChange"
       >
-        <el-table-column label="文件名称" min-width="220" align="left">
+        <el-table-column label="文件名称" min-width="200" align="left">
           <template #default="{ row }">
-            <div class="bim-name-cell">
-              <span :title="row.originalName">{{ row.originalName }}</span>
+            <div class="bim-name-cell bim-name-cell--stacked">
+              <div class="bim-name-main">
+                <span class="bim-name-badge" :class="`is-${row.type}`">
+                  <el-icon><component :is="fileTypeIcon(row)" /></el-icon>
+                </span>
+                <span class="bim-name-text" :title="row.originalName">
+                  {{ row.originalName }}
+                </span>
+              </div>
+              <small
+                v-if="buildingFloorText(row)"
+                class="bim-name-sub"
+                :title="`所属幢 / 楼层：${buildingFloorText(row)}`"
+              >
+                <el-icon><OfficeBuilding /></el-icon>
+                <span class="bim-name-sub-text">
+                  {{ buildingFloorText(row) }}
+                </span>
+              </small>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="幢号" min-width="110" align="left">
-          <template #default="{ row }">
-            {{ row.buildingName || '—' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="楼层" min-width="90" align="left">
-          <template #default="{ row }">
-            {{ row.floorName || '—' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="构件类型" min-width="150" align="left">
-          <template #default="{ row }">
-            {{ archiveComponentTypeLabel(row.componentType) || '—' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="归档编号" min-width="160" align="left">
-          <template #default="{ row }">
-            <span class="bim-code-text" :title="row.archiveCode || ''">
-              {{ row.archiveCode || '—' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column
-          v-if="isScanList"
-          label="关联设计模型"
-          min-width="180"
-          align="left"
-        >
-          <template #default="{ row }">
-            <span
-              class="bim-related"
-              :class="{ 'is-ready': linkedBimName(row) }"
-              :title="linkedBimName(row) || '未匹配设计模型'"
-            >
-              {{ linkedBimName(row) || '未匹配设计模型' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" min-width="96" align="left">
-          <template #default="{ row }">
-            <el-tag size="small" :type="statusTagType(row.status)">
-              {{ statusText(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="文件大小" min-width="100" align="left">
-          <template #default="{ row }">
-            {{ formatFileSize(row.fileSize) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="上传时间" min-width="160" align="left">
-          <template #default="{ row }">
-            {{ formatDate(row.createdAt) }}
-          </template>
-        </el-table-column>
-        <el-table-column
-          v-if="showRemesh"
-          label="网格均匀化"
-          min-width="120"
-          align="left"
-        >
-          <template #default="{ row }">
-            <el-tag
-              size="small"
-              :type="meshRemeshTagType(row.meshRemesh?.status)"
-            >
-              {{ meshRemeshText(row.meshRemesh?.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
+        <template v-if="isScanList">
+          <el-table-column label="关联设计模型" min-width="150" align="left">
+            <template #default="{ row }">
+              <span
+                class="bim-related"
+                :class="{ 'is-ready': linkedBimName(row) }"
+                :title="linkedBimName(row) || '未匹配设计模型'"
+              >
+                {{ linkedBimName(row) || '未匹配设计模型' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="状态"
+            min-width="84"
+            align="center"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              <el-tag size="small" :type="statusTagType(row.status)">
+                {{ statusText(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="高斯关联"
+            min-width="96"
+            align="center"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              <el-tag
+                size="small"
+                :type="gaussLinkReady(row) ? 'success' : 'info'"
+                :title="gaussLinkTitle(row)"
+              >
+                {{ gaussLinkReady(row) ? '已关联' : '未关联' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="全景图关联"
+            min-width="96"
+            align="center"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              <el-tag
+                size="small"
+                :type="row.includePanorama ? 'success' : 'info'"
+                :title="
+                  row.includePanorama
+                    ? '点云包含全景图（随轨迹）'
+                    : '未关联全景图'
+                "
+              >
+                {{ row.includePanorama ? '已关联' : '未关联' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="构件类型" min-width="110" align="left">
+            <template #default="{ row }">
+              {{ archiveComponentTypeLabel(row.componentType) || '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="归档编号"
+            min-width="130"
+            align="center"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              <span class="bim-code-text" :title="row.archiveCode || ''">
+                {{ row.archiveCode || '—' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="文件大小"
+            min-width="90"
+            align="center"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              {{ formatFileSize(row.fileSize) }}
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="上传时间"
+            prop="createdAt"
+            min-width="140"
+            align="center"
+            sortable="custom"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              {{ formatDate(row.createdAt) }}
+            </template>
+          </el-table-column>
+        </template>
+        <template v-else>
+          <el-table-column label="构件类型" min-width="110" align="left">
+            <template #default="{ row }">
+              {{ archiveComponentTypeLabel(row.componentType) || '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="归档编号"
+            min-width="130"
+            align="center"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              <span class="bim-code-text" :title="row.archiveCode || ''">
+                {{ row.archiveCode || '—' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="状态"
+            min-width="84"
+            align="center"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              <el-tag size="small" :type="statusTagType(row.status)">
+                {{ statusText(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="文件大小"
+            min-width="90"
+            align="center"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              {{ formatFileSize(row.fileSize) }}
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="上传时间"
+            min-width="140"
+            align="center"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              {{ formatDate(row.createdAt) }}
+            </template>
+          </el-table-column>
+          <el-table-column
+            v-if="showRemesh"
+            label="网格均匀化"
+            min-width="110"
+            align="center"
+            class-name="is-center-col"
+            label-class-name="is-center-col"
+          >
+            <template #default="{ row }">
+              <el-tag
+                size="small"
+                :type="meshRemeshTagType(row.meshRemesh?.status)"
+              >
+                {{ meshRemeshText(row.meshRemesh?.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </template>
         <el-table-column
           label="操作"
           :width="isScanList ? 236 : 150"
-          align="right"
+          align="center"
           fixed="right"
           class-name="bim-operation-column"
           label-class-name="bim-operation-column"
@@ -295,10 +422,16 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import type { Component } from 'vue'
 import {
   Aim,
+  Box,
+  DataLine,
   Delete,
+  Document,
   Grid,
+  OfficeBuilding,
+  Picture,
   Refresh,
   Search,
   Upload,
@@ -351,9 +484,49 @@ const isBimList = computed(() => props.kinds.includes('bim'))
 const isCadList = computed(() => props.kinds.includes('cad'))
 const isGaussList = computed(() => props.kinds.includes('gauss'))
 
+/** 作用：将幢号与楼层合并展示到文件名称内（BIM 只有幢、无楼层）。 */
+function buildingFloorText(file: ProjectFileInfo) {
+  let building = file.buildingName?.trim()
+  let floor = file.floorName?.trim()
+  // 兼容历史点云数据：未落库幢/层时，回退到其匹配的设计模型（BIM）。
+  if (!building && !floor && file.type === 'scan') {
+    const bim = linkedBimForFile(file)
+    building = bim?.buildingName?.trim()
+    floor = bim?.floorName?.trim()
+  }
+  // 补全单位，避免只显示「1 · 1」让人看不懂是幢号还是楼层。
+  const parts: string[] = []
+  if (building) parts.push(/[幢栋]/.test(building) ? building : `${building}幢`)
+  if (floor) parts.push(/层/.test(floor) ? floor : `${floor}层`)
+  return parts.join(' · ')
+}
+
+/** 作用：高斯关联是否就绪（已绑定高斯模型或点云本身包含高斯）。 */
+function gaussLinkReady(file: ProjectFileInfo) {
+  return Boolean(file.gaussFileName) || Boolean(file.includeGaussian)
+}
+
+/** 作用：高斯关联悬浮提示。 */
+function gaussLinkTitle(file: ProjectFileInfo) {
+  if (file.gaussFileName) return `已绑定高斯模型：${file.gaussFileName}`
+  if (file.includeGaussian) return '点云包含高斯（未单独上传高斯模型）'
+  return '未关联高斯'
+}
+
 /** 作用：扫描点云关联的设计模型（BIM）名称，用于列表展示与进入分析校验。 */
 function linkedBimName(file: ProjectFileInfo) {
   return linkedBimForFile(file)?.originalName || ''
+}
+
+/** 作用：按文件类型返回名称前的类型图标，增强列表可读性。 */
+const FILE_TYPE_ICON: Record<string, Component> = {
+  scan: DataLine,
+  bim: Box,
+  cad: Document,
+  gauss: Picture,
+}
+function fileTypeIcon(file: ProjectFileInfo) {
+  return FILE_TYPE_ICON[file.type] || Document
 }
 function canEnterAnalysis(file: ProjectFileInfo) {
   if (file.status !== 'stored') return false
@@ -392,12 +565,28 @@ const filters = reactive({
 
 const currentPage = ref(1)
 const pageSize = ref(10)
+const sortOrder = ref<'asc' | 'desc'>('desc')
 
 const sortedFiles = computed(() =>
   [...files.value].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    (a, b) =>
+      (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) *
+      (sortOrder.value === 'asc' ? 1 : -1),
   ),
 )
+
+/** 作用：切换「上传时间」排序方向。 */
+function handleSortChange({
+  prop,
+  order,
+}: {
+  prop: string
+  order: string | null
+}) {
+  if (prop !== 'createdAt') return
+  sortOrder.value = order === 'ascending' ? 'asc' : 'desc'
+  currentPage.value = 1
+}
 
 const filteredFiles = computed(() =>
   sortedFiles.value.filter((file) => {
@@ -565,11 +754,56 @@ onMounted(() => {
 }
 
 .bim-name-cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
   min-width: 0;
 }
 
-.bim-name-cell > span {
-  display: block;
+.bim-name-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bim-name-cell--stacked {
+  flex-direction: column;
+  gap: 2px;
+  align-items: stretch;
+}
+
+.bim-name-main {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.bim-name-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  border-radius: var(--radius-xs);
+}
+
+.bim-name-sub {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  max-width: 100%;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.bim-name-sub-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -616,5 +850,19 @@ onMounted(() => {
   @include controls.primary;
 
   margin-top: var(--spacing-sm);
+}
+
+/* 居中列：让表头与内容对齐（文本列保持左对齐，短列/标签/操作居中） */
+.workspace-list .workspace-table :deep(.is-center-col .cell) {
+  text-align: center;
+}
+
+.workspace-list .workspace-table :deep(th.bim-operation-column .cell),
+.workspace-list .workspace-table :deep(td.bim-operation-column .cell) {
+  text-align: center;
+}
+
+.workspace-list .workspace-table :deep(.workspace-row-actions) {
+  justify-content: center;
 }
 </style>
