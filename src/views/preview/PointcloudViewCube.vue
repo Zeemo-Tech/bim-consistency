@@ -234,9 +234,8 @@ function updateMaterials() {
     const active = activeFaces.includes(index)
     const hovered = hoveredFaces.includes(index)
     material.color.set(hovered ? 0x6bbdf5 : 0xffffff)
-    material.opacity = hovered ? 1 : active ? 0.9 : 0.52
-    material.emissive.set(hovered ? 0x174f75 : 0x000000)
-    material.emissiveIntensity = hovered ? 0.2 : 0
+    material.emissive.set(hovered ? 0x174f75 : active ? 0x244a63 : 0x000000)
+    material.emissiveIntensity = hovered ? 0.22 : active ? 0.14 : 0
   })
   regionMeshes.forEach((mesh) => {
     const material = mesh.material as THREE.MeshBasicMaterial
@@ -410,8 +409,6 @@ function init() {
       new THREE.MeshStandardMaterial({
         map: faceTexture(label),
         color: 0xffffff,
-        transparent: true,
-        opacity: 0.52,
         roughness: 0.62,
         metalness: 0.04,
       }),
@@ -450,17 +447,17 @@ function init() {
   solidOutline = new THREE.LineSegments(
     edges,
     new THREE.LineBasicMaterial({
-      color: 0x71838c,
+      color: 0x5a6a73,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.8,
     }),
   )
   dashedOutline = new THREE.LineSegments(
     edges.clone(),
     new THREE.LineDashedMaterial({
-      color: 0x71838c,
+      color: 0x5a6a73,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.7,
       dashSize: 0.07,
       gapSize: 0.045,
     }),
@@ -510,16 +507,32 @@ onBeforeUnmount(cleanup)
   height: 84px;
   overflow: visible;
   color: #9aa8af;
-  cursor: pointer;
-  border: 0;
-  outline: none;
   touch-action: none;
+  cursor: pointer;
+  outline: none;
+  border: 0;
 }
 
 .pointcloud-view-cube :deep(canvas) {
   display: block;
   width: 84px;
   height: 84px;
+  filter: drop-shadow(0 2px 6px rgb(0 0 0 / 45%));
+}
+
+/* 很淡的中性底衬：柔化立方体轮廓后的网格线，不改变整体配色 */
+.pointcloud-view-cube::before {
+  position: absolute;
+  inset: -10px;
+  pointer-events: none;
+  content: '';
+  background: radial-gradient(
+    circle at 50% 46%,
+    rgb(128 138 150 / 20%) 0%,
+    rgb(128 138 150 / 10%) 48%,
+    rgb(128 138 150 / 0%) 72%
+  );
+  border-radius: 50%;
 }
 
 .view-cube-home {
@@ -543,7 +556,7 @@ onBeforeUnmount(cleanup)
 .view-cube-home svg {
   width: 14px;
   height: 14px;
-  fill: currentColor;
+  fill: currentcolor;
 }
 
 .view-cube-roll {
