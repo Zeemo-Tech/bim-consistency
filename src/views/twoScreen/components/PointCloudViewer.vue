@@ -195,6 +195,7 @@ let resizeObserver: ResizeObserver | null = null
 let pointcloudMaxDim = 1
 let fixedViewSize: number | null = null
 let desiredPointSize: number | null = null
+let desiredPointRatio = 1
 let pointcloudGroundGrid: InfiniteGroundGrid | null = null
 let pointcloudGroundGridWebgl: InfiniteGroundGridWebgl | null = null
 let pointcloudGroundGridVisible = false
@@ -817,6 +818,10 @@ const applyManualClipBox = () => {
   if ('localClippingEnabled' in pointcloudRenderer) {
     ;(pointcloudRenderer as THREE.WebGLRenderer).localClippingEnabled = !!planes
   }
+  // 该点云（3d-tiles/自定义材质）对 per-material clipping 不生效，改用全局裁切面。
+  ;(pointcloudRenderer as THREE.WebGLRenderer).clippingPlanes = planes
+    ? planes.map((plane) => plane.clone())
+    : []
 
   if (!root) {
     requestRender()
@@ -1177,9 +1182,14 @@ const applyAnnotationMarkerScale = (
       pointcloudCamera?.near ? pointcloudCamera.near * 2 : 0.1,
       0.1,
     )
-    const viewportHeight = Math.max(pointcloudViewportEl.value?.clientHeight || 1, 1)
+    const viewportHeight = Math.max(
+      pointcloudViewportEl.value?.clientHeight || 1,
+      1,
+    )
     const worldUnitsPerPixel = pointcloudCamera
-      ? (2 * Math.tan(THREE.MathUtils.degToRad(pointcloudCamera.fov) / 2) * distance) /
+      ? (2 *
+          Math.tan(THREE.MathUtils.degToRad(pointcloudCamera.fov) / 2) *
+          distance) /
         viewportHeight
       : 0.01
     marker.userData.worldRadius = Math.max(worldUnitsPerPixel * 6, 0.002)
@@ -1403,12 +1413,38 @@ const applyPointSizeToScene = () => {
   })
 }
 
+/** 点数量显示比例（0..1）：用 geometry.setDrawRange 限制实际绘制的点数。 */
+const applyPointRatioToScene = () => {
+  if (!pointcloudScene) return
+  const ratio = clamp(desiredPointRatio, 0.01, 1)
+  pointcloudScene.traverse((obj: any) => {
+    if (!obj?.isPoints || !obj.geometry) return
+    const attr = obj.geometry.getAttribute?.('position')
+    const count = attr?.count ?? 0
+    if (!count) return
+    if (ratio >= 1) {
+      obj.geometry.setDrawRange(0, count)
+    } else {
+      obj.geometry.setDrawRange(0, Math.max(1, Math.floor(count * ratio)))
+    }
+  })
+}
+
 /** 作用：设置点云点大小（供预览页滑块调用） */
 const setPointSize = (size: number) => {
   const next = Number(size)
   if (!Number.isFinite(next) || next <= 0) return
   desiredPointSize = next
   applyPointSizeToScene()
+  requestRender()
+}
+
+/** 设置点数量显示比例（0..1），例如 0.3 = 只画 30% 的点。 */
+const setPointRatio = (ratio: number) => {
+  const next = Number(ratio)
+  if (!Number.isFinite(next)) return
+  desiredPointRatio = clamp(next, 0.01, 1)
+  applyPointRatioToScene()
   requestRender()
 }
 
@@ -2323,6 +2359,7 @@ const loadPointcloudTileset = async (
       processPointObject(tileScene)
       applyMaterialMode(tileScene)
       applyPointSizeToScene()
+      applyPointRatioToScene()
       applyManualClipBox()
       requestRender()
     })
@@ -2341,6 +2378,7 @@ const loadPointcloudTileset = async (
       processPointObject(tr.group)
       applyMaterialMode(tr.group)
       applyPointSizeToScene()
+      applyPointRatioToScene()
       applyManualClipBox()
       wrapper.updateMatrixWorld(true)
       tr.group.updateMatrixWorld(true)
@@ -2956,7 +2994,8 @@ watch(
 watch(
   () => props.annotationMarkersVisible,
   () => {
-    if (annotationMarker) annotationMarker.visible = props.annotationMarkersVisible !== false
+    if (annotationMarker)
+      annotationMarker.visible = props.annotationMarkersVisible !== false
     for (const marker of annotationStashMarkerMap.values()) {
       marker.visible = props.annotationMarkersVisible !== false
     }
@@ -3052,10 +3091,12 @@ defineExpose({
     requestRender()
   },
   setPointSize,
+  setPointRatio,
   setShowGrid,
   setEdlEnabled,
   setColorMode,
-  getColorRange: () => [pointIntensityMin, pointIntensityMax] as [number, number],
+  getColorRange: () =>
+    [pointIntensityMin, pointIntensityMax] as [number, number],
   isColorAttributeAvailable: () => pointHasIntensity || pointHasClass,
   getColorAvailability: () => ({
     intensity: pointHasIntensity,
@@ -3066,6 +3107,7 @@ defineExpose({
   setClipBox: (box: THREE.Box3 | null) => {
     manualClipBox = box ? box.clone() : null
     applyManualClipBox()
+    requestRender()
   },
   setControlsEnabled: (enabled: boolean) => {
     if (!pointcloudControls) return

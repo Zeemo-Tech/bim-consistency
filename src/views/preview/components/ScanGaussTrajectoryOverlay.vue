@@ -58,6 +58,14 @@ const props = withDefaults(
     trajectoryPoints?: TrajectoryPoint[]
     /** 当前选中的轨迹点索引（用绿色高亮） */
     selectedIndex?: number | null
+    /** 世界坐标裁切盒（剖切用），null 表示不裁切 */
+    clipBox?: {
+      min: [number, number, number]
+      max: [number, number, number]
+    } | null
+    /** 当前高亮的剖切轴/方向（用于箭头高亮） */
+    clipAxis?: 'x' | 'y' | 'z'
+    clipInvert?: boolean
   }>(),
   {
     getCameraPose: () => null,
@@ -66,6 +74,9 @@ const props = withDefaults(
     gaussDataPath: '',
     trajectoryPoints: () => [],
     selectedIndex: null,
+    clipBox: null,
+    clipAxis: 'z',
+    clipInvert: false,
   },
 )
 
@@ -82,10 +93,17 @@ let camera: THREE.PerspectiveCamera | null = null
 let frame = 0
 let lccObject: any = null
 let lccLoadToken = 0
+let activeGaussPath = ''
 let pendingGaussLoad = false
+let pendingGaussRetry = 0
+let gaussWatchdog = 0
 let resizeObserver: ResizeObserver | null = null
 let enhancedUpgradeTimer: number | null = null
 let trajectoryGroup: THREE.Group | null = null
+let clipBoxHelper: THREE.Box3Helper | null = null
+let clipHandlesGroup: THREE.Group | null = null
+const clipHandlePickers: THREE.Object3D[] = []
+const clipRaycaster = new THREE.Raycaster()
 let selectedMarker: THREE.Points | null = null
 let circleTexture: THREE.Texture | null = null
 const zUpGroup = new THREE.Group()
@@ -138,7 +156,7 @@ function pickTrajectoryIndex(clientX: number, clientY: number): number | null {
   return best >= 0 && bestDist <= 0.03 ? best : null
 }
 
-defineExpose({ pickTrajectoryIndex })
+defineExpose({ pickTrajectoryIndex, reloadGaussian, pickClipHandle })
 
 function syncCameraFromPointcloud() {
   const pose = props.getCameraPose?.()
@@ -212,9 +230,48 @@ function applyGaussianQuality(stage: 'first-screen' | 'enhanced') {
   }
 }
 
+/**
+ * 用世界坐标裁切盒裁切高斯（LCC setClipBox）。
+ * 高斯本地坐标 = Rx(-90°)⁻¹ · 世界坐标 = (x, -z, y)，故轴向盒尺寸为 (sx, sz, sy)。
+ */
+function applyGaussianClipBox() {
+  if (!lccObject || typeof lccObject.setClipBox !== 'function') return
+  const box = props.clipBox
+  if (!box) {
+    try {
+      lccObject.setClipBox(null)
+    } catch {
+      /* ignore */
+    }
+    return
+  }
+  const [minX, minY, minZ] = box.min
+  const [maxX, maxY, maxZ] = box.max
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+  const cz = (minZ + maxZ) / 2
+  const sx = Math.max(1e-4, maxX - minX)
+  const sy = Math.max(1e-4, maxY - minY)
+  const sz = Math.max(1e-4, maxZ - minZ)
+  try {
+    lccObject.setClipBox({
+      position: [cx, -cz, cy],
+      rotation: [0, 0, 0],
+      scale: [sx, sz, sy],
+      clipSide: 1,
+    })
+  } catch (err) {
+    console.error('[scan-overlay] 高斯裁切失败', err)
+  }
+}
+
 function disposeLcc() {
   lccLoadToken += 1
   clearEnhancedUpgradeTimer()
+  if (gaussWatchdog) {
+    window.clearTimeout(gaussWatchdog)
+    gaussWatchdog = 0
+  }
   const obj = lccObject
   lccObject = null
   if (obj && typeof (LCCRender as any)?.unload === 'function') {
@@ -229,23 +286,54 @@ function disposeLcc() {
 function loadGaussian() {
   if (!renderer || !scene || !camera) {
     pendingGaussLoad = true
+    // 画布/相机尚未就绪时，稍后重试，避免“只有刷新才出高斯”。
+    if (!pendingGaussRetry) {
+      pendingGaussRetry = window.setTimeout(() => {
+        pendingGaussRetry = 0
+        loadGaussian()
+      }, 300)
+    }
     return
+  }
+  if (pendingGaussRetry) {
+    window.clearTimeout(pendingGaussRetry)
+    pendingGaussRetry = 0
   }
   if (!props.showGaussian) {
     gaussStatus.value = 'idle'
+    activeGaussPath = ''
     disposeLcc()
     return
   }
   if (!props.gaussDataPath) {
     gaussStatus.value = 'unbound'
+    activeGaussPath = ''
     disposeLcc()
+    return
+  }
+  // 去重：同一路径正在加载或已加载则跳过，避免并发 load/unload 把 LCC 状态弄乱。
+  if (
+    props.gaussDataPath === activeGaussPath &&
+    (gaussStatus.value === 'loading' || gaussStatus.value === 'loaded')
+  ) {
     return
   }
   pendingGaussLoad = false
   disposeLcc()
+  activeGaussPath = props.gaussDataPath
   const token = ++lccLoadToken
   gaussStatus.value = 'loading'
   console.info('[scan-overlay] 加载高斯', props.gaussDataPath)
+  // 看门狗：若长时间仍未加载成功，自动重试一次，避免必须手动刷新页面。
+  if (gaussWatchdog) window.clearTimeout(gaussWatchdog)
+  gaussWatchdog = window.setTimeout(() => {
+    gaussWatchdog = 0
+    if (token !== lccLoadToken) return
+    if (gaussStatus.value === 'loaded') return
+    console.warn('[scan-overlay] 高斯加载超时，自动重试')
+    activeGaussPath = ''
+    loadGaussian()
+  }, 15000)
   lccObject = (LCCRender as any).load(
     {
       camera,
@@ -264,9 +352,14 @@ function loadGaussian() {
     },
     () => {
       if (token !== lccLoadToken) return
+      if (gaussWatchdog) {
+        window.clearTimeout(gaussWatchdog)
+        gaussWatchdog = 0
+      }
       gaussStatus.value = 'loaded'
       console.info('[scan-overlay] 高斯已加载')
       applyGaussianQuality('first-screen')
+      applyGaussianClipBox()
       clearEnhancedUpgradeTimer()
       enhancedUpgradeTimer = window.setTimeout(() => {
         enhancedUpgradeTimer = null
@@ -278,11 +371,221 @@ function loadGaussian() {
     (err: unknown) => {
       if (token === lccLoadToken) {
         lccObject = null
+        activeGaussPath = ''
         gaussStatus.value = 'error'
+      }
+      if (gaussWatchdog) {
+        window.clearTimeout(gaussWatchdog)
+        gaussWatchdog = 0
       }
       console.error('[scan-overlay] 高斯加载失败', err)
     },
   )
+}
+
+/** 外部触发重载：仅在应显示但尚未成功加载时重新加载（避免重复下载）。 */
+function reloadGaussian() {
+  if (!props.showGaussian || !props.gaussDataPath) return
+  if (
+    props.gaussDataPath === activeGaussPath &&
+    (gaussStatus.value === 'loading' || gaussStatus.value === 'loaded')
+  ) {
+    return
+  }
+  loadGaussian()
+}
+
+/** 在叠加层里画裁切盒线框 + 6 个可拖拽箭头（独立渲染器，不被裁掉）。 */
+function buildClipHandles(box: THREE.Box3) {
+  const center = box.getCenter(new THREE.Vector3())
+  const size = box.getSize(new THREE.Vector3())
+  const maxDim = Math.max(size.x, size.y, size.z, 1)
+  const offset = Math.max(maxDim * 0.06, 0.12)
+  const handleLength = Math.max(maxDim * 0.12, 0.22)
+  const shaftLength = handleLength * 0.62
+  const coneHeight = handleLength - shaftLength
+  const shaftRadius = Math.max(maxDim * 0.006, 0.012)
+  const coneRadius = shaftRadius * 2.2
+  const hitRadius = Math.max(shaftRadius * 6, 0.08)
+  const activeColor = new THREE.Color('#ffd04b')
+  const idleColor = new THREE.Color('#409eff')
+  const baseAxis = new THREE.Vector3(0, 1, 0)
+  const group = new THREE.Group()
+  const faces: Array<{
+    axis: 'x' | 'y' | 'z'
+    invert: boolean
+    normal: THREE.Vector3
+    arrowDir: THREE.Vector3
+    anchor: THREE.Vector3
+  }> = [
+    {
+      axis: 'x',
+      invert: false,
+      normal: new THREE.Vector3(-1, 0, 0),
+      arrowDir: new THREE.Vector3(-1, 0, 0),
+      anchor: new THREE.Vector3(box.min.x, center.y, center.z),
+    },
+    {
+      axis: 'x',
+      invert: true,
+      normal: new THREE.Vector3(1, 0, 0),
+      arrowDir: new THREE.Vector3(1, 0, 0),
+      anchor: new THREE.Vector3(box.max.x, center.y, center.z),
+    },
+    {
+      axis: 'y',
+      invert: false,
+      normal: new THREE.Vector3(0, -1, 0),
+      arrowDir: new THREE.Vector3(0, -1, 0),
+      anchor: new THREE.Vector3(center.x, box.min.y, center.z),
+    },
+    {
+      axis: 'y',
+      invert: true,
+      normal: new THREE.Vector3(0, 1, 0),
+      arrowDir: new THREE.Vector3(0, 1, 0),
+      anchor: new THREE.Vector3(center.x, box.max.y, center.z),
+    },
+    {
+      axis: 'z',
+      invert: false,
+      normal: new THREE.Vector3(0, 0, -1),
+      arrowDir: new THREE.Vector3(0, 0, -1),
+      anchor: new THREE.Vector3(center.x, center.y, box.min.z),
+    },
+    {
+      axis: 'z',
+      invert: true,
+      normal: new THREE.Vector3(0, 0, 1),
+      arrowDir: new THREE.Vector3(0, 0, 1),
+      anchor: new THREE.Vector3(center.x, center.y, box.max.z),
+    },
+  ]
+
+  for (const face of faces) {
+    const handle = new THREE.Group()
+    const isActive =
+      face.axis === props.clipAxis && face.invert === props.clipInvert
+    const color = isActive ? activeColor : idleColor
+
+    const shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLength, 12),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: isActive ? 0.95 : 0.82,
+        depthTest: false,
+        depthWrite: false,
+      }),
+    )
+    shaft.position.y = shaftLength * 0.5
+
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(coneRadius, coneHeight, 16),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: isActive ? 1 : 0.9,
+        depthTest: false,
+        depthWrite: false,
+      }),
+    )
+    cone.position.y = shaftLength + coneHeight * 0.5
+
+    const hitArea = new THREE.Mesh(
+      new THREE.CylinderGeometry(hitRadius, hitRadius, handleLength, 10),
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthTest: false,
+        depthWrite: false,
+      }),
+    )
+    hitArea.position.y = handleLength * 0.5
+    hitArea.userData = {
+      __overlayClipHandle: true,
+      axis: face.axis,
+      invert: face.invert,
+    }
+
+    handle.add(shaft)
+    handle.add(cone)
+    handle.add(hitArea)
+    handle.position
+      .copy(face.anchor)
+      .add(face.normal.clone().multiplyScalar(offset))
+    handle.quaternion.setFromUnitVectors(baseAxis, face.arrowDir)
+    handle.renderOrder = 10000
+    handle.traverse?.((obj: any) => {
+      obj.renderOrder = 10000
+    })
+    group.add(handle)
+    clipHandlePickers.push(hitArea)
+  }
+
+  return group
+}
+
+function updateClipBoxHelper() {
+  if (!scene) return
+  if (clipBoxHelper) {
+    scene.remove(clipBoxHelper)
+    clipBoxHelper.geometry?.dispose?.()
+    ;(clipBoxHelper.material as any)?.dispose?.()
+    clipBoxHelper = null
+  }
+  if (clipHandlesGroup) {
+    scene.remove(clipHandlesGroup)
+    clipHandlesGroup.traverse?.((obj: any) => {
+      obj.geometry?.dispose?.()
+      obj.material?.dispose?.()
+    })
+    clipHandlesGroup = null
+  }
+  clipHandlePickers.length = 0
+
+  const b = props.clipBox
+  if (!b) return
+  const box = new THREE.Box3(
+    new THREE.Vector3(b.min[0], b.min[1], b.min[2]),
+    new THREE.Vector3(b.max[0], b.max[1], b.max[2]),
+  )
+  clipBoxHelper = new THREE.Box3Helper(box, new THREE.Color('#ffcf4a'))
+  clipBoxHelper.renderOrder = 9999
+  ;(clipBoxHelper.material as any).depthTest = false
+  ;(clipBoxHelper.material as any).depthWrite = false
+  ;(clipBoxHelper.material as any).transparent = true
+  scene.add(clipBoxHelper)
+
+  const handles = buildClipHandles(box)
+  clipHandlesGroup = handles
+  scene.add(handles)
+}
+
+/** 拾取叠加层里的裁切箭头（世界坐标），供外层驱动拖拽。 */
+function pickClipHandle(
+  clientX: number,
+  clientY: number,
+): { axis: 'x' | 'y' | 'z'; invert: boolean } | null {
+  const host = hostRef.value
+  if (!host || !camera || !clipHandlePickers.length) return null
+  const rect = host.getBoundingClientRect()
+  if (!rect.width || !rect.height) return null
+  const ndc = new THREE.Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -(((clientY - rect.top) / rect.height) * 2 - 1),
+  )
+  if (clipRaycaster.params.Line) clipRaycaster.params.Line.threshold = 0.2
+  clipRaycaster.setFromCamera(ndc, camera)
+  const hits = clipRaycaster.intersectObjects(clipHandlePickers, true)
+  const hit = hits[0] as any
+  if (hit?.object?.userData?.__overlayClipHandle) {
+    return {
+      axis: hit.object.userData.axis,
+      invert: !!hit.object.userData.invert,
+    }
+  }
+  return null
 }
 
 function disposeTrajectory() {
@@ -407,9 +710,14 @@ function init() {
   host.appendChild(renderer.domElement)
   zUpGroup.rotation.x = zUpToYUpRotationX
   scene.add(zUpGroup)
+  // LCCRender 是模块级单例，绑定在“首次 load 时的 canvas/scene/renderer”。
+  // SPA 再次进入本页时旧单例仍指向已销毁的画布，导致高斯加载不出来（刷新页面才会重置）。
+  // 这里在挂载时先重置单例，确保绑定到当前叠加层的画布。
+  ;(LCCRender as any)?.dispose?.()
   loadGaussian()
   rebuildTrajectory()
   updateSelectedMarker()
+  updateClipBoxHelper()
   if (!frame) renderLoop()
   // 兜底：进入页面（非刷新）时 props 可能在本组件挂载后才就绪，
   // 用 nextTick + ResizeObserver 再尝试一次，避免“只有刷新才出高斯”。
@@ -443,15 +751,50 @@ watch(
   () => updateSelectedMarker(),
 )
 
+watch(
+  () => props.clipBox,
+  () => {
+    applyGaussianClipBox()
+    updateClipBoxHelper()
+  },
+  { deep: true },
+)
+
+watch(
+  () => [props.clipAxis, props.clipInvert] as const,
+  () => updateClipBoxHelper(),
+)
+
 onMounted(init)
 
 onBeforeUnmount(() => {
   window.cancelAnimationFrame(frame)
   frame = 0
+  if (pendingGaussRetry) {
+    window.clearTimeout(pendingGaussRetry)
+    pendingGaussRetry = 0
+  }
   resizeObserver?.disconnect()
   resizeObserver = null
   disposeLcc()
+  // 卸载时重置 LCC 单例，避免下次（SPA）进入复用已销毁的画布。
+  ;(LCCRender as any)?.dispose?.()
   disposeTrajectory()
+  if (clipBoxHelper) {
+    scene?.remove(clipBoxHelper)
+    clipBoxHelper.geometry?.dispose?.()
+    ;(clipBoxHelper.material as any)?.dispose?.()
+    clipBoxHelper = null
+  }
+  if (clipHandlesGroup) {
+    scene?.remove(clipHandlesGroup)
+    clipHandlesGroup.traverse?.((obj: any) => {
+      obj.geometry?.dispose?.()
+      obj.material?.dispose?.()
+    })
+    clipHandlesGroup = null
+  }
+  clipHandlePickers.length = 0
   if (selectedMarker) {
     selectedMarker.geometry.dispose()
     const m = selectedMarker.material
