@@ -1519,6 +1519,26 @@ const applyStep2QueryPresetImpl = async () => {
     !formData.value.cadFileId
   ) {
     await syncCadBindingFromCalibration()
+    // 偶发时序/并发下首次解析失败，退避重试一次，避免一直转圈
+    if (!formData.value.cadFileId) {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      await syncCadBindingFromCalibration()
+    }
+    if (!formData.value.projectId || !formData.value.scanFileId) return
+    if (!formData.value.cadFileId) {
+      // 兜底：扫描未绑定 CAD 时，从项目 CAD 列表中取一张（与独立校准页行为一致）
+      await loadProjects()
+      const project = projectList.value.find(
+        (p) => p.projectId === formData.value.projectId,
+      )
+      const projectCadFiles =
+        project?.types?.find((t) => t.type === 'cad')?.files || []
+      formData.value.cadFileId = projectCadFiles[0]?.id ?? null
+    }
+    if (!formData.value.cadFileId) {
+      statusText.value = '未找到可用的 CAD 图纸，请先在项目中上传并绑定 CAD'
+      return
+    }
   }
 
   if (

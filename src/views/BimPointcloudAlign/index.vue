@@ -82,9 +82,9 @@
       class="main-content calibration-main"
       :class="{
         'is-report-step': activeWorkflowStep === 4,
-        'is-cad-step': activeWorkflowStep === 3,
+        'is-cad-step': activeWorkflowStep === 2,
         'is-panel-hidden':
-          !showPanel && (activeWorkflowStep === 1 || activeWorkflowStep === 2),
+          !showPanel && (activeWorkflowStep === 1 || activeWorkflowStep === 3),
       }"
     >
       <AnalysisReportView
@@ -98,15 +98,15 @@
       />
 
       <CadCalibrationView
-        v-if="activeWorkflowStep === 3"
+        v-if="activeWorkflowStep === 2"
         embedded
-        @prev-step="openWorkflowStep(2)"
-        @next-step="openWorkflowStep(4)"
+        @prev-step="openWorkflowStep(1)"
+        @next-step="openWorkflowStep(3)"
       />
 
       <!-- 左侧垂直工具栏 -->
       <aside
-        v-if="activeWorkflowStep === 1 || activeWorkflowStep === 2"
+        v-if="activeWorkflowStep === 1 || activeWorkflowStep === 3"
         class="left-toolbar view-toolbar"
         aria-label="视图工具"
       >
@@ -503,7 +503,7 @@
 
       <!-- 中间3D视图区域 -->
       <div
-        v-show="activeWorkflowStep === 1 || activeWorkflowStep === 2"
+        v-show="activeWorkflowStep === 1 || activeWorkflowStep === 3"
         ref="viewportEl"
         class="viewport viewport-shell three-view-pane"
       >
@@ -549,7 +549,7 @@
       <!-- 右侧控制面板 -->
       <div
         v-if="
-          showPanel && (activeWorkflowStep === 1 || activeWorkflowStep === 2)
+          showPanel && (activeWorkflowStep === 1 || activeWorkflowStep === 3)
         "
         id="alignment-control-panel"
         class="right-panel control-panel is-workflow-panel"
@@ -557,7 +557,7 @@
         <div class="control-panel-header">
           <div class="panel-heading">
             <strong>
-              {{ activeWorkflowStep === 2 ? '偏差对比' : '配准控制' }}
+              {{ activeWorkflowStep === 3 ? '偏差对比' : '配准控制' }}
             </strong>
           </div>
           <div class="panel-step-actions">
@@ -1219,8 +1219,8 @@
             </el-button>
           </div>
 
-          <!-- 偏差对比（Scan vs BIM 快速预估），对齐参考项目第二步 -->
-          <div v-if="activeWorkflowStep === 2" class="panel-section">
+          <!-- 偏差对比（Scan vs BIM 快速预估），对齐参考项目第三步 -->
+          <div v-if="activeWorkflowStep === 3" class="panel-section">
             <ScanBimComputePanel
               section="c2m"
               :project-id="projectId"
@@ -1269,7 +1269,7 @@
         </div>
       </div>
       <button
-        v-if="activeWorkflowStep === 1 || activeWorkflowStep === 2"
+        v-if="activeWorkflowStep === 1 || activeWorkflowStep === 3"
         type="button"
         class="right-panel-toggle"
         aria-controls="alignment-control-panel"
@@ -1284,7 +1284,7 @@
       </button>
     </div>
 
-    <div v-if="activeWorkflowStep !== 2" class="status-bar">
+    <div v-if="activeWorkflowStep !== 3" class="status-bar">
       <el-tag v-if="!webgpuSupported" type="warning" size="small">
         WebGPU 不支持
       </el-tag>
@@ -2577,12 +2577,12 @@ const workflowSteps = [
     title: '点云与工程坐标配准',
     subtitle: '调整 BIM 与点云位置',
   },
-  { id: 2 as const, title: '偏差对比', subtitle: '查看 Scan vs BIM 偏差' },
   {
-    id: 3 as const,
+    id: 2 as const,
     title: 'CAD与轨迹校准',
     subtitle: '校准 CAD 图纸与巡检轨迹',
   },
+  { id: 3 as const, title: '偏差对比', subtitle: '查看 Scan vs BIM 偏差' },
   { id: 4 as const, title: '出报告', subtitle: '生成分析成果报告' },
 ]
 const requestedWorkflowStep = Number(getQueryString('step'))
@@ -7830,7 +7830,7 @@ onMounted(() => {
   })
 })
 
-/** 作用：进入「偏差对比」步骤时后台预取 CAD 校准页数据（DXF + 点云预览）。 */
+/** 作用：进入「配准」步骤时后台预取 CAD 校准页数据（DXF + 点云预览）。 */
 async function prefetchCadForStep2() {
   if (!projectId.value || !scanFileId.value) return
   try {
@@ -7852,12 +7852,12 @@ async function prefetchCadForStep2() {
 
 watch(
   activeWorkflowStep,
-  (step) => {
+  (step, prevStep) => {
     // 进入 CAD 校准 / 出报告步骤时挂起 3D 渲染与 tileset 加载，返回配准/偏差步骤再恢复
-    viewerSuspended.value = step === 3 || step === 4
+    viewerSuspended.value = step === 2 || step === 4
     if (!viewerSuspended.value) requestRender()
-    // 进入偏差对比即预取 CAD 校准数据，切到第三步可直接用缓存
-    if (step === 2) void prefetchCadForStep2()
+    // 预取 CAD 校准数据：仅在真正切换到「配准」步骤时进行，避免首屏加载并发抢资源
+    if (step === 1 && prevStep !== undefined) void prefetchCadForStep2()
   },
   { immediate: true },
 )
