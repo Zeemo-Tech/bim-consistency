@@ -409,21 +409,29 @@
 
         <span class="pc-tool-divider" />
 
-        <el-tooltip content="点云" placement="bottom" :show-after="150">
+        <el-tooltip
+          :content="
+            isLastVisibleLayer('pointcloud') ? '至少保留一个图层可见' : '点云'
+          "
+          placement="bottom"
+          :show-after="150"
+        >
           <button
             class="pc-icon-btn"
             :class="{ 'is-active': pointcloudVisible }"
             :aria-pressed="pointcloudVisible"
             type="button"
             aria-label="点云"
-            @click="pointcloudVisible = !pointcloudVisible"
+            @click="toggleLayer('pointcloud')"
           >
             <span class="pc-icon-glyph" :style="glyph(ICON_URL.pointcloud)" />
           </button>
         </el-tooltip>
         <el-tooltip
           v-if="attachIncludeGaussian"
-          content="高斯"
+          :content="
+            isLastVisibleLayer('gaussian') ? '至少保留一个图层可见' : '高斯'
+          "
           placement="bottom"
           :show-after="150"
         >
@@ -433,14 +441,16 @@
             :aria-pressed="gaussianVisible"
             type="button"
             aria-label="高斯"
-            @click="gaussianVisible = !gaussianVisible"
+            @click="toggleLayer('gaussian')"
           >
             <span class="pc-icon-glyph" :style="glyph(ICON_URL.gauss)" />
           </button>
         </el-tooltip>
         <el-tooltip
           v-if="trajectoryPoints.length"
-          content="轨迹"
+          :content="
+            isLastVisibleLayer('trajectory') ? '至少保留一个图层可见' : '轨迹'
+          "
           placement="bottom"
           :show-after="150"
         >
@@ -450,7 +460,7 @@
             :aria-pressed="trajectoryVisible"
             type="button"
             aria-label="轨迹"
-            @click="trajectoryVisible = !trajectoryVisible"
+            @click="toggleLayer('trajectory')"
           >
             <span class="pc-icon-glyph" :style="glyph(ICON_URL.trajectory)" />
           </button>
@@ -2081,6 +2091,44 @@ const overlayRef = ref<InstanceType<typeof ScanGaussTrajectoryOverlay> | null>(
 const trajectoryVisible = ref(true)
 const gaussianVisible = ref(true)
 const pointcloudVisible = ref(true)
+
+type LayerKey = 'pointcloud' | 'gaussian' | 'trajectory'
+/** 当前实际存在的图层（点云恒存在；高斯/轨迹按数据可用性出现）。 */
+function layerExists(layer: LayerKey): boolean {
+  if (layer === 'gaussian') return attachIncludeGaussian.value
+  if (layer === 'trajectory') return trajectoryPoints.value.length > 0
+  return true
+}
+function layerVisible(layer: LayerKey): boolean {
+  if (layer === 'gaussian') return gaussianVisible.value
+  if (layer === 'trajectory') return trajectoryVisible.value
+  return pointcloudVisible.value
+}
+const visibleLayerCount = computed(
+  () =>
+    (['pointcloud', 'gaussian', 'trajectory'] as LayerKey[]).filter(
+      (layer) => layerExists(layer) && layerVisible(layer),
+    ).length,
+)
+/** 该图层是当前唯一可见层时为 true —— 此时不能再隐藏，至少保留一个。 */
+function isLastVisibleLayer(layer: LayerKey): boolean {
+  return (
+    layerExists(layer) && layerVisible(layer) && visibleLayerCount.value <= 1
+  )
+}
+function toggleLayer(layer: LayerKey) {
+  if (isLastVisibleLayer(layer)) {
+    ElMessage.info('至少保留一个图层可见')
+    return
+  }
+  if (layer === 'pointcloud') {
+    pointcloudVisible.value = !pointcloudVisible.value
+  } else if (layer === 'gaussian') {
+    gaussianVisible.value = !gaussianVisible.value
+  } else {
+    trajectoryVisible.value = !trajectoryVisible.value
+  }
+}
 /** 点击圆形轨迹点的默认行为：panorama=打开全景图，view=仅切换视角。 */
 const trajectoryClickMode = ref<'panorama' | 'view'>('panorama')
 // 未包含全景图的点云，点击轨迹点只能切换视角，自动回退到 view。
