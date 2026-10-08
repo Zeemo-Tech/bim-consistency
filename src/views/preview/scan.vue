@@ -506,6 +506,9 @@
         ref="overlayRef"
         class="pc-gauss-overlay"
         :get-camera-pose="getOverlayCameraPose"
+        :get-attach-scene="getTrajectoryAttachScene"
+        :attach-to-pointcloud="trajectoryAttachToPointcloud"
+        :request-attach-render="repaintPointcloud"
         :show-gaussian="attachIncludeGaussian && gaussianVisible"
         :show-trajectory="trajectoryVisible && trajectoryPoints.length > 0"
         :gauss-data-path="gaussDataPath"
@@ -2161,6 +2164,25 @@ const pointRatio = ref(100)
 /** 叠加层相机位姿：完全跟随点云相机（与混合模式一致）。 */
 const getOverlayCameraPose = () =>
   pointcloudViewerRef.value?.getCameraPose?.() ?? null
+
+/**
+ * 轨迹挂载策略：
+ * - 仅点云时（高斯不可见）→ 挂点云场景，与点云共享深度、被点云墙遮挡；
+ * - 高斯可见时 → 画在叠加层内、叠在高斯之上（高斯开启 writeDepth 后仍会被高斯墙遮挡）。
+ */
+const trajectoryAttachToPointcloud = computed(
+  () =>
+    pointcloudVisible.value &&
+    !(attachIncludeGaussian.value && gaussianVisible.value),
+)
+
+const getTrajectoryAttachScene = () =>
+  pointcloudViewerRef.value?.getThreeContext?.()?.scene ?? null
+
+/** 轨迹挂载/更新后请求点云渲染器重绘（点云是按需渲染）。 */
+const repaintPointcloud = () => {
+  pointcloudViewerRef.value?.requestRender?.()
+}
 
 /**
  * 传给高斯叠加层的裁切盒（世界坐标）。高斯（LCC）支持 setClipBox，

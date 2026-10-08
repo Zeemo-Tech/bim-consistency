@@ -524,6 +524,9 @@ const getOrCreateUnlitMaterialWebGL = (
     if (src?.map) next.map = src.map
     applySharedMaterialFlags(next, src)
     next.toneMapped = false
+    // 显式写深度：保证叠加的轨迹等对象能与点云共享深度、被点云墙遮挡，
+    // 不依赖「是否设置过点大小」这一副作用。
+    next.depthWrite = true
     mat = next
   } else {
     const next = new THREE.MeshBasicMaterial({

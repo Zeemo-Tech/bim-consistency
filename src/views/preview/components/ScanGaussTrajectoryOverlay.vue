@@ -68,6 +68,15 @@ const props = withDefaults(
     /** 当前高亮的剖切轴/方向（用于箭头高亮） */
     clipAxis?: 'x' | 'y' | 'z'
     clipInvert?: boolean
+    /**
+     * 可选：轨迹改挂到该外部场景（点云渲染器的 scene），与点云共享深度缓冲，
+     * 从而被点云墙遮挡。返回 null 时回退到叠加层自身的场景（不遮挡）。
+     */
+    getAttachScene?: () => THREE.Scene | null
+    /** 是否需要把轨迹挂到点云场景（false 时画在叠加层内、叠在高斯之上）。 */
+    attachToPointcloud?: boolean
+    /** 轨迹挂载/更新后请求外部渲染器重绘（点云是按需渲染）。 */
+    requestAttachRender?: () => void
   }>(),
   {
     getCameraPose: () => null,
@@ -79,6 +88,9 @@ const props = withDefaults(
     clipBox: null,
     clipAxis: 'z',
     clipInvert: false,
+    getAttachScene: () => null,
+    attachToPointcloud: false,
+    requestAttachRender: () => {},
   },
 )
 
@@ -109,6 +121,76 @@ const clipRaycaster = new THREE.Raycaster()
 let selectedMarker: THREE.Points | null = null
 let circleTexture: THREE.Texture | null = null
 const zUpGroup = new THREE.Group()
+/** 轨迹当前挂载到的场景（点云场景或叠加层自身场景）。 */
+let attachedScene: THREE.Scene | null = null
+/** 需要重新解析轨迹挂载场景：仅在图层切换或点云场景尚未就绪时为 true。 */
+let attachmentDirty = true
+
+/**
+ * 把轨迹挂到点云场景（共享深度、可被点云墙遮挡）；否则挂叠加层自身场景。
+ * 仅在 attachmentDirty 时解析，避免逐帧调用 getAttachScene 造成多余开销。
+ */
+function refreshTrajectoryAttachment() {
+  if (!attachmentDirty) return
+  const target = props.attachToPointcloud
+    ? (props.getAttachScene?.() ?? null)
+    : null
+  // 点云场景尚未就绪时保持 dirty，下一帧继续尝试；就绪后停止。
+  attachmentDirty = Boolean(props.attachToPointcloud) && !target
+  if (target === attachedScene) return
+  if (zUpGroup.parent) zUpGroup.parent.remove(zUpGroup)
+  const next = target ?? scene
+  if (next) next.add(zUpGroup)
+  attachedScene = target
+  props.requestAttachRender?.()
+}
+
+/** 轨迹挂在外部（点云）场景时，几何/高亮变更后需要主动请求重绘。 */
+function requestExternalRender() {
+  if (attachedScene) props.requestAttachRender?.()
+}
+
+/**
+ * 轨迹「只显示相机附近」：[fadeStart, fadeEnd] 距离区间内渐隐。
+ * 半径按轨迹包围球半径取比例，随数据尺度自适应。
+ */
+const TRAJ_FADE_START_RATIO = 0.28
+const TRAJ_FADE_END_RATIO = 0.72
+const trajFadeUniforms = {
+  uFadeStart: { value: 30 },
+  uFadeEnd: { value: 90 },
+}
+
+/**
+ * 给轨迹材质注入「按到相机距离渐隐」的着色器片段，保留原有圆点/线样式。
+ * 顶点只透传世界坐标，距离在片元里按实际像素计算（跨段渐变更精确）；
+ * 用 three 内建 cameraPosition（始终等于实际渲染相机位置），
+ * 因此无论轨迹在叠加层还是点云渲染器里绘制都正确，无需逐帧同步。
+ */
+function applyTrajectoryDistanceFade(material: THREE.Material) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uFadeStart = trajFadeUniforms.uFadeStart
+    shader.uniforms.uFadeEnd = trajFadeUniforms.uFadeEnd
+    shader.vertexShader =
+      'varying vec3 vTrajWorldPos;\n' +
+      shader.vertexShader.replace(
+        'void main() {',
+        `void main() {
+  vTrajWorldPos = ( modelMatrix * vec4( position, 1.0 ) ).xyz;`,
+      )
+    // 在 opaque_fragment 处乘上距离渐隐，alphaTest 仍作用于原始纹理 alpha，圆点边缘保持锐利。
+    shader.fragmentShader =
+      'varying vec3 vTrajWorldPos;\n' +
+      'uniform float uFadeStart;\n' +
+      'uniform float uFadeEnd;\n' +
+      shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `gl_FragColor = vec4( outgoingLight, diffuseColor.a * ( 1.0 - smoothstep( uFadeStart, uFadeEnd, distance( vTrajWorldPos, cameraPosition ) ) ) );`,
+      )
+  }
+  material.customProgramCacheKey = () => 'traj-distance-fade'
+  material.needsUpdate = true
+}
 
 function getCircleTexture(): THREE.Texture {
   if (circleTexture) return circleTexture
@@ -141,13 +223,17 @@ function pickTrajectoryIndex(clientX: number, clientY: number): number | null {
   const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1
   const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1
   const v = new THREE.Vector3()
+  const maxPickDistance = trajFadeUniforms.uFadeEnd.value
   let best = -1
   let bestDist = Infinity
   for (let i = 0; i < points.length; i += 1) {
     const p = points[i]
-    v.set(Number(p.x) || 0, Number(p.y) || 0, Number(p.z) || 0)
-      .applyMatrix4(zUpGroup.matrixWorld)
-      .project(camera)
+    v.set(Number(p.x) || 0, Number(p.y) || 0, Number(p.z) || 0).applyMatrix4(
+      zUpGroup.matrixWorld,
+    )
+    // 已淡出的远处轨迹点不可拾取，保持「所见即可点」。
+    if (v.distanceTo(camera.position) > maxPickDistance) continue
+    v.project(camera)
     if (v.z < -1 || v.z > 1) continue
     const d = Math.hypot(v.x - ndcX, v.y - ndcY)
     if (d < bestDist) {
@@ -196,6 +282,8 @@ function renderLoop() {
   if (!renderer || !scene || !camera) return
   syncSize()
   syncCameraFromPointcloud()
+  // 轨迹优先挂到点云场景以共享深度；点云不可用时回退到自身场景。
+  refreshTrajectoryAttachment()
   renderer.clear(true, true, true)
   if (props.showGaussian && lccObject) {
     if (typeof lccObject.checkRenderNextFrame === 'function') {
@@ -348,6 +436,9 @@ function loadGaussian() {
       useIndexDB: true,
       useLoadingEffect: false,
       modelMatrix: zUpToYUpMatrix.clone(),
+      // 让高斯写入深度：轨迹（同画布、renderOrder 更大）随后做 depthTest，
+      // 从而被高斯墙体遮挡。该参数未在 d.ts 中声明，LCC 内部支持。
+      writeDepth: true,
       appKey: null,
       maxHostCacheSize: 512,
       maxGpuCacheSize: 512,
@@ -611,13 +702,27 @@ function rebuildTrajectory() {
     (p) =>
       new THREE.Vector3(Number(p.x) || 0, Number(p.y) || 0, Number(p.z) || 0),
   )
+  // 按包围球半径设定渐隐区间，使「显示范围」随场景尺度自适应。
+  const bounds = new THREE.Box3().setFromPoints(vertices)
+  const sphereRadius = Math.max(
+    1,
+    bounds.getBoundingSphere(new THREE.Sphere()).radius,
+  )
+  const fadeStart = Math.max(1, sphereRadius * TRAJ_FADE_START_RATIO)
+  trajFadeUniforms.uFadeStart.value = fadeStart
+  trajFadeUniforms.uFadeEnd.value = Math.max(
+    fadeStart + 1,
+    sphereRadius * TRAJ_FADE_END_RATIO,
+  )
   const lineGeom = new THREE.BufferGeometry().setFromPoints(vertices)
   const lineMat = new THREE.LineBasicMaterial({
     color: 0xffcf4a,
-    depthTest: false,
+    depthTest: true,
     depthWrite: false,
+    depthFunc: THREE.LessEqualDepth,
     transparent: true,
   })
+  applyTrajectoryDistanceFade(lineMat)
   const line = new THREE.Line(lineGeom, lineMat)
   line.renderOrder = 20
   line.frustumCulled = false
@@ -628,10 +733,12 @@ function rebuildTrajectory() {
     sizeAttenuation: false,
     map: getCircleTexture(),
     alphaTest: 0.5,
-    depthTest: false,
+    depthTest: true,
     depthWrite: false,
+    depthFunc: THREE.LessEqualDepth,
     transparent: true,
   })
+  applyTrajectoryDistanceFade(dotMat)
   const dots = new THREE.Points(dotGeom, dotMat)
   dots.renderOrder = 21
   dots.frustumCulled = false
@@ -641,7 +748,7 @@ function rebuildTrajectory() {
   zUpGroup.add(trajectoryGroup)
 }
 
-/** 选中控制点：单独一个绿色圆点高亮（置顶渲染）。 */
+/** 选中控制点：单独一个绿色圆点高亮（与轨迹一致，受墙体深度遮挡）。 */
 function ensureSelectedMarker() {
   if (selectedMarker) return
   const geom = new THREE.BufferGeometry()
@@ -655,8 +762,9 @@ function ensureSelectedMarker() {
     sizeAttenuation: false,
     map: getCircleTexture(),
     alphaTest: 0.5,
-    depthTest: false,
+    depthTest: true,
     depthWrite: false,
+    depthFunc: THREE.LessEqualDepth,
     transparent: true,
   })
   selectedMarker = new THREE.Points(geom, mat)
@@ -711,7 +819,7 @@ function init() {
   renderer.toneMappingExposure = 1.0
   host.appendChild(renderer.domElement)
   zUpGroup.rotation.x = zUpToYUpRotationX
-  scene.add(zUpGroup)
+  // 轨迹挂载由 refreshTrajectoryAttachment 决定：优先点云场景（共享深度、可遮挡）。
   // LCCRender 是模块级单例，绑定在“首次 load 时的 canvas/scene/renderer”。
   // SPA 再次进入本页时旧单例仍指向已销毁的画布，导致高斯加载不出来（刷新页面才会重置）。
   // 这里在挂载时先重置单例，确保绑定到当前叠加层的画布。
@@ -740,17 +848,29 @@ watch(
   () => [props.showGaussian, props.gaussDataPath] as const,
   () => loadGaussian(),
 )
+// trajectoryPoints 由父级整体替换（非就地修改），用引用监听即可，省去深层遍历。
 watch(
   () => [props.showTrajectory, props.trajectoryPoints] as const,
   () => {
     rebuildTrajectory()
     updateSelectedMarker()
+    requestExternalRender()
   },
-  { deep: true },
 )
 watch(
   () => [props.selectedIndex, props.showTrajectory] as const,
-  () => updateSelectedMarker(),
+  () => {
+    updateSelectedMarker()
+    requestExternalRender()
+  },
+)
+
+// 图层可见性变化（高斯/点云）时才重新解析轨迹挂载场景。
+watch(
+  () => props.attachToPointcloud,
+  () => {
+    attachmentDirty = true
+  },
 )
 
 watch(
@@ -781,6 +901,9 @@ onBeforeUnmount(() => {
   disposeLcc()
   // 卸载时重置 LCC 单例，避免下次（SPA）进入复用已销毁的画布。
   ;(LCCRender as any)?.dispose?.()
+  // 轨迹可能挂在点云场景上，卸载时从所属场景移除，避免残留。
+  zUpGroup.parent?.remove(zUpGroup)
+  attachedScene = null
   disposeTrajectory()
   if (clipBoxHelper) {
     scene?.remove(clipBoxHelper)
