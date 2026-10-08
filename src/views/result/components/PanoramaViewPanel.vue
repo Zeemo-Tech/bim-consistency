@@ -387,9 +387,11 @@ const loadPanoramaImage = async (imageUrl: string, yaw: number = 0) => {
 
 const syncRendererSize = () => {
   if (!panoramaViewer.value || !panoramaContainer.value) return
-  const rect = panoramaContainer.value.getBoundingClientRect()
-  const w = Math.max(1, Math.floor(rect.width || 1))
-  const h = Math.max(1, Math.floor(rect.height || 1))
+  // 使用布局尺寸（clientWidth/clientHeight）而非 getBoundingClientRect，
+  // 避免父级 CSS transform 缩放时把渲染器尺寸误判为缩放后的尺寸而导致抖动。
+  const el = panoramaContainer.value
+  const w = Math.max(1, Math.floor(el.clientWidth))
+  const h = Math.max(1, Math.floor(el.clientHeight))
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
   const cw = Math.floor(w * dpr)
   const ch = Math.floor(h * dpr)

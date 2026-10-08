@@ -516,53 +516,65 @@
         :clip-invert="activeClipInvert"
       />
 
-      <!-- 全景图叠加层：点击轨迹控制点后铺在页面上，可上一个/下一个/关闭 -->
-      <div v-if="panoramaOverlayVisible" class="pc-panorama-overlay">
-        <button
-          class="pc-panorama-close"
-          type="button"
-          aria-label="关闭全景图"
-          title="关闭"
-          @click="panoramaOverlayVisible = false"
+      <!-- 全景图叠加层：点击轨迹控制点后以空间扩散动画铺在页面上，可上一个/下一个/关闭 -->
+      <Transition name="pc-pan">
+        <div
+          v-if="panoramaOverlayVisible"
+          class="pc-panorama-overlay"
+          :style="{
+            '--pc-origin-x': `${panoramaOrigin.x}px`,
+            '--pc-origin-y': `${panoramaOrigin.y}px`,
+          }"
         >
-          <el-icon><Close /></el-icon>
-        </button>
-        <button
-          class="pc-panorama-nav is-prev"
-          type="button"
-          aria-label="上一个轨迹点"
-          title="上一个轨迹点"
-          @click="stepTrajectory(-1)"
-        >
-          <el-icon><ArrowLeft /></el-icon>
-        </button>
-        <button
-          class="pc-panorama-nav is-next"
-          type="button"
-          aria-label="下一个轨迹点"
-          title="下一个轨迹点"
-          @click="stepTrajectory(1)"
-        >
-          <el-icon><ArrowRight /></el-icon>
-        </button>
-        <PanoramaViewPanel
-          ref="panoramaRef"
-          class="pc-panorama-panel"
-          :project-id="projectId"
-          :scan-file-id="fileId"
-          @image-info-change="onPanoramaImageInfo"
-        />
-        <div class="pc-panorama-label">
-          {{
-            currentTrajectoryPoint
-              ? trajectoryPointLabel(
-                  currentTrajectoryPoint,
-                  selectedTrajectoryIndex ?? 0,
-                )
-              : ''
-          }}
+          <div class="pc-panorama-inner">
+            <button
+              class="pc-panorama-close"
+              type="button"
+              aria-label="关闭全景图"
+              title="关闭"
+              @click="closePanorama"
+            >
+              <el-icon><Close /></el-icon>
+            </button>
+            <button
+              class="pc-panorama-nav is-prev"
+              type="button"
+              aria-label="上一个轨迹点"
+              title="上一个轨迹点"
+              @click="stepTrajectory(-1)"
+            >
+              <el-icon><ArrowLeft /></el-icon>
+            </button>
+            <button
+              class="pc-panorama-nav is-next"
+              type="button"
+              aria-label="下一个轨迹点"
+              title="下一个轨迹点"
+              @click="stepTrajectory(1)"
+            >
+              <el-icon><ArrowRight /></el-icon>
+            </button>
+            <PanoramaViewPanel
+              ref="panoramaRef"
+              class="pc-panorama-panel"
+              :project-id="projectId"
+              :scan-file-id="fileId"
+              @image-info-change="onPanoramaImageInfo"
+              @panorama-rot-change="onPanoramaRotChange"
+            />
+            <div class="pc-panorama-label">
+              {{
+                currentTrajectoryPoint
+                  ? trajectoryPointLabel(
+                      currentTrajectoryPoint,
+                      selectedTrajectoryIndex ?? 0,
+                    )
+                  : ''
+              }}
+            </div>
+          </div>
         </div>
-      </div>
+      </Transition>
 
       <PointcloudAxesTriad
         v-show="showAxes"
@@ -940,6 +952,8 @@ type PointCloudViewerExpose = InstanceType<typeof PointCloudViewer> & {
   setTilesErrorTargetOverride?: (value: number | null) => void
   requestRender?: () => void
   syncFromTrajectory?: (point: TrajectoryPoint) => void
+  getCameraOrientation?: () => { lon: number; lat: number } | null
+  syncFromPanoramaRotation?: (rot: { lon: number; lat: number }) => void
   setPointRatio?: (ratio: number) => void
   enterFirstPersonMode?: () => void
   exitFirstPersonMode?: () => void
@@ -2085,6 +2099,13 @@ const currentImageInfo = ref<any | null>(null)
 const attachViewsLoaded = ref(false)
 const panoramaOverlayVisible = ref(false)
 const panoramaRef = ref<InstanceType<typeof PanoramaViewPanel> | null>(null)
+// 全景图从点击位置放大的起始锚点（相对舞台左上角的像素坐标）
+const panoramaOrigin = ref({ x: 0, y: 0 })
+const panoramaOriginReady = ref(false)
+// 全景图当前朝向（由 PanoramaViewPanel 实时上报，lon/lat 约定与点云相机一致）
+const panoramaLiveRot = ref<{ lon: number; lat: number }>({ lon: 0, lat: 0 })
+// 打开全景图时点云相机的基准朝向，退出时用「基准 + 全景旋转增量」同步回点云
+const pointcloudRotBase = ref<{ lon: number; lat: number } | null>(null)
 const overlayRef = ref<InstanceType<typeof ScanGaussTrajectoryOverlay> | null>(
   null,
 )
@@ -2193,6 +2214,75 @@ function trajectoryPointLabel(point: TrajectoryPoint, index: number) {
 }
 
 /**
+ * 计算全景图放大动画的起始锚点。
+ * 传入点击坐标时以点击位置为锚点，否则以舞台中心为锚点（保证动画始终可见）。
+ */
+function resolvePanoramaOrigin(clientX?: number, clientY?: number) {
+  const rect = stageRef.value?.getBoundingClientRect()
+  if (!rect || !rect.width || !rect.height) {
+    panoramaOrigin.value = { x: 0, y: 0 }
+    panoramaOriginReady.value = false
+    return
+  }
+  const x =
+    typeof clientX === 'number' && typeof clientY === 'number'
+      ? clientX - rect.left
+      : rect.width / 2
+  const y =
+    typeof clientX === 'number' && typeof clientY === 'number'
+      ? clientY - rect.top
+      : rect.height / 2
+  panoramaOrigin.value = { x, y }
+  panoramaOriginReady.value = true
+}
+
+/** 尚未记录起始锚点时（如非点击方式打开）回退到舞台中心。 */
+function ensurePanoramaOrigin() {
+  if (panoramaOriginReady.value) return
+  resolvePanoramaOrigin()
+}
+
+/** 将经度归一化到 (-180, 180]。 */
+function normalizeLon(lon: number) {
+  return ((((lon + 180) % 360) + 360) % 360) - 180
+}
+
+/** 记录全景图朝向（与四分屏页同步机制一致，lon/lat 约定相同）。 */
+function onPanoramaRotChange(rot: { lon: number; lat: number }) {
+  panoramaLiveRot.value = { ...rot }
+}
+
+/** 打开全景图时抓拍基准：全景图加载后会归位到 (0,0)，点云相机朝向作为增量叠加基准。 */
+function capturePanoramaSyncBase() {
+  panoramaLiveRot.value = { lon: 0, lat: 0 }
+  pointcloudRotBase.value =
+    pointcloudViewerRef.value?.getCameraOrientation?.() ?? null
+}
+
+/**
+ * 退出全景图时把观看方向同步给点云：基准朝向 + 全景旋转增量。
+ * 高斯叠加层跟随点云相机，因此该方法同时作用于点云与高斯。
+ */
+function syncPanoramaRotationToViewer() {
+  const base = pointcloudRotBase.value
+  pointcloudRotBase.value = null
+  if (!base) return
+  const { lon, lat } = panoramaLiveRot.value
+  if (Math.abs(lon) < 0.01 && Math.abs(lat) < 0.01) return
+  pointcloudViewerRef.value?.syncFromPanoramaRotation?.({
+    lon: normalizeLon(base.lon + lon),
+    lat: Math.max(-85, Math.min(85, base.lat + lat)),
+  })
+}
+
+/** 关闭全景图：同步观看方向回点云/高斯，并重置锚点以便下次点击重新定位。 */
+function closePanorama() {
+  syncPanoramaRotationToViewer()
+  panoramaOverlayVisible.value = false
+  panoramaOriginReady.value = false
+}
+
+/**
  * 选中某个轨迹控制点：切点云相机到该点位姿、加载对应全景图。
  * openPanorama=true 时把全景图叠加层铺到页面上（点击控制点时）。
  */
@@ -2202,8 +2292,13 @@ function onTrajectorySelect(index: number, openPanorama = false) {
   selectedTrajectoryIndex.value = Number(index)
   currentTrajectoryPoint.value = point
   pointcloudViewerRef.value?.syncFromTrajectory?.(point)
-  if (openPanorama) panoramaOverlayVisible.value = true
+  if (openPanorama) {
+    ensurePanoramaOrigin()
+    panoramaOverlayVisible.value = true
+  }
   if (panoramaOverlayVisible.value) {
+    // 全景图加载后会归位到 (0,0)，此处记录点云相机朝向作为退出同步的基准。
+    capturePanoramaSyncBase()
     // 等叠加层里的全景图组件挂载后再加载影像。
     void nextTick(() => {
       if (panoramaOverlayVisible.value && currentTrajectoryPoint.value) {
@@ -2230,6 +2325,8 @@ function onStageClick(event: MouseEvent) {
     ignoreNextStageClick = false
     return
   }
+  // 全景图作为满幅视觉层覆盖 Viewer 时，点击落在全景画布上，不应触发轨迹拾取。
+  if (panoramaOverlayVisible.value) return
   if (!trajectoryVisible.value || !trajectoryPoints.value.length) return
   if (!(event.target instanceof HTMLCanvasElement)) return
   const index = overlayRef.value?.pickTrajectoryIndex?.(
@@ -2239,6 +2336,10 @@ function onStageClick(event: MouseEvent) {
   if (index === null || index === undefined) return
   const openPanorama =
     trajectoryClickMode.value === 'panorama' && attachIncludePanorama.value
+  if (openPanorama) {
+    // 以点击的轨迹点为空间扩散起点，动画从这里向四周展开。
+    resolvePanoramaOrigin(event.clientX, event.clientY)
+  }
   onTrajectorySelect(index, openPanorama)
 }
 
@@ -3245,6 +3346,12 @@ onBeforeUnmount(() => {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .pc-pan-enter-active {
+    transition-duration: 1ms;
+  }
+}
+
 .pointcloud-preview-page {
   --viewer-stage: #0c1224;
   --viewer-chrome: rgb(12 18 36 / 88%);
@@ -3964,25 +4071,63 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
 }
 
-/* ==================== 全景图叠加层 ==================== */
+/* ==================== 全景图叠加层：以点击为锚点，由小矩形持续放大铺满 Viewer，同时淡入形成遮罩式显现 ==================== */
 .pc-panorama-overlay {
   position: absolute;
   inset: 0;
   z-index: 90;
-  display: grid;
-  place-items: center;
-  background: rgb(6 10 18 / 82%);
-  backdrop-filter: blur(3px);
+  opacity: 1;
+  transform: scale(1);
+  transform-origin: var(--pc-origin-x, 50%) var(--pc-origin-y, 50%);
+  will-change: transform, opacity;
 }
 
+/* 承载全景图与浮层控件 */
+.pc-panorama-inner {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+/* 进场：全景图从点击处的小矩形持续放大，向四周扩张铺满整个 Viewer，同时由透明淡入形成遮罩式显现 */
+.pc-pan-enter-active {
+  transition:
+    opacity 520ms ease-out,
+    transform 720ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* 仅进入有动画；关闭（叉号）时直接消失，不做退场动画 */
+.pc-pan-enter-from {
+  opacity: 0;
+  transform: scale(0.12);
+}
+
+/* 全景图作为 Viewer 的临时视觉层：满幅覆盖点云 / 高斯渲染区域，四周无留白 */
 .pc-panorama-panel {
-  width: min(74vw, 1120px);
-  height: min(74vh, 740px);
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
-  background: #0b1020;
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 18px 60px rgb(0 0 0 / 55%);
+  background: transparent;
+}
+
+/* 中和共享全景组件的内部布局，使其 100% 铺满且隐藏自带标题 */
+.pc-panorama-panel :deep(.panel-header),
+.pc-panorama-panel :deep(.empty-placeholder) {
+  display: none;
+}
+
+.pc-panorama-panel :deep(.panorama-container) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.pc-panorama-panel :deep(.panorama-container canvas) {
+  display: block;
 }
 
 .pc-panorama-close {
