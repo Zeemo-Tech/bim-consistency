@@ -244,7 +244,13 @@ function pickTrajectoryIndex(clientX: number, clientY: number): number | null {
   return best >= 0 && bestDist <= 0.03 ? best : null
 }
 
-defineExpose({ pickTrajectoryIndex, reloadGaussian, pickClipHandle })
+defineExpose({
+  pickTrajectoryIndex,
+  reloadGaussian,
+  pickClipHandle,
+  /** 叠加层渲染用的场景（在最上层画布），供测量等 UI 叠在高斯之上。 */
+  getOverlayScene: () => scene,
+})
 
 function syncCameraFromPointcloud() {
   const pose = props.getCameraPose?.()

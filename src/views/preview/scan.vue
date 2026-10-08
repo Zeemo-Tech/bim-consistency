@@ -306,6 +306,13 @@
                 <el-icon><Delete /></el-icon>
                 清除测量
               </button>
+              <p v-if="firstPersonActive" class="pc-pop-hint is-warn">
+                第一人称漫游中不支持测量，请先退出漫游（V）
+              </p>
+              <p v-if="analysisMode !== 'none'" class="pc-pop-hint">
+                {{ analysisHint }}
+              </p>
+              <p class="pc-pop-hint">Esc 退出 · Ctrl+Z 撤销</p>
             </div>
           </el-popover>
         </el-tooltip>
@@ -640,21 +647,8 @@
         </div>
       </div>
 
-      <div v-if="analysisMode !== 'none'" class="pc-analysis-toolbar">
-        <strong>{{ analysisTitle }}</strong>
-        <span v-if="analysisSummary" class="pc-analysis-value">
-          {{ analysisSummary }}
-        </span>
-        <span v-else class="pc-analysis-hint">{{ analysisHint }}</span>
-        <span class="pc-analysis-exit">Esc 退出 · Ctrl+Z 撤销</span>
-        <button
-          type="button"
-          :disabled="!canUndoMeasurement"
-          @click="undoMeasurement"
-        >
-          撤销
-        </button>
-        <button type="button" @click="clearAnalysis">清除</button>
+      <div v-if="measureDraftHint" class="pc-measure-hint">
+        {{ measureDraftHint }}
       </div>
 
       <!-- 剖切面板：轴 / 反向 / 位置滑杆（在视图里拖动箭头手柄同样生效） -->
@@ -702,7 +696,7 @@
       <div class="pc-measure-badges">
         <div
           v-for="badge in measureBadges"
-          v-show="badge.visible"
+          v-show="badge.visible && !badge.hidden"
           :key="badge.id"
           class="pc-measure-badge"
           :style="{ transform: `translate(${badge.x}px, ${badge.y}px)` }"
@@ -710,6 +704,29 @@
           <header @pointerdown="startBadgeDrag(badge, $event)">
             <span class="pc-measure-badge__dots" aria-hidden="true" />
             <span class="pc-measure-badge__title">{{ badge.title }}</span>
+            <div class="pc-measure-badge__actions">
+              <button
+                v-if="badge.offset.x || badge.offset.y"
+                type="button"
+                class="pc-measure-badge__reset"
+                aria-label="重置面板位置"
+                title="重置位置"
+                @pointerdown.stop
+                @click.stop="resetMeasureBadge(badge.id)"
+              >
+                重置
+              </button>
+              <button
+                type="button"
+                class="pc-measure-badge__close"
+                aria-label="关闭该测量面板"
+                title="关闭"
+                @pointerdown.stop
+                @click.stop="hideMeasureBadge(badge.id)"
+              >
+                ×
+              </button>
+            </div>
           </header>
           <div v-if="badge.mainValue" class="pc-measure-badge__main">
             <span>{{ badge.mainLabel }}</span>
@@ -721,6 +738,16 @@
               <span>{{ row.value }}</span>
             </div>
           </div>
+          <footer class="pc-measure-badge__footer">
+            <button
+              type="button"
+              class="pc-measure-badge__delete"
+              @pointerdown.stop
+              @click.stop="deleteMeasureBadge(badge.id)"
+            >
+              删除
+            </button>
+          </footer>
         </div>
       </div>
 
@@ -1028,6 +1055,11 @@ function toggleFirstPerson() {
 }
 function handleFirstPersonChange(value: boolean) {
   firstPersonActive.value = value
+  // 第一人称漫游中无法在画布上取点测量，进入时自动退出测量并提示。
+  if (value && analysisMode.value !== 'none') {
+    exitMeasurementMode()
+    ElMessage.warning('第一人称漫游中不支持测量，已退出测量')
+  }
 }
 function fpMove(direction: FpMoveDirection, active: boolean) {
   pointcloudViewerRef.value?.setFirstPersonMoveDirection?.(direction, active)
@@ -1208,6 +1240,8 @@ type MeasureBadge = {
   x: number
   y: number
   visible: boolean
+  /** 面板被叉号关闭（隐藏），但测量仍保留，可点击锚点重新显示 */
+  hidden: boolean
 }
 const measureBadges = ref<MeasureBadge[]>([])
 type MeasurementType = 'point' | 'distance' | 'area'
@@ -1247,13 +1281,21 @@ let badgeDrag: {
 } | null = null
 let labelRaf = 0
 
+/** 测量 UI 的宿主场景：优先叠加层（最上层画布），开启高斯后仍可见。 */
+function getMeasureHostScene() {
+  return overlayRef.value?.getOverlayScene?.() ?? getViewerScene()
+}
+
 function ensureMeasureGroup(): THREE.Group | null {
-  const scene = getViewerScene()
+  const scene = getMeasureHostScene()
   if (!scene) return null
   if (!measureGroup) {
     measureGroup = new THREE.Group()
     measureGroup.name = '__scan_measure_group__'
     measureGroup.renderOrder = 10000
+    scene.add(measureGroup)
+  } else if (measureGroup.parent !== scene) {
+    // 宿主场景变化（叠加层就绪）时迁到最上层。
     scene.add(measureGroup)
   }
   return measureGroup
@@ -1398,11 +1440,18 @@ function removeAreaPreview() {
 }
 
 function addMeasureBadge(
-  badge: Omit<MeasureBadge, 'x' | 'y' | 'visible' | 'offset'>,
+  badge: Omit<MeasureBadge, 'x' | 'y' | 'visible' | 'offset' | 'hidden'>,
 ) {
   measureBadges.value = [
     ...measureBadges.value,
-    { ...badge, offset: { x: 0, y: 0 }, x: 0, y: 0, visible: false },
+    {
+      ...badge,
+      offset: { x: 0, y: 0 },
+      x: 0,
+      y: 0,
+      visible: false,
+      hidden: false,
+    },
   ]
 }
 
@@ -1467,6 +1516,8 @@ function endBadgeDrag(event: PointerEvent) {
 
 /** 作用：同步图钉大小与粗线分辨率（跟随相机/视口） */
 function syncMeasureVisuals() {
+  // 叠加层就绪后把测量组迁到最上层画布，保证开启高斯时仍可见。
+  ensureMeasureGroup()
   const dom = getViewerRendererDom()
   const width = dom?.clientWidth || 1
   const height = dom?.clientHeight || 1
@@ -1813,17 +1864,42 @@ function closeAreaMeasurement() {
   requestScanRender()
 }
 
-function selectAnalysisMode(mode: AnalysisMode) {
+/** 作用：清理进行中的测量草稿（未完成的首点/面积点），保留已完成测量 */
+function releaseMeasurementDraft() {
   if (distanceStartGroup) {
     distanceStartGroup.parent?.remove(distanceStartGroup)
     disposeMeasurementGroup(distanceStartGroup)
     distanceStartGroup = null
   }
-  analysisMode.value = analysisMode.value === mode ? 'none' : mode
   distanceStart = null
   areaPoints = []
   removeAreaPreview()
+}
+
+/** 作用：退出测量模式（保留已完成的测量记录） */
+function exitMeasurementMode() {
+  releaseMeasurementDraft()
+  analysisMode.value = 'none'
   touchMeasureRevision()
+  requestScanRender()
+}
+
+function selectAnalysisMode(mode: AnalysisMode) {
+  // 第一人称漫游中无法在画布上取点，给出提示而不进入测量。
+  if (mode !== 'none' && firstPersonActive.value) {
+    ElMessage.warning('第一人称漫游中不支持测量，请先退出漫游（V）')
+    return
+  }
+  // 再次点击当前模式 = 退出测量
+  if (mode === 'none' || analysisMode.value === mode) {
+    exitMeasurementMode()
+    return
+  }
+  // 切到新模式前清理进行中的草稿
+  releaseMeasurementDraft()
+  analysisMode.value = mode
+  touchMeasureRevision()
+  requestScanRender()
 }
 
 function clearAnalysis() {
@@ -1864,6 +1940,51 @@ function removeMeasurementRecord(record: MeasurementRecord) {
   measurements.value = measurements.value.filter(
     (item) => item.id !== record.id,
   )
+}
+
+/** 作用：点击面板叉号，关闭（删除）该条测量 */
+function deleteMeasureBadge(id: string) {
+  const record = measurements.value.find((item) => item.badgeId === id)
+  if (record) {
+    removeMeasurementRecord(record)
+  } else {
+    measureBadges.value = measureBadges.value.filter((badge) => badge.id !== id)
+  }
+  touchMeasureRevision()
+  requestScanRender()
+}
+
+/** 作用：点击面板叉号，仅隐藏面板（保留测量几何），可点击锚点重新显示 */
+function hideMeasureBadge(id: string) {
+  measureBadges.value = measureBadges.value.map((badge) =>
+    badge.id === id ? { ...badge, hidden: true } : badge,
+  )
+}
+
+/** 作用：重置面板拖动偏移 */
+function resetMeasureBadge(id: string) {
+  measureBadges.value = measureBadges.value.map((badge) =>
+    badge.id === id ? { ...badge, offset: { x: 0, y: 0 } } : badge,
+  )
+}
+
+/** 作用：点击已隐藏测量的锚点附近，重新显示其面板 */
+function revealHiddenMeasureBadgeAt(clientX: number, clientY: number) {
+  const hidden = measureBadges.value.filter((badge) => badge.hidden)
+  if (!hidden.length) return false
+  const dom = getViewerRendererDom()
+  if (!dom) return false
+  const rect = dom.getBoundingClientRect()
+  const x = clientX - rect.left
+  const y = clientY - rect.top
+  const hit = hidden.find(
+    (badge) => badge.visible && Math.hypot(badge.x - x, badge.y - y) < 26,
+  )
+  if (!hit) return false
+  measureBadges.value = measureBadges.value.map((badge) =>
+    badge.id === hit.id ? { ...badge, hidden: false } : badge,
+  )
+  return true
 }
 
 /** 作用：取消进行中的测距首点 */
@@ -1977,21 +2098,22 @@ function onMeasureKeyDown(event: KeyboardEvent) {
   }
 }
 
-const analysisTitle = computed(() =>
-  analysisMode.value === 'distance'
-    ? '全局测距'
-    : analysisMode.value === 'area'
-      ? '面积测量'
-      : '全局定位',
-)
 const analysisHint = computed(() => {
   if (analysisMode.value === 'distance') return '依次点击两点完成一段测距'
   if (analysisMode.value === 'area') return '连续点击至少三个点，双击闭合区域'
   return '点击任意位置拾取坐标'
 })
-const analysisSummary = computed(() => {
-  const latest = measureBadges.value.at(-1)
-  return latest ? `${latest.mainLabel} ${latest.mainValue}` : ''
+
+/** 绘制过程中的即时提示（依赖 measureRevision 以便放置/撤销点时刷新）。 */
+const measureDraftHint = computed(() => {
+  void measureRevision.value
+  if (analysisMode.value === 'distance' && distanceStart) {
+    return '再次点击确定终点'
+  }
+  if (analysisMode.value === 'area' && areaPoints.length) {
+    return areaPoints.length >= 3 ? '双击或 Enter 闭合区域' : '至少再点击几个点'
+  }
+  return ''
 })
 
 function applyBackgroundTheme() {
@@ -2349,6 +2471,10 @@ function onStageClick(event: MouseEvent) {
   }
   // 全景图作为满幅视觉层覆盖 Viewer 时，点击落在全景画布上，不应触发轨迹拾取。
   if (panoramaOverlayVisible.value) return
+  // 点击已隐藏测量的锚点附近，重新显示其面板。
+  if (revealHiddenMeasureBadgeAt(event.clientX, event.clientY)) return
+  // 测量模式下点击用于取点，不触发轨迹拾取/全景。
+  if (analysisMode.value !== 'none') return
   if (!trajectoryVisible.value || !trajectoryPoints.value.length) return
   if (!(event.target instanceof HTMLCanvasElement)) return
   const index = overlayRef.value?.pickTrajectoryIndex?.(
@@ -3446,7 +3572,6 @@ onBeforeUnmount(() => {
 .pc-close:focus-visible,
 .pc-clip-bar button:focus-visible,
 .pc-clip-bar input:focus-visible,
-.pc-analysis-toolbar button:focus-visible,
 .pc-panorama-close:focus-visible,
 .pc-panorama-nav:focus-visible,
 .pc-int-axis__reset:focus-visible {
@@ -3677,55 +3802,23 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-.pc-analysis-toolbar {
+/* 测量绘制中的即时提示 */
+.pc-measure-hint {
   position: absolute;
-  top: 18px;
+  top: 14px;
   left: 50%;
-  z-index: 82;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  max-width: calc(100% - 32px);
-  min-height: 42px;
-  padding: 8px 10px 8px 14px;
-  color: #f8fafc;
+  z-index: 40;
+  padding: 6px 14px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: #fff;
   white-space: nowrap;
-  background: rgb(8 17 29 / 86%);
+  pointer-events: none;
+  background: rgb(8 17 29 / 82%);
   border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 12px 30px rgb(0 0 0 / 24%);
-  backdrop-filter: blur(14px);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
   transform: translateX(-50%);
-}
-
-.pc-analysis-toolbar strong {
-  font-size: var(--font-size-sm);
-}
-
-.pc-analysis-hint,
-.pc-analysis-exit {
-  font-size: var(--font-size-xs);
-  color: rgb(226 232 240 / 78%);
-}
-
-.pc-analysis-value {
-  font-size: var(--font-size-xs);
-  font-weight: 700;
-  color: #fca5a5;
-}
-
-.pc-analysis-toolbar button {
-  padding: 4px 9px;
-  font-size: var(--font-size-xs);
-  color: #fecaca;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid rgb(248 113 113 / 40%);
-  border-radius: var(--radius-xs);
-}
-
-.pc-analysis-toolbar button:hover {
-  background: rgb(248 113 113 / 16%);
 }
 
 /* 剖切面板 */
@@ -3841,7 +3934,7 @@ onBeforeUnmount(() => {
   max-width: 220px;
   padding: 10px 12px 8px;
   color: rgb(255 255 255 / 90%);
-  pointer-events: none;
+  pointer-events: auto;
   user-select: none;
   background: rgb(8 18 42 / 78%);
   border: 1px solid rgb(115 162 243 / 22%);
@@ -3881,6 +3974,78 @@ onBeforeUnmount(() => {
   font-size: var(--font-size-xs);
   font-weight: 600;
   color: rgb(255 255 255 / 68%);
+}
+
+.pc-measure-badge__actions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.pc-measure-badge__close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: rgb(255 255 255 / 72%);
+  cursor: pointer;
+  background: rgb(255 255 255 / 8%);
+  border: 0;
+  border-radius: 50%;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.pc-measure-badge__reset {
+  min-height: 18px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(151 186 255 / 92%);
+  cursor: pointer;
+  background: rgb(255 255 255 / 6%);
+  border: 0;
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+
+.pc-measure-badge__reset:hover {
+  background: rgb(255 255 255 / 12%);
+}
+
+.pc-measure-badge__close:hover {
+  color: #fff;
+  background: rgb(255 90 90 / 34%);
+}
+
+.pc-measure-badge__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pc-measure-badge__delete {
+  min-height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgb(255 255 255 / 78%);
+  cursor: pointer;
+  background: rgb(255 255 255 / 6%);
+  border: 0;
+  border-radius: 999px;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.pc-measure-badge__delete:hover {
+  background: rgb(255 90 90 / 26%);
+  transform: translateY(-1px);
 }
 
 .pc-measure-badge__main {
@@ -4251,6 +4416,10 @@ onBeforeUnmount(() => {
   font-size: 11px;
   line-height: 1.5;
   color: #909399;
+}
+
+.pc-pop-hint.is-warn {
+  color: #e6a23c;
 }
 
 .pc-pop-block {
