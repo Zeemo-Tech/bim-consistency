@@ -26,6 +26,7 @@ export function createClipBoundsCollector() {
   /**
    * 按每个几何体的缓存包围盒（three 会在首次计算后缓存）计算裁切局部包围盒，
    * 避免逐顶点扫描——大点云/多瓦片时逐顶点会非常慢。
+   * 再用「中位数 ± k·MAD」剔除离群瓦片/噪点，避免远处零星对象把框撑大。
    */
   function createFrame(
     roots: readonly ClipBoundsRoot[],
@@ -35,7 +36,7 @@ export function createClipBoundsCollector() {
     const worldToClip = new THREE.Matrix4().makeRotationFromQuaternion(
       frame.localFromWorld,
     )
-    let hasPoints = false
+    const boxes: THREE.Box3[] = []
 
     for (const source of roots) {
       const root = source instanceof THREE.Object3D ? source : source.root
@@ -54,17 +55,54 @@ export function createClipBoundsCollector() {
         localToClip.copy(worldToClip).multiply(object.matrixWorld)
         const box = local.clone().applyMatrix4(localToClip)
         if (box.isEmpty()) return
-        frame.fullBounds.union(box)
-        hasPoints = true
+        boxes.push(box)
       }
       if (includeInvisible) root.traverse(visit)
       else root.traverseVisible(visit)
     }
-    if (hasPoints) frame.fullBounds.expandByScalar(CLIP_BOUNDS_TOLERANCE_METERS)
+
+    const kept = filterOutlierBoxes(boxes)
+    for (const box of kept) frame.fullBounds.union(box)
+    if (!frame.fullBounds.isEmpty())
+      frame.fullBounds.expandByScalar(CLIP_BOUNDS_TOLERANCE_METERS)
     return frame
   }
 
   return { createFrame }
+}
+
+function median(values: number[]): number {
+  if (!values.length) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted[Math.floor(sorted.length / 2)]
+}
+
+/**
+ * 用中心点的中位数与 MAD（绝对中位差）剔除离群包围盒：
+ * 每个轴保留中心落在 `median ± max(k·MAD, 5%·extent)` 内的盒，避免远处噪点撑大框。
+ */
+function filterOutlierBoxes(boxes: THREE.Box3[]): THREE.Box3[] {
+  if (boxes.length <= 4) return boxes
+  const centers = boxes.map((box) => box.getCenter(new THREE.Vector3()))
+  const overall = new THREE.Box3()
+  boxes.forEach((box) => overall.union(box))
+  const extent = overall.getSize(new THREE.Vector3())
+  const axes: Array<'x' | 'y' | 'z'> = ['x', 'y', 'z']
+  const med = {} as Record<'x' | 'y' | 'z', number>
+  const limit = {} as Record<'x' | 'y' | 'z', number>
+  const k = 3
+  for (const axis of axes) {
+    const values = centers.map((c) => c[axis])
+    const m = median(values)
+    const mad = median(values.map((v) => Math.abs(v - m)))
+    med[axis] = m
+    limit[axis] = Math.max(k * mad, 0.05 * extent[axis])
+  }
+  const kept = boxes.filter((box, index) => {
+    const c = centers[index]
+    return axes.every((axis) => Math.abs(c[axis] - med[axis]) <= limit[axis])
+  })
+  return kept.length ? kept : boxes
 }
 
 /** 默认显示留出可抓取的空间，边距只按横断面计算，不随隧道长度放大。 */
