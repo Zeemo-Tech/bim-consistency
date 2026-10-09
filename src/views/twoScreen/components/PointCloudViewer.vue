@@ -233,8 +233,14 @@ let pointColorMode: PointCloudColorMode = 'rgb'
 let pointColorRamp: PointCloudColorRamp = 'spectrum'
 let pointHasIntensity = false
 let pointHasClass = false
+// 分类是否真正有区分度（全 0 时视为无分类数据）
+let pointClassHasVariation = false
+let pointClassFirstValue: number | null = null
 let pointIntensityMin = 0
 let pointIntensityMax = 1
+// 强度的原始全域（不随显示区间变化），供强度颜色轴做 0..1 归一化映射
+let pointIntensityDomainMin = 0
+let pointIntensityDomainMax = 1
 // 强度采样（用于底部直方图），有上限，避免大点云占用过多内存
 const INTENSITY_SAMPLE_CAP = 200000
 const intensitySamples: number[] = []
@@ -242,10 +248,10 @@ const intensitySamples: number[] = []
 /** 计算强度直方图（归一化到 0..1），供底部颜色轴绘制分布曲线。 */
 const getIntensityHistogram = (bins = 96): number[] => {
   if (!intensitySamples.length) return []
-  const span = Math.max(pointIntensityMax - pointIntensityMin, 1e-6)
+  const span = Math.max(pointIntensityDomainMax - pointIntensityDomainMin, 1e-6)
   const hist = new Array<number>(bins).fill(0)
   for (let i = 0; i < intensitySamples.length; i++) {
-    const t = (intensitySamples[i] - pointIntensityMin) / span
+    const t = (intensitySamples[i] - pointIntensityDomainMin) / span
     const index = Math.min(bins - 1, Math.max(0, Math.floor(t * bins)))
     hist[index] += 1
   }
@@ -260,14 +266,38 @@ const BODY_CLASS_COLOR = { r: 0.24, g: 0.58, b: 0.9 }
 const VIRIDIS_STOPS = [0x440154, 0x31688e, 0x35b779, 0xfde725]
 const rampScratch = new THREE.Color()
 
+/** 原始强度归一化比例：uint8→255 / uint16→65535 / 浮点按量级，与参考项目一致。 */
+const rawIntensityScale = (values: ArrayLike<number>) => {
+  let maxAbs = 0
+  for (let i = 0; i < values.length; i++) {
+    const v = Math.abs(Number(values[i]))
+    if (Number.isFinite(v) && v > maxAbs) maxAbs = v
+  }
+  if (maxAbs > 1.5) return maxAbs > 255 ? 65535 : 255
+  return 1
+}
+
 /** 从 pnts 的 batch table 读取一个标量数组（INTENSITY / CLASSIFICATION）。 */
 const readBatchScalar = (batchTable: any, key: string): number[] | null => {
-  if (!batchTable || typeof batchTable.getData !== 'function') return null
-  const desc = batchTable.header?.[key]
-  if (!desc) return null
+  if (!batchTable) return null
   try {
-    const data = batchTable.getData(key, desc.componentType, desc.type)
-    return data ? Array.from(data as ArrayLike<number>) : null
+    // 优先使用新版 API：getPropertyArray(key)（内部按 this.count 解码，正确处理 componentType）
+    if (typeof batchTable.getPropertyArray === 'function') {
+      const data = batchTable.getPropertyArray(key)
+      if (data) return Array.from(data as ArrayLike<number>)
+    }
+    // 兜底：老 API getData(key)，其签名是 (key, count, componentType, type)，
+    // 不能把 componentType 当 count 传（否则解码出全 0）。
+    if (typeof batchTable.getData === 'function') {
+      const header = batchTable.header ?? {}
+      const matchedKey =
+        Object.keys(header).find(
+          (k) => k.toUpperCase() === key.toUpperCase(),
+        ) ?? key
+      const data = batchTable.getData(matchedKey)
+      if (data) return Array.from(data as ArrayLike<number>)
+    }
+    return null
   } catch {
     return null
   }
@@ -321,7 +351,17 @@ const recolorGeometry = (geometry: THREE.BufferGeometry) => {
   if (!count) return
   const intensity = geometry.getAttribute('aIntensity')
   const classified = geometry.getAttribute('aClass')
-  const out = new Float32Array(count * 3)
+  // 复用已有 color 属性并标记 needsUpdate，确保 GPU 端真正刷新
+  const existing = geometry.getAttribute('color') as
+    | THREE.BufferAttribute
+    | undefined
+  const out =
+    existing &&
+    existing.itemSize === 3 &&
+    existing.count === count &&
+    existing.array instanceof Float32Array
+      ? (existing.array as Float32Array)
+      : new Float32Array(count * 3)
   const span = Math.max(pointIntensityMax - pointIntensityMin, 1e-6)
   for (let i = 0; i < count; i++) {
     if (pointColorMode === 'intensity' && intensity) {
@@ -338,7 +378,11 @@ const recolorGeometry = (geometry: THREE.BufferGeometry) => {
     out[i * 3 + 1] = rampScratch.g
     out[i * 3 + 2] = rampScratch.b
   }
-  geometry.setAttribute('color', new THREE.BufferAttribute(out, 3))
+  if (existing && existing.array === out) {
+    existing.needsUpdate = true
+  } else {
+    geometry.setAttribute('color', new THREE.BufferAttribute(out, 3))
+  }
 }
 
 /**
@@ -369,15 +413,22 @@ const processPointObject = (root: any) => {
     const intensity = readBatchScalar(batchTable, 'INTENSITY')
     if (intensity && intensity.length === count) {
       const values = new Float32Array(count)
+      // 归一化到 0..1（uint8→/255、uint16→/65535），显示区间与直方图都用该归一化域
+      const intensityScale = rawIntensityScale(intensity)
+      const intensityInv = intensityScale > 0 ? 1 / intensityScale : 1
       for (let i = 0; i < count; i++) {
-        const value = Number(intensity[i])
+        const value = Number(intensity[i]) * intensityInv
         values[i] = value
-        if (!pointHasIntensity) {
+        if (i === 0 && !pointHasIntensity) {
           pointIntensityMin = value
           pointIntensityMax = value
+          pointIntensityDomainMin = value
+          pointIntensityDomainMax = value
         } else {
           if (value < pointIntensityMin) pointIntensityMin = value
           if (value > pointIntensityMax) pointIntensityMax = value
+          if (value < pointIntensityDomainMin) pointIntensityDomainMin = value
+          if (value > pointIntensityDomainMax) pointIntensityDomainMax = value
         }
         if (intensitySamples.length < INTENSITY_SAMPLE_CAP) {
           intensitySamples.push(value)
@@ -391,7 +442,10 @@ const processPointObject = (root: any) => {
     if (classification && classification.length === count) {
       const values = new Float32Array(count)
       for (let i = 0; i < count; i++) {
-        values[i] = Number(classification[i]) === 2 ? 1 : 0
+        const mapped = Number(classification[i]) === 2 ? 1 : 0
+        values[i] = mapped
+        if (pointClassFirstValue === null) pointClassFirstValue = mapped
+        else if (mapped !== pointClassFirstValue) pointClassHasVariation = true
       }
       geometry.setAttribute('aClass', new THREE.BufferAttribute(values, 1))
       pointHasClass = true
@@ -402,9 +456,27 @@ const processPointObject = (root: any) => {
   })
 }
 
+/** 确保点云材质启用顶点色，否则重着色不会体现在渲染上。 */
+const ensureMaterialVertexColors = (obj: any) => {
+  const mats = Array.isArray(obj.material)
+    ? obj.material
+    : obj.material
+      ? [obj.material]
+      : []
+  for (const mat of mats) {
+    if (mat && 'vertexColors' in mat && !mat.vertexColors) {
+      mat.vertexColors = true
+      mat.needsUpdate = true
+    }
+  }
+}
+
 const recolorAllPoints = () => {
   pointcloudScene?.traverse?.((obj: any) => {
-    if (obj?.isPoints && obj.geometry) recolorGeometry(obj.geometry)
+    if (obj?.isPoints && obj.geometry) {
+      recolorGeometry(obj.geometry)
+      ensureMaterialVertexColors(obj)
+    }
   })
 }
 
@@ -3205,10 +3277,16 @@ defineExpose({
   setColorMode,
   getColorRange: () =>
     [pointIntensityMin, pointIntensityMax] as [number, number],
+  getIntensityDomain: () =>
+    [pointIntensityDomainMin, pointIntensityDomainMax] as [number, number],
   isColorAttributeAvailable: () => pointHasIntensity || pointHasClass,
   getColorAvailability: () => ({
-    intensity: pointHasIntensity,
-    tableClass: pointHasClass,
+    sourceAvailable: pointHasIntensity || pointHasClass,
+    // 全 0 / 常量强度无法着色，视为不可用，避免出现空白色轴
+    intensity:
+      pointHasIntensity &&
+      pointIntensityDomainMax - pointIntensityDomainMin > 1e-6,
+    tableClass: pointHasClass && pointClassHasVariation,
   }),
   getIntensityHistogram,
   requestRender,

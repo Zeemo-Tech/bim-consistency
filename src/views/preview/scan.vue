@@ -316,67 +316,6 @@
             </div>
           </el-popover>
         </el-tooltip>
-        <el-tooltip
-          v-if="trajectoryPoints.length"
-          :content="
-            trajectoryClickMode === 'panorama'
-              ? '点击轨迹点：打开全景图'
-              : '点击轨迹点：切换视角'
-          "
-          placement="bottom"
-          :show-after="150"
-        >
-          <el-popover
-            placement="bottom-end"
-            :width="220"
-            trigger="click"
-            popper-class="pc-popover"
-          >
-            <template #reference>
-              <button
-                class="pc-icon-btn"
-                :class="{ 'is-active': trajectoryClickMode === 'view' }"
-                :aria-pressed="trajectoryClickMode === 'view'"
-                type="button"
-                aria-label="轨迹点点击行为"
-              >
-                <el-icon><Compass /></el-icon>
-              </button>
-            </template>
-            <div class="pc-pop">
-              <div class="pc-pop-title">点击轨迹点</div>
-              <div class="pc-pop-seg">
-                <button
-                  type="button"
-                  :class="{ on: trajectoryClickMode === 'panorama' }"
-                  :aria-pressed="trajectoryClickMode === 'panorama'"
-                  :disabled="!attachIncludePanorama"
-                  :title="
-                    attachIncludePanorama ? '打开全景图' : '该点云未包含全景图'
-                  "
-                  @click="trajectoryClickMode = 'panorama'"
-                >
-                  打开全景图
-                </button>
-                <button
-                  type="button"
-                  :class="{ on: trajectoryClickMode === 'view' }"
-                  :aria-pressed="trajectoryClickMode === 'view'"
-                  @click="trajectoryClickMode = 'view'"
-                >
-                  切换视角
-                </button>
-              </div>
-              <p class="pc-pop-hint">
-                {{
-                  attachIncludePanorama
-                    ? '选择点击圆形轨迹点时的默认动作'
-                    : '该点云未包含全景图，点击轨迹点仅切换视角'
-                }}
-              </p>
-            </div>
-          </el-popover>
-        </el-tooltip>
         <el-tooltip content="重置视角" placement="bottom" :show-after="150">
           <button
             class="pc-icon-btn"
@@ -432,44 +371,6 @@
             @click="toggleLayer('pointcloud')"
           >
             <span class="pc-icon-glyph" :style="glyph(ICON_URL.pointcloud)" />
-          </button>
-        </el-tooltip>
-        <el-tooltip
-          v-if="attachIncludeGaussian"
-          :content="
-            isLastVisibleLayer('gaussian') ? '至少保留一个图层可见' : '高斯'
-          "
-          placement="bottom"
-          :show-after="150"
-        >
-          <button
-            class="pc-icon-btn"
-            :class="{ 'is-active': gaussianVisible }"
-            :aria-pressed="gaussianVisible"
-            type="button"
-            aria-label="高斯"
-            @click="toggleLayer('gaussian')"
-          >
-            <span class="pc-icon-glyph" :style="glyph(ICON_URL.gauss)" />
-          </button>
-        </el-tooltip>
-        <el-tooltip
-          v-if="trajectoryPoints.length"
-          :content="
-            isLastVisibleLayer('trajectory') ? '至少保留一个图层可见' : '轨迹'
-          "
-          placement="bottom"
-          :show-after="150"
-        >
-          <button
-            class="pc-icon-btn"
-            :class="{ 'is-active': trajectoryVisible }"
-            :aria-pressed="trajectoryVisible"
-            type="button"
-            aria-label="轨迹"
-            @click="toggleLayer('trajectory')"
-          >
-            <span class="pc-icon-glyph" :style="glyph(ICON_URL.trajectory)" />
           </button>
         </el-tooltip>
       </div>
@@ -601,50 +502,16 @@
         @home="resetView"
       />
 
-      <!-- 强度颜色轴：直方图 + 色带（对齐 cloudBIM-viewer）-->
-      <div
-        v-if="colorMode === 'intensity'"
-        class="pc-int-axis"
-        role="group"
-        aria-label="强度颜色轴"
-      >
-        <button
-          type="button"
-          class="pc-int-axis__reset"
-          title="重置强度范围"
-          aria-label="重置强度范围"
-          @click="refreshColorAvailability"
-        >
-          <el-icon><RefreshLeft /></el-icon>
-        </button>
-        <div class="pc-int-axis__body">
-          <div class="pc-int-axis__hist">
-            <svg
-              viewBox="0 0 100 100"
-              preserveAspectRatio="none"
-              aria-hidden="true"
-            >
-              <path
-                v-if="histogramPath"
-                :d="histogramPath"
-                class="pc-int-axis__area"
-              />
-            </svg>
-            <span class="pc-int-axis__pct">%</span>
-          </div>
-          <div class="pc-int-axis__barrow">
-            <span class="pc-int-axis__label">
-              {{ colorRangeLabel(colorRange[0]) }}
-            </span>
-            <div
-              class="pc-int-axis__bar"
-              :style="{ background: colorRampGradient }"
-            />
-            <span class="pc-int-axis__label">
-              {{ colorRangeLabel(colorRange[1]) }}
-            </span>
-          </div>
-        </div>
+      <!-- 强度颜色轴：直方图 + 色带 + 可拖拽区间（对齐实测预览底部颜色轴）-->
+      <div v-if="colorMode === 'intensity'" class="pc-int-axis-wrap">
+        <IntensityRangeBar
+          orientation="horizontal"
+          :ramp="colorRamp"
+          :range="normalizedColorRange"
+          :histogram="intensityHistogram"
+          :disabled="!colorHasIntensity"
+          @update:range="onIntensityRangeChange"
+        />
       </div>
 
       <div v-if="measureDraftHint" class="pc-measure-hint">
@@ -880,7 +747,6 @@ import {
   ArrowUp,
   Camera,
   Close,
-  Compass,
   Delete,
   FullScreen,
   RefreshLeft,
@@ -890,6 +756,7 @@ import {
 } from '@element-plus/icons-vue'
 import PanoramaViewPanel from '@/views/result/components/PanoramaViewPanel.vue'
 import ScanGaussTrajectoryOverlay from './components/ScanGaussTrajectoryOverlay.vue'
+import IntensityRangeBar from './components/IntensityRangeBar.vue'
 import { getProjectFilesByProjectId, getGaussAssetUrl } from '@/api/fileManage'
 import { getScanPreview, type TrajectoryPoint } from '@/api/calibration'
 import { getScanCalibration } from '@/api/scan'
@@ -1112,15 +979,15 @@ const colorRange = ref<[number, number]>([0, 1])
 const colorHasIntensity = ref(false)
 const colorHasClass = ref(false)
 const intensityHistogram = ref<number[]>([])
-const histogramPath = computed(() => {
-  const bins = intensityHistogram.value
-  if (bins.length < 2) return ''
-  const n = bins.length
-  const points = bins.map(
-    (value, index) =>
-      `${((index / (n - 1)) * 100).toFixed(2)},${(100 - value * 100).toFixed(2)}`,
-  )
-  return `M0,100 L${points.join(' L')} L100,100 Z`
+// 强度原始全域（由渲染器提供），颜色轴按 0..1 归一化映射到该全域
+const colorDomain = ref<[number, number]>([0, 1])
+const normalizedColorRange = computed<{ min: number; max: number }>(() => {
+  const [d0, d1] = colorDomain.value
+  const span = d1 - d0 || 1
+  return {
+    min: (colorRange.value[0] - d0) / span,
+    max: (colorRange.value[1] - d0) / span,
+  }
 })
 const RAMP_LABELS: Array<{ key: ScanColorRamp; label: string }> = [
   { key: 'grayscale', label: '灰度' },
@@ -1150,71 +1017,6 @@ const colorModeControls = computed<
     title: colorHasClass.value ? '点云分类' : '该点云不含分类属性',
   },
 ])
-
-// 与 PointCloudViewer 里点云实际使用的色带保持完全一致的取色
-const RAMP_VIRIDIS_STOPS: Array<[number, number, number]> = [
-  [68, 1, 84],
-  [49, 104, 142],
-  [53, 183, 121],
-  [253, 231, 37],
-]
-const rampColorCss = (
-  ramp: ScanColorRamp,
-  t: number,
-): [number, number, number] => {
-  const x = Math.min(1, Math.max(0, t))
-  if (ramp === 'grayscale') {
-    const v = Math.round(x * 255)
-    return [v, v, v]
-  }
-  if (ramp === 'viridis') {
-    const segment = Math.min(2, Math.floor(x * 3))
-    const local = x * 3 - segment
-    const a = RAMP_VIRIDIS_STOPS[segment]
-    const b = RAMP_VIRIDIS_STOPS[segment + 1]
-    return [
-      Math.round(a[0] + (b[0] - a[0]) * local),
-      Math.round(a[1] + (b[1] - a[1]) * local),
-      Math.round(a[2] + (b[2] - a[2]) * local),
-    ]
-  }
-  // spectrum / 彩虹：蓝(低) → 青 → 绿 → 黄 → 红(高)
-  const hue = (1 - x) * 240
-  const hh = hue / 60
-  const xx = 1 - Math.abs((hh % 2) - 1)
-  let r = 0
-  let g = 0
-  let b = 0
-  if (hh < 1) {
-    r = 1
-    g = xx
-  } else if (hh < 2) {
-    r = xx
-    g = 1
-  } else if (hh < 3) {
-    g = 1
-    b = xx
-  } else if (hh < 4) {
-    g = xx
-    b = 1
-  } else {
-    r = xx
-    b = 1
-  }
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)]
-}
-const colorRampGradient = computed(() => {
-  const steps = 16
-  const stops: string[] = []
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps
-    const [r, g, b] = rampColorCss(colorRamp.value, t)
-    stops.push(`rgb(${r}, ${g}, ${b}) ${(t * 100).toFixed(1)}%`)
-  }
-  return `linear-gradient(90deg, ${stops.join(', ')})`
-})
-const colorRangeLabel = (value: number) =>
-  Number.isFinite(value) ? value.toFixed(Math.abs(value) >= 100 ? 0 : 1) : '—'
 
 // 测量工具
 type AnalysisMode = 'none' | 'distance' | 'locate' | 'area'
@@ -2563,12 +2365,14 @@ async function loadScanAttachViews() {
         })
       }
     }
-    // 轨迹/控制点与「是否勾选全景图」解耦：只要接口返回轨迹就加载，
-    // 用于点云里显示圆形控制点、点击切视角、以及作为默认视角。
+    // 轨迹随「全景图（随轨迹）」勾选：未勾选则不加载/不显示轨迹，
+    // 避免未关联全景图的点云仍出现轨迹线。
     const preview = await getScanPreview(projectId.value, fileId.value).catch(
       () => null,
     )
-    trajectoryPoints.value = preview?.data?.trajectory?.points ?? []
+    trajectoryPoints.value = attachIncludePanorama.value
+      ? (preview?.data?.trajectory?.points ?? [])
+      : []
     attachViewsLoaded.value = true
     retryOverlayGaussian()
     applyInitialView()
@@ -3246,12 +3050,31 @@ const applyColorMode = () => {
   )
 }
 
+/** 颜色轴拖拽：归一化区间 → 绝对强度区间 → 重新着色 */
+const onIntensityRangeChange = (range: { min: number; max: number }) => {
+  const [d0, d1] = colorDomain.value
+  const span = d1 - d0 || 1
+  colorRange.value = [d0 + range.min * span, d0 + range.max * span]
+  applyColorMode()
+}
+
 /** 刷新“强度/台面分色”是否可用（依赖 tiles 的 INTENSITY/CLASSIFICATION 属性） */
 const refreshColorAvailability = () => {
   const viewer = pointcloudViewerRef.value
   const availability = viewer?.getColorAvailability?.()
   colorHasIntensity.value = availability?.intensity ?? false
   colorHasClass.value = availability?.tableClass ?? false
+  // 当前模式变得不可用（如强度全为 0）时退回真彩，避免空白色轴
+  if (colorMode.value === 'intensity' && !colorHasIntensity.value) {
+    colorMode.value = 'rgb'
+  }
+  if (colorMode.value === 'table-class' && !colorHasClass.value) {
+    colorMode.value = 'rgb'
+  }
+  const domain = viewer?.getIntensityDomain?.()
+  if (domain && Number.isFinite(domain[0]) && Number.isFinite(domain[1])) {
+    colorDomain.value = domain
+  }
   const range = viewer?.getColorRange?.()
   if (range && Number.isFinite(range[0]) && Number.isFinite(range[1])) {
     colorRange.value = range
@@ -3573,8 +3396,7 @@ onBeforeUnmount(() => {
 .pc-clip-bar button:focus-visible,
 .pc-clip-bar input:focus-visible,
 .pc-panorama-close:focus-visible,
-.pc-panorama-nav:focus-visible,
-.pc-int-axis__reset:focus-visible {
+.pc-panorama-nav:focus-visible {
   outline: 2px solid #6b83ff;
   outline-offset: 2px;
 }
@@ -3711,95 +3533,13 @@ onBeforeUnmount(() => {
   z-index: 60;
 }
 
-/* 底部强度颜色轴：直方图 + 色带（对齐 cloudBIM-viewer） */
-.pc-int-axis {
+/* 底部强度颜色轴：直方图 + 色带 + 可拖拽区间（组件自带样式） */
+.pc-int-axis-wrap {
   position: absolute;
   right: 20px;
   bottom: 14px;
   left: 176px;
   z-index: 26;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 8px 12px;
-  background: rgb(22 25 32 / 82%);
-  border: 1px solid rgb(255 255 255 / 10%);
-  border-radius: 12px;
-  backdrop-filter: blur(8px);
-}
-
-.pc-int-axis__reset {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  color: rgb(255 255 255 / 72%);
-  cursor: pointer;
-  background: rgb(255 255 255 / 8%);
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 6px;
-}
-
-.pc-int-axis__reset:hover {
-  color: #fff;
-  background: rgb(255 255 255 / 16%);
-}
-
-.pc-int-axis__body {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.pc-int-axis__hist {
-  position: relative;
-  height: 22px;
-}
-
-.pc-int-axis__hist svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.pc-int-axis__area {
-  fill: rgb(255 255 255 / 42%);
-  stroke: rgb(255 255 255 / 75%);
-  stroke-width: 0.6;
-  vector-effect: non-scaling-stroke;
-}
-
-.pc-int-axis__pct {
-  position: absolute;
-  top: -3px;
-  right: 0;
-  font-size: var(--font-size-xs);
-  color: rgb(255 255 255 / 55%);
-}
-
-.pc-int-axis__barrow {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.pc-int-axis__bar {
-  flex: 1;
-  height: 14px;
-  border-radius: 3px;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
-}
-
-.pc-int-axis__label {
-  min-width: 34px;
-  font-size: var(--font-size-xs);
-  font-variant-numeric: tabular-nums;
-  color: rgb(255 255 255 / 82%);
-  text-align: center;
 }
 
 /* 测量绘制中的即时提示 */
