@@ -447,7 +447,9 @@ const handleUploadError = (error: any): Error => {
       responseData?.msg ||
       responseData?.message ||
       '文件信息有误，请检查文件格式',
-    409: '该文件已存在或正在上传中，请检查文件列表或稍后重试',
+    409:
+      responseData?.msg ||
+      '该文件已存在或正在上传中，请检查文件列表或稍后重试',
     413: '文件大小超出限制，请选择较小的文件',
   }
 

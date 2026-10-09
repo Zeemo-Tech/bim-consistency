@@ -138,6 +138,11 @@
               : '请选择楼栋以匹配设计模型（BIM）'
           }}
         </div>
+        <div v-if="duplicateScan" class="match-status is-error" role="alert">
+          该幢该层已存在扫描点云（{{
+            duplicateScan.originalName
+          }}），请勿重复上传
+        </div>
       </section>
 
       <section class="archive-form device-section">
@@ -218,7 +223,7 @@
           class="submit-btn"
           type="button"
           :aria-label="uploading ? '正在上传' : '开始上传'"
-          :disabled="!selectedFile || uploading"
+          :disabled="!selectedFile || uploading || Boolean(duplicateScan)"
           @click="submit"
         >
           <el-icon :class="{ 'is-loading': uploading }">
@@ -270,6 +275,8 @@ const uploading = ref(false)
 const progress = ref(0)
 const designModels = ref<ProjectFileInfo[]>([])
 const designLoading = ref(false)
+// 项目内已存在的扫描点云，用于「同幢同层」重复校验
+const existingScans = ref<ProjectFileInfo[]>([])
 const devices = ref<Device[]>([])
 const deviceLoading = ref(false)
 
@@ -320,6 +327,7 @@ function uniqueSorted(values: Array<string | undefined>) {
 }
 
 const normalizedBuildingName = computed(() => archivePart(form.buildingName))
+const normalizedFloorName = computed(() => archivePart(form.floorName))
 // 点云↔BIM 按「幢」匹配：候选幢来自项目内已就绪的 BIM。
 const buildings = computed(() =>
   uniqueSorted(
@@ -332,6 +340,17 @@ const matchingDesign = computed(
       (item) => archivePart(item.buildingName) === normalizedBuildingName.value,
     ) || null,
 )
+// 同幢同层已存在点云：填好幢+层即时判定，禁止重复上传
+const duplicateScan = computed(() => {
+  if (!normalizedBuildingName.value || !normalizedFloorName.value) return null
+  return (
+    existingScans.value.find(
+      (file) =>
+        archivePart(file.buildingName) === normalizedBuildingName.value &&
+        archivePart(file.floorName) === normalizedFloorName.value,
+    ) || null
+  )
+})
 const archiveCode = computed(() =>
   buildArchiveCode(form.floorName, form.componentType, form.archiveSerial),
 )
@@ -365,8 +384,11 @@ async function loadDesignModels(projectId: number) {
     designModels.value = bims.filter(
       (file) => file.status === 'stored' && archivePart(file.buildingName),
     )
+    existingScans.value =
+      groups.find((group) => group.type === 'scan')?.files || []
   } catch {
     designModels.value = []
+    existingScans.value = []
   } finally {
     designLoading.value = false
   }
@@ -432,6 +454,10 @@ async function submit() {
   }
   if (!matchingDesign.value) {
     ElMessage.warning('当前幢没有匹配的设计模型（BIM），请先上传该幢的设计模型')
+    return
+  }
+  if (duplicateScan.value) {
+    ElMessage.warning('该幢该层已存在扫描点云，请勿重复上传')
     return
   }
 
@@ -664,6 +690,11 @@ function formatFileSize(size: number) {
     color: var(--color-success);
     background: var(--color-success-soft);
   }
+
+  &.is-error {
+    color: var(--color-danger);
+    background: var(--color-danger-soft);
+  }
 }
 
 .device-section {
@@ -701,7 +732,7 @@ function formatFileSize(size: number) {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding-top: 16px;;
+  padding-top: 16px;
 
   > span {
     color: var(--text-secondary);
