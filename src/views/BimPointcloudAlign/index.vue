@@ -1346,6 +1346,10 @@ import { PLYLoader } from 'three/addons/loaders/PLYLoader.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import Stats from 'three/addons/libs/stats.module.js'
 import {
+  ClipBoxController,
+  type OrientedClipPercentBounds,
+} from '@/utils/three/clip/clipBoxController'
+import {
   ClippingGroup,
   MeshBasicNodeMaterial,
   MeshLambertNodeMaterial,
@@ -4562,6 +4566,7 @@ function updateLoadedFlags() {
   ) {
     enableClipping.value = false
     applyClippingState()
+    setClipEnabled(false)
   }
 }
 
@@ -4875,82 +4880,8 @@ function buildClipHandles(box: THREE.Box3, itemId: string) {
 function updateBoundsHelpers() {
   if (!scene || !contentGroup) return
   updateGridPlacement()
+  // 旧版轴对齐剖切盒/箭头已由朝向 gizmo 取代。
   clearBoundsHelpers()
-  if (!showBounds.value) return
-
-  const activeId = resolveClipTargetId(activeClipTargetId)
-  if (enableClipping.value && isJointClipTargetId(activeId)) {
-    const helperBox = getCurrentClipBox(activeId)
-    if (helperBox && !helperBox.isEmpty()) {
-      const helper = new THREE.Box3Helper(
-        helperBox.clone(),
-        new THREE.Color('#ffcf4a'),
-      )
-      helper.renderOrder = 9999
-      ;(helper.material as any).depthTest = false
-      helper.userData = helper.userData ?? {}
-      helper.userData.__viewerBoundsHelper = true
-      helper.userData.__viewerItemId = activeId
-      boundHelpers.push(helper)
-      boundHelperEntries.push({
-        itemId: activeId,
-        target: contentGroup,
-        boxHelper: helper,
-        box: helperBox.clone(),
-      })
-      scene.add(helper)
-
-      clipHandlesGroup = buildClipHandles(helperBox, activeId)
-      boundHelpers.push(clipHandlesGroup)
-      scene.add(clipHandlesGroup)
-    }
-    requestRender()
-    return
-  }
-
-  const addHelperFor = (obj: any) => {
-    const itemId = String(obj?.userData?.__viewerItemId ?? '')
-    const helperBox =
-      enableClipping.value && itemId === activeId
-        ? getCurrentClipBox(itemId)
-        : getObjectWorldBox(obj)
-    if (!helperBox || helperBox.isEmpty()) return
-    const helperColor =
-      itemId && itemId === activeId
-        ? new THREE.Color('#ffcf4a')
-        : new THREE.Color('#7ed2ff')
-    const helper = new THREE.Box3Helper(helperBox.clone(), helperColor)
-    helper.renderOrder = 9999
-    ;(helper.material as any).depthTest = false
-    helper.userData = helper.userData ?? {}
-    helper.userData.__viewerBoundsHelper = true
-    helper.userData.__viewerItemId = itemId
-    boundHelpers.push(helper)
-    if (itemId) {
-      boundHelperEntries.push({
-        itemId,
-        target: obj,
-        boxHelper: helper,
-        box: helperBox.clone(),
-      })
-    }
-    scene.add(helper)
-  }
-
-  for (const root of loadedRoots) addHelperFor(root)
-  for (const entry of loadedTilesets) addHelperFor(entry.wrapper)
-
-  if (enableClipping.value && activeId) {
-    const activeEntry = boundHelperEntries.find(
-      (entry) => entry.itemId === activeId,
-    )
-    if (activeEntry) {
-      clipHandlesGroup = buildClipHandles(activeEntry.box, activeId)
-      boundHelpers.push(clipHandlesGroup)
-      scene.add(clipHandlesGroup)
-    }
-  }
-  requestRender()
 }
 
 /** 作用：清空当前场景中的所有加载内容、索引与交互状态（不销毁 renderer/camera）。 */
@@ -6703,61 +6634,69 @@ function updateClipRangeFromContent(
 }
 
 /** 作用：把 UI 中的剖切配置同步到 WebGPU ClippingGroup。 */
-function applyClippingState() {
-  if (!contentGroup) return
+// ==================== 朝向剖切盒（gizmo） ====================
+let clipController: ClipBoxController | null = null
+let clipEnabledRequested = false
+const orientedClipBounds = ref<OrientedClipPercentBounds>({
+  x: [0, 100],
+  y: [0, 100],
+  z: [0, 100],
+})
 
-  clippingGroup.enabled = false
-  const rootPlanes = clippingGroup.clippingPlanes as any
-  if (Array.isArray(rootPlanes)) rootPlanes.length = 0
+const applyOrientedClipPlanes = (planes: THREE.Plane[]) => {
+  if (!clippingGroup) return
+  clippingGroup.enabled = planes.length > 0
+  const arr = clippingGroup.clippingPlanes as any
+  if (Array.isArray(arr)) arr.length = 0
   else clippingGroup.clippingPlanes = []
-
-  const enabled =
-    !!enableClipping.value &&
-    !!hasModel.value &&
-    !!showBounds.value &&
-    !!resolveClipTargetId(activeClipTargetId)
-
-  if (!enabled) {
-    for (const { host } of clipHostByItemId.values()) {
-      host.enabled = false
-      const planes = host.clippingPlanes as any
-      if (Array.isArray(planes)) planes.length = 0
-      else host.clippingPlanes = []
-    }
-    requestRender()
-    return
+  if (planes.length) {
+    clippingGroup.clippingPlanes.push(...planes.map((plane) => plane.clone()))
   }
+}
 
-  const activeId = resolveClipTargetId(activeClipTargetId)
-  activeClipTargetId = activeId
-  const activeBox = getCurrentClipBox(activeId)
+const ensureClipController = () => {
+  if (clipController) return clipController
+  if (!scene) return null
+  clipController = new ClipBoxController({
+    scene,
+    getCamera: () => camera,
+    getDomElement: () => renderer?.domElement ?? null,
+    getRoots: () =>
+      contentGroup
+        ? [{ root: contentGroup, includeInvisible: true as const }]
+        : [],
+    applyPlanes: (planes) => {
+      applyOrientedClipPlanes(planes)
+      requestRender()
+    },
+    requestRender,
+    setControlsEnabled: (enabled) => {
+      if (controls) controls.enabled = enabled
+    },
+    onChange: (bounds) => {
+      orientedClipBounds.value = bounds
+    },
+  })
+  clipController.attach()
+  if (clipEnabledRequested) clipController.setEnabled(true)
+  return clipController
+}
 
-  for (const [itemId, entry] of clipHostByItemId.entries()) {
-    const host = entry.host
-    const planes = host.clippingPlanes as any
-    if (Array.isArray(planes)) planes.length = 0
-    else host.clippingPlanes = []
+const setClipEnabled = (enabled: boolean) => {
+  clipEnabledRequested = enabled
+  const controller = ensureClipController()
+  if (!controller) return
+  controller.setEnabled(enabled)
+  requestRender()
+}
 
-    if (!isJointClipTargetId(activeId) && itemId !== activeId) {
-      host.enabled = false
-      continue
-    }
+const resetOrientedClip = () => {
+  clipController?.reset()
+  requestRender()
+}
 
-    if (!activeBox) {
-      host.enabled = false
-      continue
-    }
-
-    host.enabled = true
-    host.clippingPlanes.push(
-      new THREE.Plane(new THREE.Vector3(1, 0, 0), -activeBox.min.x),
-      new THREE.Plane(new THREE.Vector3(-1, 0, 0), activeBox.max.x),
-      new THREE.Plane(new THREE.Vector3(0, 1, 0), -activeBox.min.y),
-      new THREE.Plane(new THREE.Vector3(0, -1, 0), activeBox.max.y),
-      new THREE.Plane(new THREE.Vector3(0, 0, 1), -activeBox.min.z),
-      new THREE.Plane(new THREE.Vector3(0, 0, -1), activeBox.max.z),
-    )
-  }
+function applyClippingState() {
+  // 裁切改由 ClipBoxController 通过 applyOrientedClipPlanes 应用。
   requestRender()
 }
 
@@ -6814,18 +6753,11 @@ function onShowBoundsChange() {
         onEditModeChange()
       }
       enableClipping.value = true
-      activeClipTargetId = resolveClipTargetId(activeClipTargetId)
-      if (activeClipTargetId) {
-        getOrCreateClipState(activeClipTargetId)
-        syncClipUiFromFace(activeClipTargetId)
-      }
     }
   } else if (enableClipping.value) {
     enableClipping.value = false
-    applyClippingState()
   }
-  updateBoundsHelpers()
-  applyClippingState()
+  setClipEnabled(showBounds.value && enableClipping.value)
 }
 
 /** 作用：网格显示开关变化时控制网格可见性。 */
@@ -7237,6 +7169,7 @@ function renderFrame() {
     }
   }
   updateMeasurementBadgePositions()
+  clipController?.update()
   if (gridHelper?.visible) gridHelper.updateForCamera?.(camera)
   if (
     edlEnabled.value &&
@@ -7883,6 +7816,8 @@ onBeforeUnmount(() => {
   scene = null
   renderer = null
   stats = null
+  clipController?.dispose()
+  clipController = null
   contentGroup = null
   transformControls = null
   rotationControls = null
