@@ -3,26 +3,8 @@
     ref="containerEl"
     class="BimPointcloudAlign-container calibration-page cb-shell"
   >
-    <!-- 顶部工具栏 -->
+    <!-- 顶部工具栏：仅保留步骤条 -->
     <div class="topbar calibration-header">
-      <div class="topbar-left title-block">
-        <el-button
-          text
-          :icon="ArrowLeft"
-          aria-label="返回扫描点云"
-          title="返回扫描点云"
-          @click="handleBackToCalibration"
-        />
-        <div class="alignment-title-context">
-          <h1 class="brand-title">
-            {{ activeWorkflowStepMeta.title }}
-          </h1>
-          <span class="alignment-file-context" :title="titleBlockSubtitle">
-            {{ titleBlockSubtitle }}
-          </span>
-        </div>
-      </div>
-
       <nav class="alignment-workflow-nav" aria-label="BIM 与点云分析流程">
         <div class="alignment-workflow-track">
           <button
@@ -45,37 +27,11 @@
             </span>
             <span class="alignment-workflow-step__copy">
               <strong>{{ step.title }}</strong>
-              <small>{{ step.subtitle }}</small>
+              <div style="font-size: 10px">{{ step.subtitle }}</div>
             </span>
           </button>
         </div>
       </nav>
-
-      <div class="topbar-right header-actions">
-        <el-button
-          v-if="activeWorkflowStep === 1"
-          :disabled="!projectId || !scanFileId || !bimFileId"
-          :loading="loadingAlignmentMatrixDialog"
-          @click="handleShowAlignmentMatrix"
-        >
-          校准矩阵
-        </el-button>
-        <el-tooltip
-          v-if="activeWorkflowStep === 1"
-          :content="saveCalibrationTooltip"
-          :disabled="!saveCalibrationTooltip"
-          placement="bottom"
-        >
-          <el-button
-            type="primary"
-            :disabled="!canSaveCalibration"
-            :loading="savingCalibration"
-            @click="handleCalibrationComplete"
-          >
-            校准完成
-          </el-button>
-        </el-tooltip>
-      </div>
     </div>
 
     <div
@@ -1112,7 +1068,7 @@
                     <input
                       class="axis-number-input"
                       aria-label="X 轴位移，单位米"
-                      :value="positionOffsetX"
+                      :value="formatPositionOffset(positionOffsetX)"
                       type="number"
                       inputmode="decimal"
                       :step="positionAdjustStep"
@@ -1142,7 +1098,7 @@
                     <input
                       class="axis-number-input"
                       aria-label="Y 轴位移，单位米"
-                      :value="positionOffsetY"
+                      :value="formatPositionOffset(positionOffsetY)"
                       type="number"
                       inputmode="decimal"
                       :step="positionAdjustStep"
@@ -1172,7 +1128,7 @@
                     <input
                       class="axis-number-input"
                       aria-label="Z 轴位移，单位米"
-                      :value="positionOffsetZ"
+                      :value="formatPositionOffset(positionOffsetZ)"
                       type="number"
                       inputmode="decimal"
                       :step="positionAdjustStep"
@@ -1355,7 +1311,6 @@ import {
 } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowLeft,
   DArrowLeft,
   DArrowRight,
   Hide,
@@ -1437,8 +1392,6 @@ const CadCalibrationView = defineAsyncComponent({
   loadingComponent: CadCalibrationLoading,
   delay: 0,
 })
-
-const CALIBRATION_RETURN_KEY = 'calibration:return'
 
 const router = useRouter()
 const route = useRoute()
@@ -1734,53 +1687,6 @@ const handleShowAlignmentMatrix = async () => {
   } finally {
     loadingAlignmentMatrixDialog.value = false
   }
-}
-
-const handleBackToCalibration = async () => {
-  const returnTo = getQueryString('returnTo')
-  const scanId = getQueryString('scanId')
-  const title = getQueryString('title')
-  const date = getQueryString('date')
-  const uploader = getQueryString('uploader')
-  const bimId = getQueryString('bimId')
-  const bimName = getQueryString('bimName')
-  const cadId = getQueryString('cadId')
-  const cadName = getQueryString('cadName')
-  const pointCloudName = getQueryString('pointCloudName')
-  const gaussId = getQueryString('gaussId')
-  const gaussName = getQueryString('gaussName')
-  const gaussAssetPath = getQueryString('gaussAssetPath')
-  const projectIdParam = getQueryString('projectId')
-  const projectNameParam = getQueryString('projectName')
-
-  if (scanId) {
-    sessionStorage.setItem(
-      CALIBRATION_RETURN_KEY,
-      JSON.stringify({
-        step: 'bim',
-        scanId,
-        title,
-        date,
-        uploader,
-        projectId: projectIdParam,
-        projectName: projectNameParam,
-        bimId,
-        bimName,
-        cadId,
-        cadName,
-        gaussId,
-        gaussName,
-        gaussAssetPath,
-        pointCloudName,
-      }),
-    )
-  }
-
-  if (returnTo) {
-    await router.push(returnTo)
-    return
-  }
-  router.back()
 }
 
 function clearLoadedGltf() {
@@ -2634,15 +2540,6 @@ const activeWorkflowStep = ref<WorkflowStepId>(
     ? (requestedWorkflowStep as WorkflowStepId)
     : 1,
 )
-const activeWorkflowStepMeta = computed(
-  () =>
-    workflowSteps.find((step) => step.id === activeWorkflowStep.value) ||
-    workflowSteps[0],
-)
-const titleBlockSubtitle = computed(
-  () =>
-    `${activeWorkflowStepMeta.value.subtitle} · ${pointCloudNameForDisplay.value}`,
-)
 /** 偏差对比 / CAD校准 / 出报告步骤需已完成并保存粗配准。 */
 const canOpenDeviationStep = computed(
   () =>
@@ -3300,15 +3197,6 @@ const canSaveCalibration = computed(() => {
   if (!hasModel.value || !hasTileset.value) return false
   if (registrationStage.value === 'fine') return canSaveFineAlignment.value
   return true
-})
-
-/** 顶部"校准完成"按钮被禁用时显示的 tooltip 提示。 */
-const saveCalibrationTooltip = computed(() => {
-  if (!hasModel.value || !hasTileset.value) return ''
-  if (registrationStage.value === 'fine' && !fineAlignResult.value) {
-    return fineRunBlockedReason.value || '请先点击「开始计算」完成精细化配准'
-  }
-  return ''
 })
 
 function markFineAlignmentDirty() {
