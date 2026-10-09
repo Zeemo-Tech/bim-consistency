@@ -1,7 +1,4 @@
 import * as THREE from 'three'
-import { Line2 } from 'three/examples/jsm/lines/Line2.js'
-import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
-import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 
 export type ClipAxis = 'x' | 'y' | 'z'
 export type ClipSide = 0 | 1
@@ -20,8 +17,9 @@ interface EdgeEntry {
   axis: ClipAxis
   sides: ClipSide[]
   picker: THREE.Mesh
-  line: Line2
-  outline: Line2
+  mesh: THREE.Mesh
+  material: THREE.MeshBasicMaterial
+  length: number
 }
 
 const EDGE_COLOR = 0x80bcc4
@@ -169,39 +167,24 @@ export class ClipBoxGizmo {
             new THREE.BoxGeometry(1, 1, 1),
             pickerMaterial,
           )
-          const geometry = new LineGeometry()
-          geometry.setPositions([0, 0, 0, 0, 0, 0])
-          const line = new Line2(
-            geometry,
-            new LineMaterial({
-              color: EDGE_COLOR,
-              linewidth: 2.2,
-              transparent: true,
-              opacity: 1,
-              depthTest: false,
-              depthWrite: false,
-            }),
-          )
-          const outline = new Line2(
-            geometry,
-            new LineMaterial({
-              color: 0x142b31,
-              linewidth: 4.2,
-              transparent: true,
-              opacity: 1,
-              depthTest: false,
-              depthWrite: false,
-            }),
-          )
-          outline.renderOrder = 9997
-          line.renderOrder = 9998
-          this.group.add(picker, outline, line)
+          // 用细长 Box 代替 Line2，兼容 WebGL 与 WebGPU 渲染器。
+          const material = new THREE.MeshBasicMaterial({
+            color: EDGE_COLOR,
+            transparent: true,
+            opacity: 1,
+            depthTest: false,
+            depthWrite: false,
+          })
+          const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material)
+          mesh.renderOrder = 9998
+          this.group.add(picker, mesh)
           this.edges.push({
             axis,
             sides: [first, second],
             picker,
-            line,
-            outline,
+            mesh,
+            material,
+            length: 1,
           })
         }
       }
@@ -249,11 +232,13 @@ export class ClipBoxGizmo {
       })
       edge.picker.position.copy(start)
       edge.picker.userData.length = size[edge.axis]
-      const end = start.clone()
-      start[edge.axis] = bounds.min[edge.axis]
-      end[edge.axis] = bounds.max[edge.axis]
-      edge.line.geometry.setPositions([...start.toArray(), ...end.toArray()])
-      edge.line.computeLineDistances()
+      const length = Math.max(size[edge.axis], 1e-5)
+      edge.length = length
+      edge.mesh.position.copy(start)
+      edge.mesh.position[edge.axis] = center[edge.axis]
+      const thickness = Math.max(Math.max(size.x, size.y, size.z) * 0.004, 1e-4)
+      edge.mesh.scale.set(thickness, thickness, thickness)
+      edge.mesh.scale[edge.axis] = length
     }
     this.corners.forEach((corner, index) => {
       corner.position.set(
@@ -296,13 +281,7 @@ export class ClipBoxGizmo {
         ) > 0.995
       )
     })
-    const aspect =
-      camera instanceof THREE.PerspectiveCamera
-        ? camera.aspect
-        : (camera.right - camera.left) / (camera.top - camera.bottom)
     for (const edge of this.edges) {
-      edge.line.material.resolution.set(viewportHeight * aspect, viewportHeight)
-      edge.outline.material.resolution.copy(edge.line.material.resolution)
       const pixel = clipWorldUnitsPerPixel(
         camera,
         edge.picker.getWorldPosition(new THREE.Vector3()),
@@ -341,9 +320,8 @@ export class ClipBoxGizmo {
         (handle?.kind === 'face' &&
           edge.axis !== handle.axis &&
           edge.sides[faceAxes.indexOf(handle.axis)] === handle.side)
-      edge.line.material.color.setHex(selected ? ACTIVE_COLOR : EDGE_COLOR)
-      edge.line.material.linewidth = selected ? 3.2 : 2.2
-      edge.outline.material.linewidth = selected ? 5.2 : 4.2
+      edge.material.color.setHex(selected ? ACTIVE_COLOR : EDGE_COLOR)
+      edge.material.opacity = selected ? 1 : 0.85
     })
   }
 
