@@ -429,7 +429,7 @@
               </button>
             </div>
             <p v-if="bimControls.sectionEnabled" class="section-note">
-              拖拽模型外侧的 6 个方向箭头，调整剖切范围。
+              拖动盒面箭头改尺寸，拖边/角旋转，Esc 取消。
             </p>
           </section>
 
@@ -490,6 +490,11 @@ import PointcloudViewCube from './PointcloudViewCube.vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import {
+  ClipBoxController,
+  FULL_CLIP_BOUNDS,
+  type OrientedClipPercentBounds,
+} from '@/utils/three/clip/clipBoxController'
 import {
   MeshBasicNodeMaterial,
   MeshLambertNodeMaterial,
@@ -1176,68 +1181,75 @@ function buildClipHandles(box: THREE.Box3) {
 }
 
 function updateBoundsHelpers() {
+  // 旧版轴对齐剖切盒/箭头已由朝向 gizmo 取代：清理即可。
   if (!scene) return
   clearBoundsHelpers()
-  if (!showBounds.value) {
-    requestRender()
-    return
-  }
-
-  const helperBox =
-    clippingEnabled.value && hasModel.value
-      ? getCurrentClipBox()
-      : getContentWorldBox()
-  if (!helperBox || helperBox.isEmpty()) {
-    requestRender()
-    return
-  }
-
-  clipBoxHelper = new THREE.Box3Helper(
-    helperBox.clone(),
-    new THREE.Color('#ffcf4a'),
-  )
-  clipBoxHelper.renderOrder = 9999
-  ;(clipBoxHelper.material as any).depthTest = false
-  clipBoxHelper.userData = {
-    __viewerBoundsHelper: true,
-  }
-  scene.add(clipBoxHelper)
-
-  if (clippingEnabled.value) {
-    clipHandlesGroup = buildClipHandles(helperBox)
-    scene.add(clipHandlesGroup)
-  }
-  requestRender()
 }
 
 function applyClippingState() {
-  if (!clippingGroup) return
-
-  clippingGroup.enabled = false
-  const planes = clippingGroup.clippingPlanes as any
-  if (Array.isArray(planes)) planes.length = 0
-  else clippingGroup.clippingPlanes = []
-
-  const activeBox =
-    clippingEnabled.value && hasModel.value && showBounds.value
-      ? getCurrentClipBox()
-      : null
-  if (!activeBox) {
-    requestRender()
-    return
-  }
-
-  clippingGroup.enabled = true
-  clippingGroup.clippingPlanes.push(
-    new THREE.Plane(new THREE.Vector3(1, 0, 0), -activeBox.min.x),
-    new THREE.Plane(new THREE.Vector3(-1, 0, 0), activeBox.max.x),
-    new THREE.Plane(new THREE.Vector3(0, 1, 0), -activeBox.min.y),
-    new THREE.Plane(new THREE.Vector3(0, -1, 0), activeBox.max.y),
-    new THREE.Plane(new THREE.Vector3(0, 0, 1), -activeBox.min.z),
-    new THREE.Plane(new THREE.Vector3(0, 0, -1), activeBox.max.z),
-  )
+  // 裁切由 ClipBoxController 通过 applyOrientedClipPlanes 应用，这里只请求重绘。
   requestRender()
 }
+
+// ==================== 朝向剖切盒（gizmo） ====================
+let clipController: ClipBoxController | null = null
+let clipEnabledRequested = false
+const orientedClipBounds = ref<OrientedClipPercentBounds>({
+  x: [0, 100],
+  y: [0, 100],
+  z: [0, 100],
+})
+
+const applyOrientedClipPlanes = (planes: THREE.Plane[]) => {
+  if (!clippingGroup) return
+  clippingGroup.enabled = planes.length > 0
+  const arr = clippingGroup.clippingPlanes as any
+  if (Array.isArray(arr)) arr.length = 0
+  else clippingGroup.clippingPlanes = []
+  if (planes.length) {
+    clippingGroup.clippingPlanes.push(...planes.map((plane) => plane.clone()))
+  }
+}
+
+const ensureClipController = () => {
+  if (clipController) return clipController
+  if (!scene) return null
+  clipController = new ClipBoxController({
+    scene,
+    getCamera: () => camera,
+    getDomElement: () => renderer?.domElement ?? null,
+    getRoots: () =>
+      contentGroup ? [{ root: contentGroup, includeInvisible: true }] : [],
+    applyPlanes: (planes) => {
+      applyOrientedClipPlanes(planes)
+      requestRender()
+    },
+    requestRender,
+    setControlsEnabled: (enabled) => {
+      if (controls) controls.enabled = enabled
+    },
+    onChange: (bounds) => {
+      orientedClipBounds.value = bounds
+    },
+  })
+  clipController.attach()
+  if (clipEnabledRequested) clipController.setEnabled(true)
+  return clipController
+}
+
+const setClipEnabled = (enabled: boolean) => {
+  clipEnabledRequested = enabled
+  const controller = ensureClipController()
+  if (!controller) return
+  controller.setEnabled(enabled)
+  requestRender()
+}
+
+const resetOrientedClip = () => {
+  clipController?.reset()
+  requestRender()
+}
+
 
 function onShowBoundsChange() {
   if (showBounds.value) {
@@ -1246,12 +1258,10 @@ function onShowBoundsChange() {
       return
     }
     clippingEnabled.value = true
-    ensureClipState()
   } else {
     clippingEnabled.value = false
   }
-  updateBoundsHelpers()
-  applyClippingState()
+  setClipEnabled(showBounds.value)
 }
 
 function onBoundsButtonClick() {
@@ -2927,6 +2937,7 @@ function renderFrame() {
   if (!renderer || !scene || !camera) return
   controls?.update?.()
   camera.updateMatrixWorld?.()
+  clipController?.update()
   if (gridHelper?.visible) gridHelper.updateForCamera(camera)
   renderer.render(scene, camera)
   updateMeasureBadges()
@@ -3497,6 +3508,8 @@ function disposeResources() {
   camera = null
   viewerCamera.value = null
   scene = null
+  clipController?.dispose()
+  clipController = null
   renderer = null
   contentGroup = null
   clippingGroup = null
