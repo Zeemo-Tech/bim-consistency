@@ -238,7 +238,12 @@
 
         <span class="pc-tool-divider" />
 
-        <el-tooltip content="第一人称漫游" placement="bottom" :show-after="150">
+        <el-tooltip
+          v-if="attachIncludeGaussian || trajectoryPoints.length > 0"
+          content="第一人称漫游"
+          placement="bottom"
+          :show-after="150"
+        >
           <button
             class="pc-icon-btn"
             :class="{ 'is-active': firstPersonActive }"
