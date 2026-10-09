@@ -511,6 +511,7 @@
         @loaded-change="handlePointcloudLoadedChange"
         @world-ready="handlePointcloudWorldReady"
         @first-person-change="handleFirstPersonChange"
+        @clip-change="onClipChange"
       />
 
       <!-- 叠加层：高斯 + 轨迹，按点云坐标系叠加（跟随点云相机） -->
@@ -622,39 +623,19 @@
         {{ measureDraftHint }}
       </div>
 
-      <!-- 剖切面板：轴 / 反向 / 位置滑杆（在视图里拖动箭头手柄同样生效） -->
+      <!-- 剖切：视口内拖拽朝向包围盒（6 面改尺寸 / 边·角旋转） -->
       <div v-if="showBounds" class="pc-clip-bar" role="group" aria-label="剖切">
         <span class="pc-clip-bar__title">剖切</span>
-        <div class="pc-clip-bar__axes">
-          <button
-            v-for="axis in CLIP_AXES"
-            :key="axis"
-            type="button"
-            :class="{ on: activeClipAxis === axis }"
-            @click="onClipAxisChange(axis)"
-          >
-            {{ axis.toUpperCase() }}
-          </button>
-        </div>
+        <span class="pc-clip-bar__hint">
+          拖动盒面改尺寸，拖边/角旋转，Esc 取消
+        </span>
         <button
           type="button"
-          class="pc-clip-bar__flip"
-          :class="{ on: activeClipInvert }"
-          @click="toggleClipInvert"
+          class="pc-clip-bar__reset"
+          @click="resetOrientedClip"
         >
-          反向
+          重置
         </button>
-        <input
-          v-model.number="clipUiPosition"
-          class="pc-clip-bar__slider"
-          type="range"
-          :min="clipUiRange.min"
-          :max="clipUiRange.max"
-          :step="clipUiStep"
-          aria-label="剖切位置"
-          @input="onClipSliderInput"
-        />
-        <span class="pc-clip-bar__value">{{ clipUiPercent }}%</span>
         <button
           type="button"
           class="pc-clip-bar__close"
@@ -938,6 +919,18 @@ type PointCloudViewerExpose = InstanceType<typeof PointCloudViewer> & {
   getThreeContext?: () => ViewerThreeContext
   getPointcloudWorldBox?: () => THREE.Box3 | null
   setClipBox?: (box: THREE.Box3 | null) => void
+  setClipEnabled?: (enabled: boolean) => void
+  setClipBounds?: (bounds: {
+    x: [number, number]
+    y: [number, number]
+    z: [number, number]
+  }) => void
+  getClipBounds?: () => {
+    x: [number, number]
+    y: [number, number]
+    z: [number, number]
+  }
+  resetClipBounds?: () => void
   setControlsEnabled?: (enabled: boolean) => void
   setPointSize?: (size: number) => void
   setShowGrid?: (show: boolean) => void
@@ -2107,6 +2100,23 @@ let clipBoundDom: HTMLCanvasElement | null = null
 /** 抓住剖切箭头后，屏蔽随之而来的 stage click（避免误开全景图）。 */
 let ignoreNextStageClick = false
 
+/** 朝向裁切盒的百分比区间（由查看器 gizmo 拖拽回传）。 */
+const orientedClipBounds = ref<{
+  x: [number, number]
+  y: [number, number]
+  z: [number, number]
+}>({ x: [0, 100], y: [0, 100], z: [0, 100] })
+function onClipChange(bounds: {
+  x: [number, number]
+  y: [number, number]
+  z: [number, number]
+}) {
+  orientedClipBounds.value = bounds
+}
+function resetOrientedClip() {
+  pointcloudViewerRef.value?.resetClipBounds?.()
+}
+
 const projectId = computed(() => {
   const value = Number(route.query.projectId)
   return Number.isFinite(value) && value > 0 ? value : null
@@ -2680,8 +2690,8 @@ function onClipSliderInput() {
 }
 
 function requestPointcloudRender() {
-  const activeBox = showBounds.value ? getCurrentClipBox() : null
-  pointcloudViewerRef.value?.setClipBox?.(activeBox)
+  // 裁切由查看器内的朝向裁切盒负责；这里只请求重绘。
+  pointcloudViewerRef.value?.requestRender?.()
 }
 
 function clearBoundsHelpers() {
@@ -2898,7 +2908,7 @@ function onShowBoundsChange() {
 function onBoundsButtonClick() {
   if (showBounds.value) {
     showBounds.value = false
-    onShowBoundsChange()
+    pointcloudViewerRef.value?.setClipEnabled?.(false)
     return
   }
   if (clipBoundsDisabledReason.value) {
@@ -2906,7 +2916,7 @@ function onBoundsButtonClick() {
     return
   }
   showBounds.value = true
-  onShowBoundsChange()
+  pointcloudViewerRef.value?.setClipEnabled?.(true)
 }
 
 function getPointerNdc(ev: PointerEvent) {
@@ -3095,13 +3105,7 @@ function unbindClipInteractions() {
 
 function syncScanThreeControls() {
   bindClipInteractions()
-  if (showBounds.value) {
-    invalidateClipBounds()
-    onShowBoundsChange()
-    return
-  }
-  clearBoundsHelpers()
-  pointcloudViewerRef.value?.setClipBox?.(null)
+  pointcloudViewerRef.value?.setClipEnabled?.(showBounds.value)
 }
 
 function handlePointcloudLoadedChange(loaded: boolean) {
@@ -3115,7 +3119,7 @@ function handlePointcloudLoadedChange(loaded: boolean) {
     }
     clipBoxState = null
     clearBoundsHelpers()
-    pointcloudViewerRef.value?.setClipBox?.(null)
+    pointcloudViewerRef.value?.setClipEnabled?.(false)
     return
   }
   syncScanThreeControls()
