@@ -3543,6 +3543,7 @@ function getClipTargetObject(itemId = activeClipTargetId) {
 
 function invalidateClipBounds() {
   clipBoundsRevision += 1
+  clipController?.invalidate()
 }
 
 function scheduleBoundsHelpersUpdate() {
@@ -6644,13 +6645,32 @@ const orientedClipBounds = ref<OrientedClipPercentBounds>({
 })
 
 const applyOrientedClipPlanes = (planes: THREE.Plane[]) => {
-  if (!clippingGroup) return
-  clippingGroup.enabled = planes.length > 0
-  const arr = clippingGroup.clippingPlanes as any
-  if (Array.isArray(arr)) arr.length = 0
-  else clippingGroup.clippingPlanes = []
-  if (planes.length) {
-    clippingGroup.clippingPlanes.push(...planes.map((plane) => plane.clone()))
+  // 根组裁切
+  if (clippingGroup) {
+    clippingGroup.enabled = planes.length > 0
+    const rootPlanes = clippingGroup.clippingPlanes as any
+    if (Array.isArray(rootPlanes)) rootPlanes.length = 0
+    else clippingGroup.clippingPlanes = []
+    if (planes.length) {
+      clippingGroup.clippingPlanes.push(...planes.map((plane) => plane.clone()))
+    }
+  }
+  // 各已加载项的裁切 host（真正生效的裁切通道）
+  const activeId = resolveClipTargetId(activeClipTargetId)
+  for (const [itemId, entry] of clipHostByItemId.entries()) {
+    const host = entry.host
+    const arr = host.clippingPlanes as any
+    if (Array.isArray(arr)) arr.length = 0
+    else host.clippingPlanes = []
+    const use = isJointClipTargetId(activeId) || itemId === activeId
+    if (!use || !planes.length) {
+      host.enabled = false
+      continue
+    }
+    host.enabled = true
+    host.clippingPlanes.push(
+      ...planes.map((plane: THREE.Plane) => plane.clone()),
+    )
   }
 }
 
@@ -6661,10 +6681,7 @@ const ensureClipController = () => {
     scene,
     getCamera: () => camera,
     getDomElement: () => renderer?.domElement ?? null,
-    getRoots: () =>
-      contentGroup
-        ? [{ root: contentGroup, includeInvisible: true as const }]
-        : [],
+    getRoots: () => getClipTargetObjects(activeClipTargetId),
     applyPlanes: (planes) => {
       applyOrientedClipPlanes(planes)
       requestRender()
@@ -6686,6 +6703,7 @@ const setClipEnabled = (enabled: boolean) => {
   clipEnabledRequested = enabled
   const controller = ensureClipController()
   if (!controller) return
+  if (enabled) controller.invalidate()
   controller.setEnabled(enabled)
   requestRender()
 }
@@ -6753,6 +6771,7 @@ function onShowBoundsChange() {
         onEditModeChange()
       }
       enableClipping.value = true
+      activeClipTargetId = resolveClipTargetId(activeClipTargetId)
     }
   } else if (enableClipping.value) {
     enableClipping.value = false
