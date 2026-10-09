@@ -214,32 +214,44 @@
       <footer class="upload-footer">
         <span>
           {{
-            selectedFile
-              ? '确认归档信息后开始上传'
-              : '请先选择文件，再填写归档信息'
+            uploading
+              ? '正在上传，可随时停止'
+              : selectedFile
+                ? '确认归档信息后开始上传'
+                : '请先选择文件，再填写归档信息'
           }}
         </span>
-        <button
-          class="submit-btn"
-          type="button"
-          :aria-label="uploading ? '正在上传' : '开始上传'"
-          :disabled="!selectedFile || uploading || Boolean(duplicateScan)"
-          @click="submit"
-        >
-          <el-icon :class="{ 'is-loading': uploading }">
-            <Loading v-if="uploading" />
-            <Upload v-else />
-          </el-icon>
-          {{ uploading ? '上传中…' : '开始上传' }}
-        </button>
+        <div class="upload-footer-actions">
+          <button
+            v-if="uploading"
+            class="submit-btn stop-btn"
+            type="button"
+            aria-label="停止上传"
+            @click="stopUpload"
+          >
+            <el-icon><Close /></el-icon>
+            停止上传
+          </button>
+          <button
+            v-else
+            class="submit-btn"
+            type="button"
+            aria-label="开始上传"
+            :disabled="!selectedFile || Boolean(duplicateScan)"
+            @click="submit"
+          >
+            <el-icon><Upload /></el-icon>
+            开始上传
+          </button>
+        </div>
       </footer>
     </section>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
-import { Close, Document, Loading, Upload } from '@element-plus/icons-vue'
+import { computed, onBeforeUnmount, reactive, ref } from 'vue'
+import { Close, Document, Upload } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import {
   ARCHIVE_COMPONENT_TYPES,
@@ -273,6 +285,8 @@ const fileInput = ref<HTMLInputElement>()
 const selectedFile = ref<File>()
 const uploading = ref(false)
 const progress = ref(0)
+// 当前进行中的上传器（用于「停止上传」）
+let activeUploader: { cancel: () => Promise<void> } | null = null
 const designModels = ref<ProjectFileInfo[]>([])
 const designLoading = ref(false)
 // 项目内已存在的扫描点云，用于「同幢同层」重复校验
@@ -311,7 +325,7 @@ function deviceCapText(device: Device) {
 function handleDeviceChange() {
   const device = selectedDevice.value
   if (!device) return
-  // 选择设备后按其能力自动勾选
+  // 选择设备后按其能力自动勾选；用户仍可手动取消，取消后不上传对应内容。
   form.includePanorama = device.hasPanorama
   form.includeGaussian = device.hasGaussian
 }
@@ -434,6 +448,7 @@ function handleBuildingChange(value: string) {
 }
 
 async function submit() {
+  if (uploading.value) return
   if (!selectedFile.value) {
     ElMessage.warning('请先选择点云文件')
     return
@@ -461,37 +476,65 @@ async function submit() {
     return
   }
 
+  const projectId = props.projectId
   uploading.value = true
   progress.value = 0
+  const { FileUploader } = await import('@/utils/upload')
+  const uploader = new FileUploader({
+    projectId,
+    type: 'scan',
+    file: selectedFile.value,
+    buildingName: form.buildingName.trim(),
+    floorName: form.floorName.trim(),
+    producedAt: form.producedAt,
+    componentType: form.componentType,
+    archiveSerial: form.archiveSerial.trim(),
+    archiveCode: archiveCode.value,
+    deviceId: form.deviceId ?? undefined,
+    includePanorama: form.includePanorama,
+    includeGaussian: form.includeGaussian,
+    onProgress: (value) => {
+      progress.value = value
+    },
+  })
+  activeUploader = uploader
   try {
-    const { uploadFile } = await import('@/utils/upload')
-    await uploadFile({
-      projectId: props.projectId,
-      type: 'scan',
-      file: selectedFile.value,
-      buildingName: form.buildingName.trim(),
-      floorName: form.floorName.trim(),
-      producedAt: form.producedAt,
-      componentType: form.componentType,
-      archiveSerial: form.archiveSerial.trim(),
-      archiveCode: archiveCode.value,
-      deviceId: form.deviceId ?? undefined,
-      includePanorama: form.includePanorama,
-      includeGaussian: form.includeGaussian,
-      onProgress: (value) => {
-        progress.value = value
-      },
-    })
+    await uploader.start()
+    if (activeUploader !== uploader) return
     progress.value = 100
     ElMessage.success('点云上传并处理完成')
-    emit('complete', { projectId: props.projectId })
+    emit('complete', { projectId })
     visible.value = false
   } catch (error) {
+    if (activeUploader !== uploader) return
     ElMessage.error(error instanceof Error ? error.message : '上传失败')
   } finally {
-    uploading.value = false
+    if (activeUploader === uploader) {
+      activeUploader = null
+      uploading.value = false
+    }
   }
 }
+
+/** 停止正在进行的点云上传（中止分片并删除后端上传会话）。 */
+async function stopUpload() {
+  const uploader = activeUploader
+  if (!uploader) return
+  activeUploader = null
+  uploading.value = false
+  progress.value = 0
+  try {
+    await uploader.cancel()
+  } catch {
+    // 取消失败不影响前端状态
+  }
+  ElMessage.info('已停止上传')
+}
+
+onBeforeUnmount(() => {
+  void activeUploader?.cancel()
+  activeUploader = null
+})
 
 function resetForm() {
   form.buildingName = ''
@@ -757,6 +800,22 @@ function formatFileSize(size: number) {
 
   :deep(.is-loading) {
     animation: rotating 2s linear infinite;
+  }
+}
+
+.upload-footer-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.stop-btn {
+  border-color: var(--color-danger);
+  background: var(--bg-card);
+  color: var(--color-danger);
+
+  &:hover:not(:disabled) {
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
   }
 }
 

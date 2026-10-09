@@ -448,8 +448,7 @@ const handleUploadError = (error: any): Error => {
       responseData?.message ||
       '文件信息有误，请检查文件格式',
     409:
-      responseData?.msg ||
-      '该文件已存在或正在上传中，请检查文件列表或稍后重试',
+      responseData?.msg || '该文件已存在或正在上传中，请检查文件列表或稍后重试',
     413: '文件大小超出限制，请选择较小的文件',
   }
 
@@ -536,6 +535,11 @@ export const uploadFile = async (
     } else {
       onHashProgress?.(100)
       onProgress?.(10)
+    }
+
+    // 允许在计算 hash 期间取消：hash 完成后立即中止，不进入上传分片。
+    if (onCancelCheck?.()) {
+      throw new Error('上传已取消')
     }
 
     // 2. 初始化上传或获取已存在的上传任务
