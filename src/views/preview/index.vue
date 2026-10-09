@@ -1219,7 +1219,9 @@ const ensureClipController = () => {
     getCamera: () => camera,
     getDomElement: () => renderer?.domElement ?? null,
     getRoots: () =>
-      contentGroup ? [{ root: contentGroup, includeInvisible: true }] : [],
+      contentGroup
+        ? [{ root: contentGroup, includeInvisible: true as const }]
+        : [],
     applyPlanes: (planes) => {
       applyOrientedClipPlanes(planes)
       requestRender()
