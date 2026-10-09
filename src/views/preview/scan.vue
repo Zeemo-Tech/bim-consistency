@@ -316,6 +316,67 @@
             </div>
           </el-popover>
         </el-tooltip>
+        <el-tooltip
+          v-if="attachIncludePanorama"
+          :content="
+            trajectoryClickMode === 'panorama'
+              ? '点击轨迹点：打开全景图'
+              : '点击轨迹点：切换视角'
+          "
+          placement="bottom"
+          :show-after="150"
+        >
+          <el-popover
+            placement="bottom-end"
+            :width="220"
+            trigger="click"
+            popper-class="pc-popover"
+          >
+            <template #reference>
+              <button
+                class="pc-icon-btn"
+                :class="{ 'is-active': trajectoryClickMode === 'view' }"
+                :aria-pressed="trajectoryClickMode === 'view'"
+                type="button"
+                aria-label="轨迹点点击行为"
+              >
+                <el-icon><Compass /></el-icon>
+              </button>
+            </template>
+            <div class="pc-pop">
+              <div class="pc-pop-title">点击轨迹点</div>
+              <div class="pc-pop-seg">
+                <button
+                  type="button"
+                  :class="{ on: trajectoryClickMode === 'panorama' }"
+                  :aria-pressed="trajectoryClickMode === 'panorama'"
+                  :disabled="!attachIncludePanorama"
+                  :title="
+                    attachIncludePanorama ? '打开全景图' : '该点云未包含全景图'
+                  "
+                  @click="trajectoryClickMode = 'panorama'"
+                >
+                  打开全景图
+                </button>
+                <button
+                  type="button"
+                  :class="{ on: trajectoryClickMode === 'view' }"
+                  :aria-pressed="trajectoryClickMode === 'view'"
+                  @click="trajectoryClickMode = 'view'"
+                >
+                  切换视角
+                </button>
+              </div>
+              <p class="pc-pop-hint">
+                {{
+                  attachIncludePanorama
+                    ? '选择点击圆形轨迹点时的默认动作'
+                    : '该点云未包含全景图，点击轨迹点仅切换视角'
+                }}
+              </p>
+            </div>
+          </el-popover>
+        </el-tooltip>
         <el-tooltip content="重置视角" placement="bottom" :show-after="150">
           <button
             class="pc-icon-btn"
@@ -371,6 +432,44 @@
             @click="toggleLayer('pointcloud')"
           >
             <span class="pc-icon-glyph" :style="glyph(ICON_URL.pointcloud)" />
+          </button>
+        </el-tooltip>
+        <el-tooltip
+          v-if="attachIncludeGaussian"
+          :content="
+            isLastVisibleLayer('gaussian') ? '至少保留一个图层可见' : '高斯'
+          "
+          placement="bottom"
+          :show-after="150"
+        >
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': gaussianVisible }"
+            :aria-pressed="gaussianVisible"
+            type="button"
+            aria-label="高斯"
+            @click="toggleLayer('gaussian')"
+          >
+            <span class="pc-icon-glyph" :style="glyph(ICON_URL.gauss)" />
+          </button>
+        </el-tooltip>
+        <el-tooltip
+          v-if="attachIncludePanorama"
+          :content="
+            isLastVisibleLayer('trajectory') ? '至少保留一个图层可见' : '轨迹'
+          "
+          placement="bottom"
+          :show-after="150"
+        >
+          <button
+            class="pc-icon-btn"
+            :class="{ 'is-active': trajectoryVisible }"
+            :aria-pressed="trajectoryVisible"
+            type="button"
+            aria-label="轨迹"
+            @click="toggleLayer('trajectory')"
+          >
+            <span class="pc-icon-glyph" :style="glyph(ICON_URL.trajectory)" />
           </button>
         </el-tooltip>
       </div>
@@ -747,6 +846,7 @@ import {
   ArrowUp,
   Camera,
   Close,
+  Compass,
   Delete,
   FullScreen,
   RefreshLeft,
