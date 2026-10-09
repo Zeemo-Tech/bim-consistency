@@ -2610,11 +2610,11 @@ function histBarColor(index: number): string {
 .c2m-run-button .el-icon {
   margin-right: 7px;
   font-size: 16px;
-  color: #f4f8ff;
+  color: #fff;
 }
 
 .c2m-run-button.el-button.is-disabled .el-icon {
-  color: #f4f8ff;
+  color: #fff;
 }
 
 .c2m-preset-block {

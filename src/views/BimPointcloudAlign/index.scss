@@ -1160,9 +1160,10 @@
   --el-button-hover-border-color: transparent;
 }
 
+/* 表单类图标保持主色；不再强制面板内所有 .el-icon 变色，
+ * 否则会覆盖按钮（如「开始快速预估」）白底/白字图标的颜色。 */
 .right-panel :deep(.el-select__caret),
 .right-panel :deep(.el-input__icon),
-.right-panel :deep(.el-icon),
 .right-panel :deep(.el-select__icon) {
   color: var(--bpa-neon-text) !important;
 }
