@@ -67,7 +67,7 @@ function goDevices() {
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  padding: 0 var(--spacing-lg);
+  padding: 0 var(--spacing-lg) 0 0;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color-light);
 }
@@ -85,10 +85,13 @@ function goDevices() {
 }
 
 .header-brand {
-  flex: 0 0 auto;
-  gap: var(--spacing-sm);
+  flex: 0 0 var(--sidebar-width);
+  justify-content: flex-start;
+  box-sizing: border-box;
+  width: var(--sidebar-width);
   height: 100%;
-  padding: 0 78px 0 0;
+  padding: 0 var(--spacing-md);
+  gap: var(--spacing-sm);
   color: var(--brand-sapphire);
   cursor: pointer;
   background: transparent;
@@ -159,7 +162,7 @@ function goDevices() {
 
 @media (width <= 800px) {
   .app-header {
-    padding-inline: var(--spacing-md);
+    padding: 0 var(--spacing-md) 0 0;
   }
 
   .brand-name {
@@ -167,7 +170,9 @@ function goDevices() {
   }
 
   .header-brand {
-    padding-right: var(--spacing-md);
+    flex-basis: 64px;
+    width: 64px;
+    padding-inline: var(--spacing-sm);
   }
 
   .top-tabs {
@@ -187,7 +192,7 @@ function goDevices() {
 
 @media (width <= 520px) {
   .app-header {
-    padding-inline: var(--spacing-sm);
+    padding: 0 var(--spacing-sm) 0 0;
   }
 
   .top-tabs {

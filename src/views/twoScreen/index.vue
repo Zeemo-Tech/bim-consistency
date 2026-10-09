@@ -951,6 +951,61 @@ const isProjectFileReady = (
   return Boolean(file && ['stored', 'completed'].includes(file.status))
 }
 
+/**
+ * 解析扫描可用的高斯文件，与「点云预览」页保持一致的宽松策略：
+ * 1) 校准返回的高斯绑定；2) 扫描文件自身携带的 gaussFileId；
+ * 3) 扫描声明含高斯时，按同幢同层在 gauss 分组里匹配；4) 兜底任一就绪的 gauss 文件。
+ * 后端未回写 hasGaussBinding 时，四分屏也能加载同幢同层的高斯。
+ */
+const resolveGaussFileId = (
+  scanFileId: number | null | undefined,
+  scanBuildingName: string,
+  scanFloorName: string,
+  calibration:
+    | {
+        hasGaussBinding?: boolean
+        gaussFileId?: number | null
+      }
+    | null
+    | undefined,
+  groups: FileTypeGroup[] | undefined,
+) => {
+  const allFiles = Array.isArray(groups)
+    ? groups.flatMap((group) => group.files)
+    : []
+  const scanFile = allFiles.find(
+    (item) => Number(item.id) === Number(scanFileId),
+  )
+  const gaussFiles =
+    groups?.find((group) => group.type === 'gauss')?.files ?? []
+
+  const boundCandidates = [
+    calibration?.hasGaussBinding ? (calibration?.gaussFileId ?? null) : null,
+    scanFile?.gaussFileId ?? null,
+  ]
+  for (const candidate of boundCandidates) {
+    if (candidate && isProjectFileReady(groups, 'gauss', candidate)) {
+      return candidate
+    }
+  }
+
+  // 扫描未声明含高斯时，不再按同幢同层猜测，避免误加载无关高斯。
+  if (!scanFile?.includeGaussian) return null
+
+  const matched = gaussFiles.find(
+    (file) =>
+      normalizeSlotName(file.buildingName) === scanBuildingName &&
+      normalizeSlotName(file.floorName) === scanFloorName,
+  )
+  if (matched && isProjectFileReady(groups, 'gauss', matched.id)) {
+    return matched.id
+  }
+  const fallback = gaussFiles.find((file) =>
+    isProjectFileReady(groups, 'gauss', file.id),
+  )
+  return fallback?.id ?? null
+}
+
 const normalizeSlotName = (value: string | null | undefined) =>
   String(value || '').trim()
 
@@ -2143,12 +2198,15 @@ const evaluateScanReadinessDetail = async (
     Boolean(data?.bimFileId) &&
     normalizeSlotName(data?.bimBuildingName) === scanBuildingName &&
     isProjectFileReady(groups, 'bim', data?.bimFileId)
-  const matchedGauss =
-    Boolean(data?.hasGaussBinding) &&
-    Boolean(data?.gaussFileId) &&
-    normalizeSlotName(data?.gaussBuildingName) === scanBuildingName &&
-    normalizeSlotName(data?.gaussFloorName) === scanFloorName &&
-    isProjectFileReady(groups, 'gauss', data?.gaussFileId)
+  const matchedGauss = Boolean(
+    resolveGaussFileId(
+      scan.scanFileId,
+      scanBuildingName,
+      scanFloorName,
+      data,
+      groups,
+    ),
+  )
 
   if (!matchedCad) missing.push('cad')
   if (!matchedBim) missing.push('bim')
@@ -2955,8 +3013,6 @@ const loadScanCalibration = async () => {
     const scanFloorName = normalizeSlotName(activeScan?.floorName)
     const matchesScanBuilding = (value: string | null | undefined) =>
       Boolean(scanBuildingName && normalizeSlotName(value) === scanBuildingName)
-    const matchesScanFloor = (value: string | null | undefined) =>
-      Boolean(scanFloorName && normalizeSlotName(value) === scanFloorName)
 
     boundCadFileId.value = matchesScanBuilding(res.data?.cadBuildingName)
       ? (res.data?.cadFileId ?? null)
@@ -2968,16 +3024,13 @@ const loadScanCalibration = async () => {
       filesRes.code === 200 && Array.isArray(filesRes.data) ? filesRes.data : []
     projectFileGroups.value = groups
     syncHeaderSelectionFromActiveScan()
-    const nextGaussFileId = res.data?.hasGaussBinding
-      ? (res.data?.gaussFileId ?? null)
-      : null
-    const gaussMatchesScan =
-      matchesScanBuilding(res.data?.gaussBuildingName) &&
-      matchesScanFloor(res.data?.gaussFloorName)
-    boundGaussFileId.value =
-      gaussMatchesScan && isProjectFileReady(groups, 'gauss', nextGaussFileId)
-        ? nextGaussFileId
-        : null
+    boundGaussFileId.value = resolveGaussFileId(
+      activeScanId.value,
+      scanBuildingName,
+      scanFloorName,
+      res.data,
+      groups,
+    )
     await loadBimMetadata()
     return res.data
   } catch (error) {

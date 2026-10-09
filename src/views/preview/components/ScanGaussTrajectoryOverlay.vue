@@ -722,7 +722,7 @@ function rebuildTrajectory() {
   )
   const lineGeom = new THREE.BufferGeometry().setFromPoints(vertices)
   const lineMat = new THREE.LineBasicMaterial({
-    color: 0xffcf4a,
+    color: 0x73a2f3,
     depthTest: true,
     depthWrite: false,
     depthFunc: THREE.LessEqualDepth,
@@ -734,8 +734,8 @@ function rebuildTrajectory() {
   line.frustumCulled = false
   const dotGeom = new THREE.BufferGeometry().setFromPoints(vertices)
   const dotMat = new THREE.PointsMaterial({
-    color: 0xff8a3d,
-    size: 6,
+    color: 0x73a2f3,
+    size: 9,
     sizeAttenuation: false,
     map: getCircleTexture(),
     alphaTest: 0.5,
