@@ -250,6 +250,7 @@ import {
   updateProject,
   type ProjectData,
 } from '@/api/project'
+import { getProjectFilesByProjectId } from '@/api/fileManage'
 import CloudBimShell from '@/layout/cloudbim/CloudBimShell.vue'
 
 defineOptions({ name: 'CloudBimProjects' })
@@ -314,6 +315,38 @@ function formatDate(value?: string) {
   return value ? new Date(value).toLocaleDateString('zh-CN') : '-'
 }
 
+/**
+ * 项目列表接口未返回文件数量，这里按项目逐个拉取文件分组并汇总，
+ * 已带 fileCount / fileTypeCounts 的项目直接跳过（兼容后端后续补充）。
+ */
+async function attachFileCounts(list: ProjectData[]) {
+  const targets = list.filter(
+    (project) =>
+      project.id &&
+      typeof project.fileCount !== 'number' &&
+      !project.fileTypeCounts?.length,
+  )
+  await Promise.all(
+    targets.map(async (project) => {
+      try {
+        const res = await getProjectFilesByProjectId(project.id as number)
+        const groups = res.data || []
+        const fileTypeCounts = groups.map((group) => ({
+          type: group.type,
+          count: group.files.length,
+        }))
+        project.fileTypeCounts = fileTypeCounts
+        project.fileCount = fileTypeCounts.reduce(
+          (sum, item) => sum + item.count,
+          0,
+        )
+      } catch {
+        // 单个项目文件统计失败不影响整个列表展示
+      }
+    }),
+  )
+}
+
 async function loadProjects() {
   loading.value = true
   try {
@@ -325,6 +358,7 @@ async function loadProjects() {
     })
     projects.value = res.data?.list || []
     total.value = res.data?.total || 0
+    await attachFileCounts(projects.value)
   } catch (error: any) {
     projects.value = []
     total.value = 0
