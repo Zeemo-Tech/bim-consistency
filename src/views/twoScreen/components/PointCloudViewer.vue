@@ -64,6 +64,11 @@ import { buildGaussianTrajectoryYUpPose } from '../utils/fusionTransforms'
 import { InfiniteGroundGrid } from '@/utils/three/infiniteGroundGrid'
 import { InfiniteGroundGrid as InfiniteGroundGridWebgl } from '@/utils/three/infiniteGroundGridWebgl'
 import { PointCloudEdlPipeline } from '@/utils/three/pointCloudEdl'
+import {
+  ClipBoxController,
+  FULL_CLIP_BOUNDS,
+  type OrientedClipPercentBounds,
+} from '@/utils/three/clip/clipBoxController'
 import { PointCloudEdlPipeline as PointCloudEdlPipelineWebgl } from '@/utils/three/pointCloudEdlWebgl'
 
 type MoveDirection = 'up' | 'down' | 'left' | 'right'
@@ -122,6 +127,7 @@ const emit = defineEmits<{
       } | null
     },
   ): void
+  (e: 'clip-change', value: OrientedClipPercentBounds): void
 }>()
 
 const pointcloudViewportEl = ref<HTMLDivElement | null>(null)
@@ -187,6 +193,11 @@ const getResolvedTilesResolutionScale = () => {
 }
 
 let pointcloudScene: THREE.Scene | null = null
+// 剖切 gizmo 单独一个 scene，随主场景渲染且不受全局裁切面影响（覆盖层 pass）
+let clipGizmoScene: THREE.Scene | null = null
+let clipController: ClipBoxController | null = null
+let clipRequestedBounds: OrientedClipPercentBounds | null = null
+let clipEnabledRequested = false
 let pointcloudCamera: THREE.PerspectiveCamera | null = null
 let pointcloudRenderer: WebGPURenderer | THREE.WebGLRenderer | null = null
 let pointcloudControls: OrbitControls | null = null
@@ -933,6 +944,96 @@ const applyManualClipBox = () => {
     if (!obj?.material) return
     applyClipPlanesToMaterial(obj.material, planes)
   })
+  requestRender()
+}
+
+// ==================== 朝向剖切盒（gizmo 覆盖层） ====================
+
+const applyOrientedClipPlanes = (planes: THREE.Plane[]) => {
+  if (!pointcloudRenderer) return
+  if (rendererMode === 'webgpu' && pointcloudClipHost) {
+    pointcloudClipHost.enabled = planes.length > 0
+    const hostPlanes = pointcloudClipHost.clippingPlanes as any
+    if (Array.isArray(hostPlanes)) hostPlanes.length = 0
+    else pointcloudClipHost.clippingPlanes = []
+    if (planes.length) {
+      pointcloudClipHost.clippingPlanes.push(
+        ...planes.map((plane) => plane.clone()),
+      )
+    }
+    return
+  }
+  if ('localClippingEnabled' in pointcloudRenderer) {
+    ;(pointcloudRenderer as THREE.WebGLRenderer).localClippingEnabled =
+      planes.length > 0
+  }
+  ;(pointcloudRenderer as THREE.WebGLRenderer).clippingPlanes = planes.map(
+    (plane) => plane.clone(),
+  )
+}
+
+const ensureClipController = () => {
+  if (clipController) return clipController
+  if (!clipGizmoScene) return null
+  clipController = new ClipBoxController({
+    scene: clipGizmoScene,
+    getCamera: () => pointcloudCamera,
+    getDomElement: () => pointcloudRenderer?.domElement ?? null,
+    getRoots: () => {
+      const root = getPointcloudRoot()
+      return root ? [{ root, includeInvisible: true }] : []
+    },
+    applyPlanes: (planes) => applyOrientedClipPlanes(planes),
+    requestRender,
+    setControlsEnabled: (enabled) => {
+      if (pointcloudControls) pointcloudControls.enabled = enabled
+    },
+    initialBounds: clipRequestedBounds ?? undefined,
+    onChange: (bounds) => emit('clip-change', bounds),
+  })
+  clipController.attach()
+  if (clipEnabledRequested) clipController.setEnabled(true)
+  return clipController
+}
+
+const renderClipGizmo = () => {
+  if (!pointcloudRenderer || !pointcloudCamera || !clipGizmoScene) return
+  if (!clipController?.isEnabled() || clipGizmoScene.children.length === 0)
+    return
+  const renderer: any = pointcloudRenderer
+  const prevAutoClear = renderer.autoClear
+  // 全局裁切面会连 gizmo 一起裁掉：gizmo 覆盖层 pass 临时清空全局裁切面。
+  const prevPlanes = renderer.clippingPlanes
+  renderer.autoClear = false
+  renderer.clippingPlanes = []
+  renderer.clearDepth?.()
+  renderer.render(clipGizmoScene, pointcloudCamera)
+  renderer.clippingPlanes = prevPlanes
+  renderer.autoClear = prevAutoClear
+}
+
+const setClipEnabled = (enabled: boolean) => {
+  clipEnabledRequested = enabled
+  const controller = ensureClipController()
+  if (!controller) return
+  controller.setEnabled(enabled)
+  needsRender = true
+  requestRender()
+}
+
+const setClipBounds = (bounds: OrientedClipPercentBounds) => {
+  clipRequestedBounds = bounds
+  clipController?.setBounds(bounds)
+  needsRender = true
+  requestRender()
+}
+
+const getClipBounds = (): OrientedClipPercentBounds =>
+  clipController?.getBounds() ?? clipRequestedBounds ?? FULL_CLIP_BOUNDS
+
+const resetClipBounds = () => {
+  clipController?.reset()
+  needsRender = true
   requestRender()
 }
 
@@ -2029,6 +2130,7 @@ const initPointcloudViewer = async () => {
 
     pointcloudScene = new THREE.Scene()
     pointcloudScene.background = new THREE.Color(defaultBgColor)
+    clipGizmoScene = new THREE.Scene()
     pointcloudClippingGroup = new ClippingGroup()
     pointcloudScene.add(pointcloudClippingGroup)
     pointcloudContentGroup = new THREE.Group()
@@ -2243,9 +2345,7 @@ const renderSceneFrame = () => {
   if (edlEnabled && edlPipelineWebgl) {
     edlPipelineWebgl.enabled = true
     edlPipelineWebgl.render(pointcloudScene, pointcloudCamera)
-    return
-  }
-  if (edlEnabled && edlPipeline) {
+  } else if (edlEnabled && edlPipeline) {
     const dom = pointcloudRenderer.domElement
     const dpr = pointcloudRenderer.getPixelRatio?.() ?? 1
     edlPipeline.render(
@@ -2253,9 +2353,10 @@ const renderSceneFrame = () => {
       Math.max(1, dom.clientWidth) * dpr,
       Math.max(1, dom.clientHeight) * dpr,
     )
-    return
+  } else {
+    pointcloudRenderer.render(pointcloudScene, pointcloudCamera)
   }
-  pointcloudRenderer.render(pointcloudScene, pointcloudCamera)
+  renderClipGizmo()
 }
 
 const forceCaptureDataUrl = async () => {
@@ -2335,6 +2436,7 @@ const renderPointcloud = () => {
     const didUpdate = pointcloudControls?.update() ?? false
     const didMove = updateFirstPersonMovement(performance.now())
     pointcloudCamera.updateMatrixWorld()
+    clipController?.update()
     if (pointcloudGroundGrid?.visible) {
       pointcloudGroundGrid.updateForCamera(pointcloudCamera)
     }
@@ -3077,6 +3179,9 @@ const cleanup = () => {
   edlPipelineWebgl = null
 
   pointcloudScene = null
+  clipController?.dispose()
+  clipController = null
+  clipGizmoScene = null
   pointcloudCamera = null
   pointcloudRenderer = null
   pointcloudControls = null
@@ -3295,6 +3400,11 @@ defineExpose({
     applyManualClipBox()
     requestRender()
   },
+  setClipEnabled,
+  setClipBounds,
+  getClipBounds,
+  resetClipBounds,
+  invalidateClipFrame: () => clipController?.invalidate(),
   setControlsEnabled: (enabled: boolean) => {
     if (!pointcloudControls) return
     if (!enabled) {
