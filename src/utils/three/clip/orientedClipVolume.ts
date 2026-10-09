@@ -16,54 +16,17 @@ export interface OrientedClipFrame {
 
 const CLIP_BOUNDS_TOLERANCE_METERS = 0.02
 
-type PositionAttribute =
-  | THREE.BufferAttribute
-  | THREE.InterleavedBufferAttribute
 export type ClipBoundsRoot =
   | THREE.Object3D
   | { root: THREE.Object3D; includeInvisible: true }
 
-interface CachedObjectBounds {
-  geometry: THREE.BufferGeometry
-  position: PositionAttribute
-  positionVersion: number
-  positionCount: number
-  index: THREE.BufferAttribute | null
-  indexVersion?: number
-  drawStart: number
-  drawEnd: number
-  instanceMatrix?: THREE.InstancedBufferAttribute
-  instanceVersion?: number
-  instanceCount?: number
-  localToClip: readonly number[]
-  bounds: THREE.Box3
-}
-
-function positionVersion(position: PositionAttribute): number {
-  return position instanceof THREE.InterleavedBufferAttribute
-    ? position.data.version
-    : position.version
-}
-
-function sameMatrix(
-  elements: readonly number[],
-  matrix: THREE.Matrix4,
-): boolean {
-  return elements.every((value, index) =>
-    Object.is(value, matrix.elements[index]),
-  )
-}
-
-/**
- * 按实际绘制索引和 drawRange 收集裁切局部包围盒，已过滤噪点不能撑大剖切框。
- * 隐藏 LOD 仍收集过滤后的内容；缓存随几何、索引、绘制窗口或变换变化而刷新。
- */
 export function createClipBoundsCollector() {
-  const cache = new WeakMap<THREE.Object3D, CachedObjectBounds>()
-  const localPoint = new THREE.Vector3()
-  const instanceTransform = new THREE.Matrix4()
-  const localToClipInstance = new THREE.Matrix4()
+  const localToClip = new THREE.Matrix4()
 
+  /**
+   * 按每个几何体的缓存包围盒（three 会在首次计算后缓存）计算裁切局部包围盒，
+   * 避免逐顶点扫描——大点云/多瓦片时逐顶点会非常慢。
+   */
   function createFrame(
     roots: readonly ClipBoundsRoot[],
     along?: THREE.Vector3 | null,
@@ -85,95 +48,14 @@ export function createClipBoundsCollector() {
         if (!(geometry instanceof THREE.BufferGeometry)) return
         const position = geometry.getAttribute('position')
         if (!position || !position.count) return
-        const index = geometry.getIndex()
-        const drawStart = Math.max(0, geometry.drawRange.start)
-        const drawEnd = Math.min(
-          index?.count ?? position.count,
-          geometry.drawRange.start + geometry.drawRange.count,
-        )
-
-        const localToClip = worldToClip.clone().multiply(object.matrixWorld)
-        const instanced =
-          object instanceof THREE.InstancedMesh ? object : undefined
-        const version = positionVersion(position)
-        const previous = cache.get(object)
-        if (
-          previous?.geometry === geometry &&
-          previous.position === position &&
-          previous.positionVersion === version &&
-          previous.positionCount === position.count &&
-          previous.index === index &&
-          previous.indexVersion === index?.version &&
-          previous.drawStart === drawStart &&
-          previous.drawEnd === drawEnd &&
-          previous.instanceMatrix === instanced?.instanceMatrix &&
-          previous.instanceVersion === instanced?.instanceMatrix.version &&
-          previous.instanceCount === instanced?.count &&
-          sameMatrix(previous.localToClip, localToClip)
-        ) {
-          if (!previous.bounds.isEmpty()) {
-            frame.fullBounds.union(previous.bounds)
-            hasPoints = true
-          }
-          return
-        }
-
-        const bounds = new THREE.Box3()
-        const instances = instanced ? instanced.count : 1
-        for (let instance = 0; instance < instances; instance += 1) {
-          if (instanced) instanced.getMatrixAt(instance, instanceTransform)
-          const transform = instanced
-            ? localToClipInstance.copy(localToClip).multiply(instanceTransform)
-            : localToClip
-          if (!transform.elements.every(Number.isFinite)) continue
-          for (let drawIndex = drawStart; drawIndex < drawEnd; drawIndex += 1) {
-            const vertex = index ? index.getX(drawIndex) : drawIndex
-            if (
-              !Number.isInteger(vertex) ||
-              vertex < 0 ||
-              vertex >= position.count
-            )
-              continue
-            localPoint.set(
-              position.getX(vertex),
-              position.getY(vertex),
-              position.getZ(vertex),
-            )
-            if (
-              !Number.isFinite(localPoint.x) ||
-              !Number.isFinite(localPoint.y) ||
-              !Number.isFinite(localPoint.z)
-            )
-              continue
-            localPoint.applyMatrix4(transform)
-            if (
-              Number.isFinite(localPoint.x) &&
-              Number.isFinite(localPoint.y) &&
-              Number.isFinite(localPoint.z)
-            ) {
-              bounds.expandByPoint(localPoint)
-            }
-          }
-        }
-        cache.set(object, {
-          geometry,
-          position,
-          positionVersion: version,
-          positionCount: position.count,
-          index,
-          indexVersion: index?.version,
-          drawStart,
-          drawEnd,
-          instanceMatrix: instanced?.instanceMatrix,
-          instanceVersion: instanced?.instanceMatrix.version,
-          instanceCount: instanced?.count,
-          localToClip: [...localToClip.elements],
-          bounds,
-        })
-        if (!bounds.isEmpty()) {
-          frame.fullBounds.union(bounds)
-          hasPoints = true
-        }
+        if (!geometry.boundingBox) geometry.computeBoundingBox()
+        const local = geometry.boundingBox
+        if (!local || local.isEmpty()) return
+        localToClip.copy(worldToClip).multiply(object.matrixWorld)
+        const box = local.clone().applyMatrix4(localToClip)
+        if (box.isEmpty()) return
+        frame.fullBounds.union(box)
+        hasPoints = true
       }
       if (includeInvisible) root.traverse(visit)
       else root.traverseVisible(visit)
