@@ -68,6 +68,8 @@ const props = withDefaults(
     /** 当前高亮的剖切轴/方向（用于箭头高亮） */
     clipAxis?: 'x' | 'y' | 'z'
     clipInvert?: boolean
+    /** 是否绘制旧版剖切盒/箭头（新朝向 gizmo 接管时传 false，仅保留裁切） */
+    clipHandlesVisible?: boolean
     /**
      * 可选：轨迹改挂到该外部场景（点云渲染器的 scene），与点云共享深度缓冲，
      * 从而被点云墙遮挡。返回 null 时回退到叠加层自身的场景（不遮挡）。
@@ -88,6 +90,7 @@ const props = withDefaults(
     clipBox: null,
     clipAxis: 'z',
     clipInvert: false,
+    clipHandlesVisible: true,
     getAttachScene: () => null,
     attachToPointcloud: false,
     requestAttachRender: () => {},
@@ -645,6 +648,8 @@ function updateClipBoxHelper() {
 
   const b = props.clipBox
   if (!b) return
+  // 仅裁切、不画旧版盒/箭头（新朝向 gizmo 负责交互）
+  if (props.clipHandlesVisible === false) return
   const box = new THREE.Box3(
     new THREE.Vector3(b.min[0], b.min[1], b.min[2]),
     new THREE.Vector3(b.max[0], b.max[1], b.max[2]),

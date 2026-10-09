@@ -530,6 +530,7 @@
         :clip-box="overlayClipBox"
         :clip-axis="activeClipAxis"
         :clip-invert="activeClipInvert"
+        :clip-handles-visible="false"
       />
 
       <!-- 全景图叠加层：点击轨迹控制点后以空间扩散动画铺在页面上，可上一个/下一个/关闭 -->
@@ -2224,20 +2225,28 @@ const repaintPointcloud = () => {
 }
 
 /**
- * 传给高斯叠加层的裁切盒（世界坐标）。高斯（LCC）支持 setClipBox，
- * 剖切时用它把高斯一起裁掉，效果与「分析」页的裁切框一致。
+ * 传给高斯叠加层的裁切盒（世界坐标，轴对齐近似）。
+ * 朝向 gizmo 旋转后无法用 Box3 精确表达，这里按轴对齐近似裁切高斯。
  */
 const overlayClipBox = computed(() => {
-  void clipBoxTick.value
-  void clipUiPosition.value
-  void activeClipAxis.value
-  void activeClipInvert.value
   if (!showBounds.value) return null
-  const box = getCurrentClipBox()
-  if (!box || box.isEmpty()) return null
+  const world = getContentWorldBox()
+  if (!world || world.isEmpty()) return null
+  const size = world.getSize(new THREE.Vector3())
+  const b = orientedClipBounds.value
+  const at = (axis: 'x' | 'y' | 'z', pct: number) =>
+    world.min[axis] + size[axis] * (pct / 100)
   return {
-    min: box.min.toArray() as [number, number, number],
-    max: box.max.toArray() as [number, number, number],
+    min: [at('x', b.x[0]), at('y', b.y[0]), at('z', b.z[0])] as [
+      number,
+      number,
+      number,
+    ],
+    max: [at('x', b.x[1]), at('y', b.y[1]), at('z', b.z[1])] as [
+      number,
+      number,
+      number,
+    ],
   }
 })
 
