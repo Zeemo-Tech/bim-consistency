@@ -515,6 +515,16 @@
             <strong>
               {{ activeWorkflowStep === 3 ? '偏差对比' : '配准控制' }}
             </strong>
+            <el-tooltip
+              v-if="activeWorkflowStep === 1"
+              content="调整模型位置并保存粗配准，再进行精细配准。完成校准后可进入偏差对比。"
+              placement="bottom"
+              :show-after="150"
+            >
+              <el-icon class="panel-help" aria-label="配准流程说明">
+                <QuestionFilled />
+              </el-icon>
+            </el-tooltip>
           </div>
           <div class="panel-step-actions">
             <button
@@ -548,9 +558,6 @@
           </div>
         </div>
         <div class="panel-body">
-          <p v-if="activeWorkflowStep === 1" class="workflow-guidance">
-            调整模型位置并保存粗配准，再进行精细配准。完成校准后可进入偏差对比。
-          </p>
           <div
             v-if="activeWorkflowStep === 1"
             class="panel-section registration-edit-panel"
@@ -775,7 +782,18 @@
             </template>
 
             <div class="registration-handle-control">
-              <label for="registration-handles">操作手柄</label>
+              <span class="registration-handle-label">
+                操作手柄
+                <el-tooltip
+                  :content="registrationHandleHint"
+                  placement="bottom"
+                  :show-after="150"
+                >
+                  <el-icon class="panel-help" aria-label="操作手柄说明">
+                    <QuestionFilled />
+                  </el-icon>
+                </el-tooltip>
+              </span>
               <el-switch
                 id="registration-handles"
                 v-model="showTransformHandles"
@@ -788,13 +806,6 @@
                 aria-label="显示配准操作手柄"
               />
             </div>
-            <p class="registration-handle-hint">
-              {{
-                enableClipping
-                  ? '剖切时暂时隐藏配准手柄。'
-                  : '控制画布中的平移与旋转手柄；关闭后仍可输入数值调整。'
-              }}
-            </p>
             <div class="transform-mode" role="tablist" aria-label="变换方式">
               <button
                 type="button"
@@ -1322,6 +1333,7 @@ import {
   CircleCheck,
   Warning,
   InfoFilled,
+  QuestionFilled,
 } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import wanggeIcon from '@/assets/images/wangge.png'
@@ -2598,6 +2610,11 @@ const clipRange = ref({ min: 0, max: 1 })
 const canEnableClipping = computed(() => {
   return hasGltf.value && hasTileset.value && pointCloudClippingReady.value
 })
+const registrationHandleHint = computed(() =>
+  enableClipping.value
+    ? '剖切时暂时隐藏配准手柄。'
+    : '控制画布中的平移与旋转手柄；关闭后仍可输入数值调整。',
+)
 const clipBoundsDisabledReason = computed(() => {
   if (showBounds.value) return ''
   if (loadingBim.value) return 'BIM 加载中，请稍候再开启裁切框'

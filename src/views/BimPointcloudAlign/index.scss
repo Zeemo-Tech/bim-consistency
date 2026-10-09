@@ -3230,3 +3230,170 @@
 .calibration-page .main-content.is-panel-hidden .right-panel-toggle {
   right: 8px;
 }
+
+/* ==================== 右侧面板紧凑化：减少留白、提升密度 ==================== */
+
+/* 面板头部：压缩高度 */
+.calibration-page .control-panel-header {
+  min-height: 50px;
+  padding: 8px 12px;
+  gap: 8px;
+}
+
+.calibration-page .control-panel-header .panel-heading {
+  gap: 0;
+}
+
+.calibration-page .control-panel-header .panel-heading strong {
+  font-size: var(--font-size-sm);
+}
+
+.calibration-page .control-panel-header .panel-step-actions {
+  gap: 6px;
+}
+
+.calibration-page .control-panel-header .panel-next-step {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 8px 0 9px;
+  border-radius: var(--radius-xs);
+}
+
+/* 引导文案与分区留白收紧 */
+.calibration-page .workflow-guidance {
+  padding: 8px 12px;
+  line-height: 1.5;
+}
+
+.calibration-page .control-panel .panel-section,
+.calibration-page .registration-edit-panel {
+  padding: 12px;
+}
+
+.calibration-page .control-panel .section-title {
+  margin-bottom: 8px;
+}
+
+.calibration-page .control-panel .section-divider {
+  margin: 10px 0;
+}
+
+/* 阶段切换与变换模式：更矮的一行 */
+.calibration-page .registration-stage-row {
+  margin-bottom: 10px;
+}
+
+.calibration-page .registration-stage-btn {
+  height: 30px;
+  min-height: 30px;
+  line-height: 28px;
+}
+
+.calibration-page .registration-edit-panel > .transform-mode {
+  margin-bottom: 10px;
+}
+
+.calibration-page
+  .registration-edit-panel
+  > .transform-mode
+  .transform-mode-button {
+  height: 30px;
+  min-height: 30px;
+  line-height: 30px;
+}
+
+/* 步长：标签与控件同排，省一行 */
+.calibration-page .registration-edit-panel .step-control-group {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.calibration-page .registration-edit-panel .control-row--compact {
+  margin-bottom: 8px;
+}
+
+/* 精细配准卡片与参数区 */
+.calibration-page .control-panel .fine-status,
+.calibration-page .control-panel .fine-result,
+.calibration-page .control-panel .fine-params {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+}
+
+.calibration-page .control-panel .fine-result__title {
+  margin-bottom: 6px;
+}
+
+.calibration-page .control-panel .fine-result__grid {
+  gap: 4px 10px;
+}
+
+.calibration-page .control-panel .fine-params,
+.calibration-page .control-panel .fine-actions {
+  gap: 8px;
+}
+
+.calibration-page .control-panel .fine-actions .el-button {
+  height: 30px;
+  min-height: 30px;
+}
+
+.calibration-page .control-panel .fine-threshold-item {
+  gap: 2px;
+}
+
+/* 操作手柄行更紧凑 */
+.calibration-page .registration-handle-control {
+  min-height: 28px;
+  margin-top: 12px;
+  font-size: var(--font-size-xs);
+}
+
+.calibration-page .registration-handle-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* 底部动作区 */
+.calibration-page .registration-footer-actions {
+  margin-top: 10px;
+}
+
+.calibration-page .registration-complete-button.el-button {
+  height: 32px;
+  min-height: 32px;
+  margin: 10px 0 0;
+}
+
+/* 解释性文字收敛为「?」图标 + 悬停提示 */
+.calibration-page .control-panel-header .panel-heading {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.calibration-page .registration-handle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+}
+
+.calibration-page .panel-help {
+  color: var(--text-tertiary);
+  font-size: 14px;
+  cursor: help;
+  outline: none;
+  transition: color var(--transition-fast);
+}
+
+.calibration-page .panel-help:hover,
+.calibration-page .panel-help:focus-visible {
+  color: var(--color-primary);
+}
+
+
