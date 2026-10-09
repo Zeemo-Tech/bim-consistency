@@ -328,7 +328,12 @@
                 :disabled="row.status !== 'stored'"
                 @click="openFourScreen(row)"
               >
-                <el-icon><Grid /></el-icon>
+                <img
+                  class="bim-action-icon"
+                  src="/dianyun/sifenping.svg"
+                  alt=""
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="bim-action-button"
@@ -711,15 +716,24 @@ onMounted(() => {
 .bim-action-button {
   @include controls.action;
 
+  flex: 0 0 auto;
   width: var(--control-height);
+  height: var(--control-height);
   padding: 0;
+}
+
+.bim-action-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
 }
 
 .bim-action-button--primary {
   @include controls.primary;
 
   width: auto;
-  padding: 0 var(--spacing-compact);
+  padding: 0 5px;
 }
 
 /* 带文字的次要操作按钮（如「四分屏」），保持与主按钮一致的间距与高度 */

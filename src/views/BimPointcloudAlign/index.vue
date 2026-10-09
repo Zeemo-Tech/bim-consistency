@@ -1421,6 +1421,7 @@ import { sampleC2MDeviationAtPick } from '@/utils/c2mPick'
 import { getToken, getOrganizationId, formatToken } from '@/utils/auth'
 import {
   getIfcGlbFile,
+  getProjectFilesByProjectId,
   getScanTilesAsset,
   getScanTilesetUrl,
 } from '@/api/fileManage'
@@ -1543,6 +1544,46 @@ const resetSessionState = () => {
   applyClippingState()
 }
 
+/**
+ * 保存前校验：点云与设计模型必须属于同一幢，否则后端会拒绝配准
+ * （400 scan 与 bim 必须属于同一幢）。无法判定时放行，交给后端处理。
+ */
+const ensureBimSameBuildingAsScan = async () => {
+  if (!projectId.value || !scanFileId.value || !bimFileId.value) return true
+  try {
+    const res = await getProjectFilesByProjectId(projectId.value)
+    if (res.code !== 200 || !Array.isArray(res.data)) return true
+    const files = res.data.flatMap((group) => group.files)
+    const scan = files.find((item) => Number(item.id) === scanFileId.value)
+    const bim = files.find((item) => Number(item.id) === bimFileId.value)
+    if (!scan || !bim) return true
+
+    const scanBuilding = (scan.buildingName || '').trim()
+    const bimBuilding = (bim.buildingName || '').trim()
+    if (!scanBuilding && !bimBuilding) return true
+    if (
+      scanBuilding &&
+      bimBuilding &&
+      scanBuilding.toUpperCase() === bimBuilding.toUpperCase()
+    ) {
+      return true
+    }
+
+    const scanLabel = scanBuilding
+      ? `点云所属幢「${scanBuilding}」`
+      : '该点云未记录所属幢'
+    const bimLabel = bimBuilding
+      ? `设计模型所属幢「${bimBuilding}」`
+      : '该设计模型未记录所属幢'
+    ElMessage.error(
+      `无法保存配准：${scanLabel}，${bimLabel}，两者不一致。请先将点云与同幢 BIM 重新归档后再试。`,
+    )
+    return false
+  } catch {
+    return true
+  }
+}
+
 const saveCalibrationResult = async () => {
   const snapshot = collectCalibrationSnapshot({ warnOnMissing: true })
   if (!snapshot) {
@@ -1559,6 +1600,8 @@ const saveCalibrationResult = async () => {
     ElMessage.warning('缺少扫描文件或 BIM 文件 ID，无法保存校准结果')
     return false
   }
+
+  if (!(await ensureBimSameBuildingAsScan())) return false
 
   const gaussId = getQueryString('gaussId')
   const gaussFileId = Number(gaussId)

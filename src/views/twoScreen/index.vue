@@ -2109,14 +2109,24 @@ const ensureProjectFileGroups = async () => {
   return loadProjectFileGroups(projectId.value)
 }
 
-const evaluateScanReadiness = async (
+type ScanReadinessKey = 'scan' | 'bim' | 'cad' | 'gauss'
+
+const SCAN_READINESS_LABELS: Record<ScanReadinessKey, string> = {
+  scan: '点云文件',
+  bim: 'BIM 对齐',
+  cad: 'CAD 对齐',
+  gauss: '高斯绑定',
+}
+
+const evaluateScanReadinessDetail = async (
   scan: ScanListItem,
   options?: { requireGauss?: boolean },
-) => {
-  if (!projectId.value) return false
+): Promise<{ ready: boolean; missing: ScanReadinessKey[] }> => {
+  if (!projectId.value) return { ready: false, missing: ['scan'] }
   const groups = await ensureProjectFileGroups()
+  const missing: ScanReadinessKey[] = []
   if (!isProjectFileReady(groups, 'scan', scan.scanFileId)) {
-    return false
+    missing.push('scan')
   }
 
   const response = await getScanCalibration(projectId.value, scan.scanFileId)
@@ -2140,11 +2150,45 @@ const evaluateScanReadiness = async (
     normalizeSlotName(data?.gaussFloorName) === scanFloorName &&
     isProjectFileReady(groups, 'gauss', data?.gaussFileId)
 
-  if (options?.requireGauss) {
-    return matchedCad && matchedBim && matchedGauss
-  }
+  if (!matchedCad) missing.push('cad')
+  if (!matchedBim) missing.push('bim')
+  const gaussRequired =
+    Boolean(options?.requireGauss) || Boolean(data?.hasGaussBinding)
+  if (gaussRequired && !matchedGauss) missing.push('gauss')
 
-  return matchedCad && matchedBim && (!data?.hasGaussBinding || matchedGauss)
+  const ready = options?.requireGauss
+    ? matchedCad && matchedBim && matchedGauss
+    : matchedCad && matchedBim && (!data?.hasGaussBinding || matchedGauss)
+
+  return { ready, missing }
+}
+
+const evaluateScanReadiness = async (
+  scan: ScanListItem,
+  options?: { requireGauss?: boolean },
+) => (await evaluateScanReadinessDetail(scan, options)).ready
+
+/** 生成「缺少哪些绑定」的提示片段，用于四分屏入口的失败说明。 */
+const describeScanMissingBindings = async (
+  scan: ScanListItem | null,
+  options?: { requireGauss?: boolean },
+) => {
+  if (!scan) return ''
+  try {
+    const { missing } = await evaluateScanReadinessDetail(scan, options)
+    if (missing.length === 0) return ''
+    const slotLabel = [scan.buildingName, scan.floorName]
+      .map((value) => normalizeSlotName(value))
+      .filter(Boolean)
+      .join(' ')
+    const names = missing.map((key) => SCAN_READINESS_LABELS[key])
+    return slotLabel
+      ? `扫描「${slotLabel}」缺少：${names.join('、')}`
+      : `扫描缺少：${names.join('、')}`
+  } catch (error) {
+    console.warn('扫描绑定诊断失败:', error)
+    return ''
+  }
 }
 
 const createCachedScanReadinessChecker = (
@@ -2454,12 +2498,18 @@ const loadScanList = async (
       activeScanId.value = nextScanId
     } else {
       activeScanId.value = null
-      const message = options?.preferLatestFullReady
+      const baseMessage = options?.preferLatestFullReady
         ? '当前项目暂无同时具备 BIM、CAD、gauss 的扫描'
         : isUserRange
           ? '该时间范围内暂无已校准扫描'
           : '当前项目暂无可用于四分屏的已校准扫描'
-      ElMessage.warning(message)
+      const missingText = await describeScanMissingBindings(
+        routeScan ?? latestScan,
+        { requireGauss: options?.preferLatestFullReady },
+      )
+      ElMessage.warning(
+        missingText ? `${baseMessage}（${missingText}）` : baseMessage,
+      )
     }
   } catch (error: any) {
     if (scanRequestId.value !== requestId) return

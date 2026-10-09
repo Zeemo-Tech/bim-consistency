@@ -624,8 +624,12 @@ function formatFileSize(size: number) {
 
 .archive-fields {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 16px;
+
+  > .archive-field:last-child {
+    grid-column: span 2;
+  }
 }
 
 .archive-field {
@@ -697,8 +701,7 @@ function formatFileSize(size: number) {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-color-light);
+  padding-top: 16px;;
 
   > span {
     color: var(--text-secondary);

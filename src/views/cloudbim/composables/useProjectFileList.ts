@@ -120,27 +120,39 @@ export function useProjectFileList(kinds: FileType[]) {
     }
   }
 
+  /** 作用：判断 BIM 是否与扫描同幢（BIM 未落库楼栋时视为兼容）。 */
+  function isBimBuildingCompatible(
+    bim: ProjectFileInfo,
+    targetBuilding: string,
+  ) {
+    if (!targetBuilding) return true
+    const bimBuilding = normalizeBuildingName(bim.buildingName)
+    return !bimBuilding || bimBuilding === targetBuilding
+  }
+
   /**
    * 作用：为某个文件解析「一一对应」的设计模型（BIM）。
    *
-   * 参考项目在归档时用归档编号把点云与 BIM 绑定；本项目后端保持不变，
-   * 因此按楼栋（buildingName）在项目楼栋列表里匹配对应 BIM：
+   * 后端要求配准的点云与 BIM 必须属于同一幢，因此这里始终优先同幢匹配：
+   * - 归档编号关联仅在该 BIM 与扫描同幢时采用；
    * - 扫描点云带有楼栋名时，匹配同楼栋的 BIM；
-   * - 项目只有一个 BIM 时，直接匹配该 BIM（兜底）。
+   * - 仅在扫描没有楼栋信息时，才用唯一 BIM 兜底。
    */
   function linkedBimForFile(file: ProjectFileInfo): ProjectFileInfo | null {
-    // 1) 归档编号关联：直接按 linkedBimFileId 解析设计模型。
+    const target = normalizeBuildingName(file.buildingName)
+    const bims = buildings.value
+      .map((item) => item.bimFile)
+      .filter((bim): bim is ProjectFileInfo => Boolean(bim))
+
+    // 1) 归档编号关联：仅当该 BIM 与扫描同幢时才采用，
+    //    否则后端保存配准时会报「scan 与 bim 必须属于同一幢」。
     if (file.linkedBimFileId) {
       const linked = allFiles.value.find(
         (item) => item.type === 'bim' && item.id === file.linkedBimFileId,
       )
-      if (linked) return linked
+      if (linked && isBimBuildingCompatible(linked, target)) return linked
     }
     // 2) 兼容旧数据：按楼栋名匹配。
-    const bims = buildings.value
-      .map((item) => item.bimFile)
-      .filter((bim): bim is ProjectFileInfo => Boolean(bim))
-    const target = normalizeBuildingName(file.buildingName)
     if (target) {
       const matched = buildings.value.find(
         (item) =>
@@ -148,7 +160,8 @@ export function useProjectFileList(kinds: FileType[]) {
       )
       if (matched?.bimFile) return matched.bimFile
     }
-    if (bims.length === 1) return bims[0]
+    // 3) 仅在扫描没有楼栋信息时，才允许用唯一 BIM 兜底，避免跨幢误配。
+    if (!target && bims.length === 1) return bims[0]
     return null
   }
 

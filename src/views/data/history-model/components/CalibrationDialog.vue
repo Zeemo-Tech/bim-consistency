@@ -520,6 +520,17 @@ const syncBimSelection = () => {
   ) {
     return
   }
+  // 未携带 BIM 时，优先选择与点云同幢的 BIM，避免跨幢配准被后端拒绝。
+  const buildingName = pointCloudBuildingName.value
+  if (buildingName) {
+    const matched = list.find(
+      (item) => String(item.buildingName || '').trim() === buildingName,
+    )
+    if (matched) {
+      selectedBimId.value = matched.id
+      return
+    }
+  }
   selectedBimId.value = list[0]?.id || ''
 }
 

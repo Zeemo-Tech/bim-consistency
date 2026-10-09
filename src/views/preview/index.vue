@@ -370,42 +370,77 @@
             </label>
           </section>
 
-          <!-- 剖切 -->
+          <!-- BIM 材质 -->
           <section class="tool-section">
-            <h3>剖切</h3>
-            <label class="toggle-row">
-              <span>启用剖切</span>
-              <el-switch
-                v-model="bimControls.sectionEnabled"
-                aria-label="启用剖切"
-              />
-            </label>
-            <p class="section-note">
-              开启后拖拽模型外侧的 6 个方向箭头，调整剖切范围。
-            </p>
+            <h3>BIM 材质</h3>
+            <div class="option-row" role="radiogroup" aria-label="BIM 材质">
+              <button
+                v-for="option in materialOptions"
+                :key="option.value"
+                class="option-chip"
+                :class="{ 'is-active': materialMode === option.value }"
+                type="button"
+                role="radio"
+                :aria-checked="materialMode === option.value"
+                :disabled="!hasModel"
+                @click="setMaterialMode(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
           </section>
 
-          <!-- 辅助显示 -->
-          <section class="tool-section">
-            <h3>辅助显示</h3>
-            <label class="toggle-row">
-              <span>坐标轴</span>
-              <el-switch v-model="bimControls.showAxes" aria-label="坐标轴" />
-            </label>
-            <label class="toggle-row">
-              <span>参考网格</span>
-              <el-switch v-model="bimControls.showGrid" aria-label="参考网格" />
-            </label>
+          <!-- 视图辅助：剖切与辅助显示同一行 -->
+          <section class="tool-section view-tools">
+            <h3>视图辅助</h3>
+            <div class="option-row" role="group" aria-label="视图辅助">
+              <button
+                class="option-chip"
+                :class="{ 'is-active': bimControls.sectionEnabled }"
+                type="button"
+                role="switch"
+                :aria-checked="bimControls.sectionEnabled"
+                @click="bimControls.sectionEnabled = !bimControls.sectionEnabled"
+              >
+                <el-icon :size="13"><Scissor /></el-icon>
+                <span>剖切</span>
+              </button>
+              <button
+                class="option-chip"
+                :class="{ 'is-active': bimControls.showAxes }"
+                type="button"
+                role="switch"
+                :aria-checked="bimControls.showAxes"
+                @click="bimControls.showAxes = !bimControls.showAxes"
+              >
+                <el-icon :size="13"><Compass /></el-icon>
+                <span>坐标轴</span>
+              </button>
+              <button
+                class="option-chip"
+                :class="{ 'is-active': bimControls.showGrid }"
+                type="button"
+                role="switch"
+                :aria-checked="bimControls.showGrid"
+                @click="bimControls.showGrid = !bimControls.showGrid"
+              >
+                <el-icon :size="13"><Grid /></el-icon>
+                <span>参考网格</span>
+              </button>
+            </div>
+            <p v-if="bimControls.sectionEnabled" class="section-note">
+              拖拽模型外侧的 6 个方向箭头，调整剖切范围。
+            </p>
           </section>
 
           <!-- 画布背景 -->
           <section class="tool-section">
             <h3>画布背景</h3>
-            <div class="background-options" role="group" aria-label="画布背景">
+            <div class="option-row" role="group" aria-label="画布背景">
               <button
                 v-for="option in backgroundOptions"
                 :key="option.value"
-                class="preview-button theme-chip"
+                class="option-chip"
                 :class="{ 'is-active': backgroundTheme === option.value }"
                 type="button"
                 @click="backgroundTheme = option.value"
@@ -434,6 +469,8 @@ import {
   FullScreen,
   ArrowLeft,
   Grid,
+  Scissor,
+  Compass,
   Warning,
   DArrowRight,
   Loading,
@@ -721,6 +758,15 @@ function setCheckedKeys(keys: string[]) {
 
 // 渲染状态
 const materialMode = ref<'original' | 'unlit' | 'lambert'>('unlit')
+
+const materialOptions: Array<{
+  label: string
+  value: 'original' | 'unlit' | 'lambert'
+}> = [
+  { label: '原始材质', value: 'original' },
+  { label: '无光照', value: 'unlit' },
+  { label: '漫反射', value: 'lambert' }
+]
 
 // 全屏状态
 const isFullscreen = ref(false)
@@ -4569,6 +4615,7 @@ onBeforeUnmount(() => {
 }
 
 .layout-shell {
+  position: relative;
   display: grid;
   flex: 1;
   grid-template-columns: minmax(0, 1fr) var(--viewer-panel-width);
@@ -4576,7 +4623,7 @@ onBeforeUnmount(() => {
 }
 
 .layout-shell.is-sidebar-collapsed {
-  grid-template-columns: minmax(0, 1fr) 56px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .viewer-region {
@@ -4630,7 +4677,7 @@ onBeforeUnmount(() => {
   gap: var(--spacing-sm);
   align-items: center;
   justify-content: space-between;
-  min-height: 56px;
+  min-height: 48px;
   padding: var(--spacing-sm) var(--spacing-md);
   border-bottom: 1px solid var(--border-color-light);
 }
@@ -4641,9 +4688,23 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.sidebar.is-collapsed {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: auto;
+  transform: translateY(-50%);
+  background: transparent;
+  border-left: 0;
+  z-index: 40;
+}
+
 .sidebar.is-collapsed .sidebar-heading {
   justify-content: center;
-  padding-inline: var(--spacing-sm);
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border-bottom: 0;
 }
 
 .sidebar-sections {
@@ -4652,8 +4713,7 @@ onBeforeUnmount(() => {
 }
 
 .tool-section {
-  padding: var(--spacing-md);
-  border-bottom: 1px solid var(--border-color-light);
+  padding: var(--spacing-sm) var(--spacing-md);
 }
 
 .tool-section h3 {
@@ -4661,6 +4721,73 @@ onBeforeUnmount(() => {
   font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+/* 选项方糖开关：单选 / 多选统一外观（BIM 材质、视图辅助、画布背景） */
+.option-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.option-chip {
+  display: inline-flex;
+  flex: 1 1 0;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--bg-control);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-xs);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.option-chip:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-control-hover);
+  border-color: var(--border-color-hover);
+}
+
+.option-chip.is-active {
+  font-weight: 600;
+  color: var(--color-primary-active);
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+
+.option-chip.is-active .el-icon {
+  color: var(--color-primary);
+}
+
+.option-chip:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.view-tools .section-note {
+  margin: 0;
+}
+
+.view-tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-compact);
+}
+
+.view-tools h3 {
+  margin: 0;
 }
 
 .mesh-segmented {
@@ -4870,16 +4997,6 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   min-height: var(--control-height, 32px);
   gap: var(--spacing-compact);
-}
-
-.background-options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--spacing-sm);
-}
-
-.theme-chip {
-  justify-content: flex-start;
 }
 
 .theme-swatch {
