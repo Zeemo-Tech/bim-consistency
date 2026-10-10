@@ -950,7 +950,8 @@ const handleCompleteCalibration = async () => {
     ElMessage.success('校准结果已保存')
     if (isStep2Flow.value) {
       persistStep2ReturnState(true)
-      handleReturn()
+      // 嵌入式第二步：完成校准仅保存，不自动返回
+      if (!props.embedded) handleReturn()
     }
     return
   }
@@ -981,7 +982,8 @@ const handleCompleteCalibration = async () => {
     ElMessage.success('校准已保存')
     if (isStep2Flow.value) {
       persistStep2ReturnState(true)
-      handleReturn()
+      // 嵌入式第二步：完成校准仅保存，不自动返回
+      if (!props.embedded) handleReturn()
     }
   } catch (error: any) {
     if (destroyed) return
