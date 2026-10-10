@@ -298,6 +298,11 @@
         </span>
       </div>
 
+      <div v-if="c2mAutoRunning" class="c2m-auto-hint" role="status">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        正在自动计算偏差并加载到场景…
+      </div>
+
       <section class="c2m-primary-card" aria-label="快速预估主要操作">
         <div class="c2m-primary-toggle">
           <span>
@@ -331,11 +336,41 @@
           type="primary"
           :loading="c2mRunning"
           :disabled="!c2mCanRun"
-          @click="handleC2MRun"
+          @click="handleC2MRun()"
         >
           <el-icon><Promotion /></el-icon>
-          开始快速预估
+          {{ c2mResult ? '重新预估' : '开始快速预估' }}
         </el-button>
+
+        <el-button
+          class="c2m-apply-button"
+          size="small"
+          :loading="c2mRecoloring"
+          :disabled="!canRecolorC2M"
+          @click="handleC2MRecolor"
+        >
+          <el-icon><CircleCheck /></el-icon>
+          {{ c2mSettingsDirty ? '应用配色与分布' : '当前设置已应用' }}
+        </el-button>
+        <div class="c2m-actions">
+          <el-button
+            size="small"
+            :loading="props.c2mLoading"
+            :disabled="!c2mResult || c2mRunning || props.c2mLoading"
+            @click="handleLoadC2MPly"
+          >
+            <el-icon v-if="!props.c2mLoading"><Download /></el-icon>
+            加载到场景
+          </el-button>
+          <el-button
+            size="small"
+            :disabled="!props.meshLoaded"
+            @click="handleClearC2MScene"
+          >
+            <el-icon><Delete /></el-icon>
+            清空场景
+          </el-button>
+        </div>
         <p v-if="!hasRemeshResult" class="c2m-search-hint">
           需先完成 BIM 网格均匀化（本页下方「网格均匀化」）。
         </p>
@@ -559,35 +594,6 @@
               </template>
             </div>
           </div>
-
-          <el-button
-            class="c2m-apply-button"
-            size="small"
-            :loading="c2mRecoloring"
-            :disabled="!canRecolorC2M"
-            @click="handleC2MRecolor"
-          >
-            <el-icon><CircleCheck /></el-icon>
-            {{ c2mSettingsDirty ? '应用配色与分布' : '当前设置已应用' }}
-          </el-button>
-          <div class="c2m-actions">
-            <el-button
-              size="small"
-              :disabled="!c2mResult || c2mRunning"
-              @click="handleLoadC2MPly"
-            >
-              <el-icon><Download /></el-icon>
-              加载到场景
-            </el-button>
-            <el-button
-              size="small"
-              :disabled="!props.meshLoaded"
-              @click="handleClearC2MScene"
-            >
-              <el-icon><Delete /></el-icon>
-              清空场景
-            </el-button>
-          </div>
         </div>
       </details>
 
@@ -685,6 +691,7 @@ import {
   FullScreen,
   Grid,
   Histogram,
+  Loading,
   Promotion,
   Setting,
 } from '@element-plus/icons-vue'
@@ -731,6 +738,8 @@ const props = defineProps<{
   wireAvailable?: boolean
   /** 父组件加载 C2M 后的 per-vertex 距离（与 PLY 顶点顺序一致），用于本地直方图 */
   c2mDistances?: Float32Array | null
+  /** 父组件正在下载并加载赋色网格：用于禁用按钮并显示转圈动画 */
+  c2mLoading?: boolean
   /** 只渲染指定分区：工作流分步时用于把「网格均匀化」与「偏差对比」拆到不同步骤 */
   section?: 'all' | 'remesh' | 'c2m'
 }>()
@@ -1689,9 +1698,9 @@ async function syncDistancesToParent(): Promise<void> {
   }
 }
 
-async function hydrateC2MFromServer() {
-  if (!props.projectId || !props.scanId || !props.bimFileId) return
-  if (!props.hasAlignment || !hasRemeshResult.value) return
+async function hydrateC2MFromServer(): Promise<boolean> {
+  if (!props.projectId || !props.scanId || !props.bimFileId) return false
+  if (!props.hasAlignment || !hasRemeshResult.value) return false
   try {
     const res = await getC2MLatest(
       props.projectId,
@@ -1705,11 +1714,49 @@ async function hydrateC2MFromServer() {
         c2mVoxelSize.value = res.data.voxelSize
       }
       await syncDistancesToParent()
+      return true
     }
   } catch {
     /* 无服务端缓存 */
   }
+  return false
 }
+
+/** 进入第三步后是否已触发过「自动出结果 → 自动加载场景」，避免重复触发。 */
+const c2mAutoTriggered = ref(false)
+/** 自动流程进行中（面板提示用）。 */
+const c2mAutoRunning = ref(false)
+
+/**
+ * 作用：把「开始快速预估 + 加载到场景」两步自动化。
+ * 进入偏差对比步骤时，优先命中服务端 latest 缓存直接加载；
+ * 无缓存则自动执行一次 C2M 计算，完成后自动加载到场景。
+ */
+async function autoPrepareC2M() {
+  if (props.section === 'remesh') return
+  if (c2mAutoTriggered.value) return
+  if (!c2mCanRun.value) return
+  c2mAutoTriggered.value = true
+  c2mAutoRunning.value = true
+  try {
+    const hydrated = await hydrateC2MFromServer()
+    if (hydrated) {
+      handleLoadC2MPly()
+      return
+    }
+    await handleC2MRun({ auto: true })
+    if (c2mResult.value) handleLoadC2MPly()
+  } finally {
+    c2mAutoRunning.value = false
+  }
+}
+
+watch(
+  () => [props.projectId, props.scanId, props.bimFileId] as const,
+  () => {
+    c2mAutoTriggered.value = false
+  },
+)
 
 watch(
   () =>
@@ -1721,7 +1768,7 @@ watch(
       hasRemeshResult.value,
     ] as const,
   () => {
-    void hydrateC2MFromServer()
+    void autoPrepareC2M()
   },
   { immediate: true },
 )
@@ -1742,7 +1789,8 @@ watch(
   },
 )
 
-async function handleC2MRun() {
+async function handleC2MRun(options: { auto?: boolean } = {}) {
+  const auto = options.auto === true
   if (!c2mCanRun.value) return
   c2mRunning.value = true
   c2mResult.value = null
@@ -1775,7 +1823,9 @@ async function handleC2MRun() {
     )
     c2mResult.value = res.data
     c2mSettingsDirty.value = false
-    ElMessage.success('C2M 计算完成')
+    ElMessage.success(
+      auto ? '偏差预估已自动完成，正在加载到场景…' : 'C2M 计算完成',
+    )
     await syncDistancesToParent()
   } catch (e: any) {
     if (
@@ -2057,9 +2107,10 @@ function histBarColor(index: number): string {
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-top: 20px;
   background: none;
   border: none;
-  padding: 4px 0;
+  // padding: 4px 0;
   cursor: pointer;
   color: var(--text-secondary);
   font-size: 12px;
@@ -2176,6 +2227,18 @@ function histBarColor(index: number): string {
 }
 .c2m-history-hint {
   margin-bottom: 8px;
+}
+.c2m-auto-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #d6e4ff;
+  background: #f2f7ff;
+  color: #3b6bd6;
+  font-size: 12px;
 }
 .c2m-pick-hint {
   margin-top: 6px;

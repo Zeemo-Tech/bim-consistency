@@ -134,46 +134,46 @@ export interface ComputeModelAlignmentParams {
 
 // 精细化配准请求参数
 export interface FineAlignmentParams {
-  modelScanFileId: number;
-  modelBimFileId: number;
-  maxCorrespondenceDistance?: number;
-  rmseRegressRatio?: number;
-  fitnessRegressRatio?: number;
-  applyWhenRegressed?: boolean;
+  modelScanFileId: number
+  modelBimFileId: number
+  maxCorrespondenceDistance?: number
+  rmseRegressRatio?: number
+  fitnessRegressRatio?: number
+  applyWhenRegressed?: boolean
 }
 
 // 精细化配准评估指标
 export interface FineAlignmentMetrics {
-  initFitness: number;
-  initRmse: number;
-  fineFitness: number;
-  fineRmse: number;
-  deltaTranslationM: number;
-  deltaRotationDeg: number;
-  elapsedS: number;
-  sourceTotalPoints: number;
-  targetPoints: number;
+  initFitness: number
+  initRmse: number
+  fineFitness: number
+  fineRmse: number
+  deltaTranslationM: number
+  deltaRotationDeg: number
+  elapsedS: number
+  sourceTotalPoints: number
+  targetPoints: number
 }
 
 // 精细化配准结果
 export interface FineAlignmentResult {
-  modelScanFileId: number;
-  modelBimFileId: number;
-  modelMatrix: number[];
-  regressed: boolean;
-  appliedFineResult: boolean;
-  fallback: boolean;
-  rmseRegressRatio: number;
-  fitnessRegressRatio: number;
-  applyWhenRegressed: boolean;
-  metrics: FineAlignmentMetrics;
-  modelRotationQx: number;
-  modelRotationQy: number;
-  modelRotationQz: number;
-  modelRotationQw: number;
-  modelTranslationX: number;
-  modelTranslationY: number;
-  modelTranslationZ: number;
+  modelScanFileId: number
+  modelBimFileId: number
+  modelMatrix: number[]
+  regressed: boolean
+  appliedFineResult: boolean
+  fallback: boolean
+  rmseRegressRatio: number
+  fitnessRegressRatio: number
+  applyWhenRegressed: boolean
+  metrics: FineAlignmentMetrics
+  modelRotationQx: number
+  modelRotationQy: number
+  modelRotationQz: number
+  modelRotationQw: number
+  modelTranslationX: number
+  modelTranslationY: number
+  modelTranslationZ: number
 }
 
 // Scan 与 Gauss 绑定请求参数
@@ -228,13 +228,9 @@ export const getScanPreview = async (
   )
 
   const points = response.data?.trajectory?.points ?? []
-  const invalidIndex = points.findIndex(
-    (point) => !Number.isFinite(point.z),
-  )
+  const invalidIndex = points.findIndex((point) => !Number.isFinite(point.z))
   if (invalidIndex >= 0) {
-    throw new Error(
-      `预览接口返回的轨迹点缺少真实高度(z)，索引 ${invalidIndex}`,
-    )
+    throw new Error(`预览接口返回的轨迹点缺少真实高度(z)，索引 ${invalidIndex}`)
   }
 
   return response
@@ -347,7 +343,7 @@ export const computeFineAlignment = (
       timeout: 1800000,
     },
   )
-};
+}
 
 /**
  * 保存/覆盖 scan 与 gauss 的绑定关系
@@ -366,6 +362,63 @@ export const saveGaussAlignment = (
       },
     },
   )
+}
+
+// 分析草稿（步骤状态 / 用户配置 / 模型与分析参数 / 已完成的编辑结果）
+export interface AlignmentDraftPayload {
+  /** 关联的 BIM 文件 */
+  bimFileId?: number
+  /** 当前工作流步骤（1 配准 / 2 CAD校准 / 3 偏差对比 / 4 出报告） */
+  step: number
+  /** 配准阶段：coarse / fine */
+  registrationStage?: string
+  /** 其余步骤状态、用户配置、分析参数与编辑结果（自由结构，由后端持久化） */
+  data?: Record<string, unknown>
+}
+
+/** 草稿保存结果 */
+export interface AlignmentDraftResult {
+  id?: number
+  /** 服务端记录的最近保存时间（ISO 字符串） */
+  updatedAt?: string
+}
+
+/**
+ * 保存 BIM-点云分析草稿。
+ *
+ * 说明：需后端提供 `POST /api/projects/:projectId/scans/:scanFileId/alignment/draft`
+ * （upsert 语义，按 projectId + scanFileId + bimFileId 覆盖）。
+ */
+export const saveAlignmentDraft = (
+  projectId: number,
+  scanFileId: number,
+  payload: AlignmentDraftPayload,
+) => {
+  return http.request<Result<AlignmentDraftResult>>(
+    'post',
+    `/api/projects/${projectId}/scans/${scanFileId}/alignment/draft`,
+    {
+      data: payload,
+      headers: { 'Content-Type': 'application/json' },
+    },
+  )
+}
+
+/**
+ * 获取最近一次分析草稿（用于进入页面恢复）。
+ *
+ * 说明：需后端提供 `GET /api/projects/:projectId/scans/:scanFileId/alignment/draft`。
+ */
+export const getAlignmentDraft = (
+  projectId: number,
+  scanFileId: number,
+  bimFileId?: number,
+) => {
+  return http.request<
+    Result<AlignmentDraftResult & { payload?: AlignmentDraftPayload }>
+  >('get', `/api/projects/${projectId}/scans/${scanFileId}/alignment/draft`, {
+    params: bimFileId ? { bimFileId } : undefined,
+  })
 }
 
 /**

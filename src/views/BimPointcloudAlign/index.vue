@@ -3,8 +3,20 @@
     ref="containerEl"
     class="BimPointcloudAlign-container calibration-page cb-shell"
   >
-    <!-- 顶部工具栏：仅保留步骤条 -->
+    <!-- 顶部工具栏：左侧返回 / 中间步骤条 / 右侧草稿与全屏 -->
     <div class="topbar calibration-header">
+      <div class="topbar-left header-back">
+        <button
+          type="button"
+          class="back-to-project"
+          aria-label="返回"
+          @click="handleBackToProject"
+        >
+          <el-icon aria-hidden="true"><ArrowLeft /></el-icon>
+          <span>返回</span>
+        </button>
+      </div>
+
       <nav class="alignment-workflow-nav" aria-label="BIM 与点云分析流程">
         <div class="alignment-workflow-track">
           <button
@@ -32,6 +44,78 @@
           </button>
         </div>
       </nav>
+
+      <div class="topbar-right header-actions">
+        <el-tooltip
+          :content="saveDraftTooltip"
+          placement="bottom"
+          :show-after="300"
+        >
+          <button
+            type="button"
+            class="header-icon-btn"
+            :class="{ 'is-saved': draftSaved && !savingDraft }"
+            aria-label="保存草稿"
+            :aria-busy="savingDraft"
+            @click="handleSaveDraft"
+          >
+            <el-icon v-if="savingDraft" class="is-loading" aria-hidden="true">
+              <Loading />
+            </el-icon>
+            <el-icon v-else-if="draftSaved" aria-hidden="true">
+              <DocumentChecked />
+            </el-icon>
+            <el-icon v-else aria-hidden="true"><Document /></el-icon>
+          </button>
+        </el-tooltip>
+
+        <el-tooltip
+          :content="isFullscreen ? '退出全屏' : '进入全屏'"
+          placement="bottom"
+          :show-after="300"
+        >
+          <button
+            type="button"
+            class="header-icon-btn"
+            :aria-label="isFullscreen ? '退出全屏' : '进入全屏'"
+            :aria-pressed="isFullscreen"
+            @click="toggleFullscreen"
+          >
+            <svg
+              v-if="isFullscreen"
+              class="header-icon-svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 4v5H4" />
+              <path d="M15 4v5h5" />
+              <path d="M9 20v-5H4" />
+              <path d="M15 20v-5h5" />
+            </svg>
+            <svg
+              v-else
+              class="header-icon-svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 9V4h5" />
+              <path d="M20 9V4h-5" />
+              <path d="M4 15v5h5" />
+              <path d="M20 15v5h-5" />
+            </svg>
+          </button>
+        </el-tooltip>
+      </div>
     </div>
 
     <div
@@ -1199,6 +1283,7 @@
               :wire-hidden="remeshWireHidden"
               :wire-available="remeshWireAvailable"
               :c2m-distances="c2mDistanceArray"
+              :c2m-loading="c2mLoading"
               @load-remesh="handleLoadRemesh"
               @toggle-solid="toggleRemeshSolid"
               @toggle-wire="toggleRemeshWire"
@@ -1223,6 +1308,7 @@
               :wire-hidden="remeshWireHidden"
               :wire-available="remeshWireAvailable"
               :c2m-distances="c2mDistanceArray"
+              :c2m-loading="c2mLoading"
               @load-remesh="handleLoadRemesh"
               @toggle-solid="toggleRemeshSolid"
               @toggle-wire="toggleRemeshWire"
@@ -1297,6 +1383,36 @@
         </details>
       </div>
     </el-dialog>
+
+    <el-dialog
+      v-model="showLeaveConfirmDialog"
+      title="未保存的修改"
+      width="440px"
+      append-to-body
+      :close-on-click-modal="false"
+    >
+      <p class="leave-confirm__text">
+        当前步骤存在未保存的修改。返回项目前，请选择如何处理这些改动。
+      </p>
+      <template #footer>
+        <el-button
+          :disabled="savingDraft"
+          @click="showLeaveConfirmDialog = false"
+        >
+          继续编辑
+        </el-button>
+        <el-button :disabled="savingDraft" @click="discardAndLeave">
+          放弃修改
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="savingDraft"
+          @click="saveDraftAndLeave"
+        >
+          保存草稿并返回
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1320,10 +1436,13 @@ import {
   shallowRef,
   watch,
 } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  ArrowLeft,
   DArrowLeft,
   DArrowRight,
+  Document,
+  DocumentChecked,
   Hide,
   Moon,
   RefreshLeft,
@@ -1363,8 +1482,11 @@ import { GLTFExtensionsPlugin } from '3d-tiles-renderer/three/plugins'
 import {
   computeBimAlignment,
   computeFineAlignment,
+  getAlignmentDraft,
   getBimAlignment,
+  saveAlignmentDraft,
   saveGaussAlignment,
+  type AlignmentDraftPayload,
   type FineAlignmentResult,
   type ModelAlignment,
 } from '@/api/calibration'
@@ -5004,6 +5126,12 @@ const togglePointCloudVisibility = () => {
   requestRender()
 }
 
+/** 作用：加载偏差可视化网格后，隐藏点云与 BIM，避免遮挡偏差结果。 */
+const hideCloudAndBimForDeviation = () => {
+  if (hasGltf.value && !modelHidden.value) toggleModelVisibility()
+  if (hasTileset.value && !pointCloudHidden.value) togglePointCloudVisibility()
+}
+
 /** 作用：把点大小应用到已加载点云（点材质 size，与预览页一致）。 */
 /** 作用：把点大小应用到某个对象子树（仅遍历该子树，避免整棵 tileset 反复遍历）。 */
 function applyPointSizeToRoot(root: any, size: number) {
@@ -5222,6 +5350,8 @@ const toggleRemeshWire = () => {
 let c2mMeshObj: THREE.Mesh | null = null
 /** 与 mesh 顶点顺序一致的 float32 距离，供面板直方图与动态色温 */
 const c2mDistanceArray = shallowRef<Float32Array | null>(null)
+/** 正在下载/解析赋色网格：驱动面板「加载到场景」按钮转圈并禁用 */
+const c2mLoading = ref(false)
 const c2mVizMaxColormap = ref(0.1)
 const c2mVizToleranceLimit = ref(0.05)
 
@@ -5277,6 +5407,7 @@ async function handleLoadC2MPly(payload: C2MLoadPayload) {
     return
   }
 
+  c2mLoading.value = true
   const cachedDist = c2mDistanceArray.value
 
   if (c2mMeshObj) {
@@ -5353,6 +5484,7 @@ async function handleLoadC2MPly(payload: C2MLoadPayload) {
     c2mMeshObj.position.copy(targetPos)
     c2mMeshObj.quaternion.copy(targetQuat)
     scene.add(c2mMeshObj)
+    hideCloudAndBimForDeviation()
     requestRender()
 
     const distHint = distArr
@@ -5366,6 +5498,7 @@ async function handleLoadC2MPly(payload: C2MLoadPayload) {
     c2mDistanceArray.value = null
     ElMessage.error(`加载 C2M 网格失败: ${e?.message ?? e}`)
   } finally {
+    c2mLoading.value = false
     if (blobUrl) URL.revokeObjectURL(blobUrl)
   }
 }
@@ -6588,6 +6721,8 @@ async function autoLoadSceneResources(force = false) {
 
   await Promise.allSettled(tasks)
   await fetchAndRestoreBimAlignment()
+  // 资源与已保存配准就绪后，恢复上次草稿中的步骤 / 配置
+  await restoreAlignmentDraft()
 }
 
 /** 作用：根据材质模式设置 renderer 的色调映射（unlit 关闭 toneMapping）。 */
@@ -7717,8 +7852,312 @@ async function initThree() {
   requestRender()
 }
 
+// ── 顶部：返回 / 保存草稿 / 全屏 ───────────────────────────────────
+/** 粗配准/精配准是否存在未保存改动。 */
+const hasPendingEdits = computed(
+  () =>
+    coarseAlignmentDirty.value ||
+    (!!fineAlignResult.value && !fineAlignmentSaved.value),
+)
+/** 存在尚未保存为草稿的改动（保存草稿后不再提示）。 */
+const hasUnsavedChanges = computed(
+  () => hasPendingEdits.value && !draftSaved.value,
+)
+
+const showLeaveConfirmDialog = ref(false)
+const leavingPage = ref(false)
+
+function leavePage() {
+  if (leavingPage.value) return
+  leavingPage.value = true
+  const done = () => {
+    leavingPage.value = false
+  }
+  // 优先回到进入分析时的来源页（列表页「进入分析」按钮所在页）
+  const returnTo = getQueryString('returnTo')
+  if (returnTo) {
+    void router
+      .push(returnTo)
+      .catch(() => undefined)
+      .finally(done)
+    return
+  }
+  if (window.history.length > 1) {
+    router.back()
+    done()
+    return
+  }
+  void router
+    .push({
+      name: 'CloudBimSurvey',
+      query: projectId.value ? { projectId: String(projectId.value) } : {},
+    })
+    .catch(() => undefined)
+    .finally(done)
+}
+
+function handleBackToProject() {
+  if (leavingPage.value) return
+  if (hasUnsavedChanges.value) {
+    showLeaveConfirmDialog.value = true
+    return
+  }
+  leavePage()
+}
+
+function discardAndLeave() {
+  showLeaveConfirmDialog.value = false
+  leavePage()
+}
+
+async function saveDraftAndLeave() {
+  const ok = await performSaveDraft()
+  if (ok) {
+    showLeaveConfirmDialog.value = false
+    leavePage()
+  }
+}
+
+// ── 保存草稿 ──────────────────────────────────────────────────────
+const savingDraft = ref(false)
+/** 草稿是否已保存（用于图标：未保存灰色 / 已保存绿色）。 */
+const draftSaved = ref(false)
+const lastDraftSavedAt = ref<Date | null>(null)
+
+// 步骤或配准编辑变化后，草稿回到「未保存」状态。
+watch(
+  () => [
+    activeWorkflowStep.value,
+    registrationStage.value,
+    coarseAlignmentDirty.value,
+    fineAlignmentSaved.value,
+  ],
+  () => {
+    draftSaved.value = false
+  },
+)
+
+const saveDraftTooltip = computed(() => {
+  const at = lastDraftSavedAt.value
+  if (!at) return '保存草稿'
+  const hh = String(at.getHours()).padStart(2, '0')
+  const mm = String(at.getMinutes()).padStart(2, '0')
+  const ss = String(at.getSeconds()).padStart(2, '0')
+  return `保存草稿（上次 ${hh}:${mm}:${ss}）`
+})
+
+/** 收集当前步骤的有效工作数据（步骤状态 / 配置 / 参数 / 编辑结果）。 */
+function collectDraftPayload(): AlignmentDraftPayload {
+  return {
+    bimFileId: bimFileId.value || undefined,
+    step: activeWorkflowStep.value,
+    registrationStage: registrationStage.value,
+    data: {
+      hasSavedAlignmentMatrix: hasSavedAlignmentMatrix.value,
+      coarseAlignmentDirty: coarseAlignmentDirty.value,
+      fineAlignmentSaved: fineAlignmentSaved.value,
+      latestAlignment: latestAlignmentResult.value ?? null,
+      fineAlignment: fineAlignResult.value ?? null,
+      view: {
+        projectionMode: projectionMode.value,
+        showGrid: showGrid.value,
+        backgroundColor: backgroundColor.value,
+        pointcloudPointSize: pointcloudPointSize.value,
+        pointcloudColorMode: pointcloudColorMode.value,
+      },
+    },
+  }
+}
+
+async function performSaveDraft(): Promise<boolean> {
+  if (savingDraft.value) return false
+  if (!projectId.value || !scanFileId.value) {
+    ElMessage.warning('缺少项目或扫描文件，无法保存草稿')
+    return false
+  }
+  savingDraft.value = true
+  try {
+    // 先把当前配准编辑固化为后端校准矩阵，确保重新进入分析后可恢复
+    if (hasModel.value && hasTileset.value) {
+      await saveCalibrationResult()
+    }
+    await saveAlignmentDraft(
+      projectId.value,
+      scanFileId.value,
+      collectDraftPayload(),
+    )
+    lastDraftSavedAt.value = new Date()
+    draftSaved.value = true
+    ElMessage.success('草稿已保存')
+    return true
+  } catch (error: any) {
+    ElMessage.error(
+      `草稿保存失败：${error?.response?.data?.msg || error?.message || '未知错误'}`,
+    )
+    return false
+  } finally {
+    savingDraft.value = false
+  }
+}
+
+async function handleSaveDraft() {
+  await performSaveDraft()
+}
+
+// ── 草稿恢复 ──────────────────────────────────────────────────────
+const draftRestoreKey = ref('')
+
+/** 作用：把「最近保存时间」格式化为 HH:mm。 */
+function formatDraftClock(at: Date | null): string {
+  if (!at) return ''
+  const hh = String(at.getHours()).padStart(2, '0')
+  const mm = String(at.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
+/** 作用：读取已询问过的草稿标记（跨刷新持久化）。 */
+function readDraftPromptedStamp(storageKey: string): string {
+  try {
+    return localStorage.getItem(storageKey) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** 作用：写入已询问过的草稿标记（跨刷新持久化）。 */
+function writeDraftPromptedStamp(storageKey: string, stamp: string) {
+  try {
+    localStorage.setItem(storageKey, stamp)
+  } catch {
+    /* 忽略存储失败（如隐私模式） */
+  }
+}
+
+/** 作用：进入分析后拉取上次草稿，弹窗询问是否恢复步骤 / 配准阶段 / 视图配置。 */
+async function restoreAlignmentDraft() {
+  if (!projectId.value || !scanFileId.value || !bimFileId.value) return
+  const key = `${projectId.value}:${scanFileId.value}:${bimFileId.value}`
+  if (draftRestoreKey.value === key) return
+  draftRestoreKey.value = key
+  try {
+    const res = await getAlignmentDraft(
+      projectId.value,
+      scanFileId.value,
+      bimFileId.value,
+    )
+    if (res?.code !== 200 || !res.data?.payload) return
+    const payload = res.data.payload
+    const updatedAt = res.data.updatedAt ? new Date(res.data.updatedAt) : null
+    const clock = formatDraftClock(updatedAt)
+
+    // 同一扫描只询问一次（含整页刷新；之后即使有新草稿也不再询问）
+    const promptStorageKey = `bim_alignment_draft_prompted:${key}`
+    if (readDraftPromptedStamp(promptStorageKey)) return
+
+    try {
+      await ElMessageBox.confirm(
+        `检测到上次保存的草稿${clock ? `（${clock}）` : ''}，是否恢复到保存时的状态？`,
+        '恢复草稿',
+        {
+          confirmButtonText: '恢复草稿',
+          cancelButtonText: '暂不恢复',
+          type: 'info',
+          distinguishCancelAndClose: true,
+        },
+      )
+    } catch {
+      // 用户选择「暂不恢复」：保持进入时的默认状态
+      writeDraftPromptedStamp(promptStorageKey, '1')
+      return
+    }
+    writeDraftPromptedStamp(promptStorageKey, '1')
+    applyDraftPayload(payload)
+    // 等待步骤/配准阶段变化触发的「未保存」watch 执行完，再回填已保存状态
+    await nextTick()
+    lastDraftSavedAt.value = updatedAt
+    draftSaved.value = true
+  } catch {
+    /* 无草稿：忽略 */
+  }
+}
+
+/** 作用：把草稿内容应用到当前页面。 */
+function applyDraftPayload(payload: AlignmentDraftPayload) {
+  const data = (payload.data ?? {}) as Record<string, any>
+
+  // 视图配置
+  const view = data.view as Record<string, any> | undefined
+  if (view) {
+    if (typeof view.backgroundColor === 'string') {
+      backgroundColor.value = view.backgroundColor
+      onBackgroundColorChange()
+    }
+    if (
+      view.projectionMode === 'perspective' ||
+      view.projectionMode === 'orthographic'
+    ) {
+      setProjectionMode(view.projectionMode)
+    }
+    if (
+      typeof view.showGrid === 'boolean' &&
+      view.showGrid !== showGrid.value
+    ) {
+      showGrid.value = view.showGrid
+      onShowGridChange()
+    }
+    if (typeof view.pointcloudPointSize === 'number') {
+      pointcloudPointSize.value = view.pointcloudPointSize
+      applyPointcloudPointSize(view.pointcloudPointSize)
+    }
+    if (
+      view.pointcloudColorMode === 'rgb' ||
+      view.pointcloudColorMode === 'intensity'
+    ) {
+      pointcloudColorMode.value = view.pointcloudColorMode
+      applyPointcloudDisplay()
+    }
+  }
+
+  // 配准阶段
+  if (
+    payload.registrationStage === 'coarse' ||
+    payload.registrationStage === 'fine'
+  ) {
+    registrationStage.value = payload.registrationStage
+  }
+
+  // 工作流步骤：偏差对比步骤需已保存配准
+  const step = Number(payload.step)
+  if (step === 1 || step === 3) {
+    const allowed = step === 1 || canOpenDeviationStep.value
+    if (allowed && step !== activeWorkflowStep.value) {
+      activeWorkflowStep.value = step
+      showPanel.value = true
+      void router.replace({ query: { ...route.query, step: String(step) } })
+    }
+  }
+}
+
+// ── 全屏 ──────────────────────────────────────────────────────────
+const isFullscreen = ref(false)
+function updateFullscreenState() {
+  isFullscreen.value = !!document.fullscreenElement
+}
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen()
+    } else {
+      await (containerEl.value ?? document.documentElement).requestFullscreen()
+    }
+  } catch {
+    ElMessage.warning('当前浏览器不支持全屏')
+  }
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onMeasureKeyDown)
+  document.addEventListener('fullscreenchange', updateFullscreenState)
   if (!webgpuSupported.value) {
     statusText.value =
       'WebGPU not supported. Please use Chrome/Edge with WebGPU enabled.'
@@ -7810,6 +8249,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(positionFixFrameHandle)
   cancelAnimationFrame(orientationFixFrameHandle)
   window.removeEventListener('keydown', onMeasureKeyDown)
+  document.removeEventListener('fullscreenchange', updateFullscreenState)
   edlPipeline?.dispose?.()
   edlPipeline = null
   resizeObserver?.disconnect()
