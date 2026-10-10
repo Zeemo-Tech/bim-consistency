@@ -421,6 +421,59 @@ export const getAlignmentDraft = (
   })
 }
 
+/** 草稿版本列表项 */
+export interface AlignmentDraftVersion {
+  id: number
+  step: number
+  registrationStage?: string
+  updatedAt?: string
+}
+
+/**
+ * 查询分析草稿版本列表（按时间倒序）。
+ */
+export const listAlignmentDrafts = (
+  projectId: number,
+  scanFileId: number,
+  bimFileId?: number,
+) => {
+  return http.request<Result<AlignmentDraftVersion[]>>(
+    'get',
+    `/api/projects/${projectId}/scans/${scanFileId}/alignment/drafts`,
+    { params: bimFileId ? { bimFileId } : undefined },
+  )
+}
+
+/**
+ * 按 ID 查询某一条草稿（用于回溯）。
+ */
+export const getAlignmentDraftById = (
+  projectId: number,
+  scanFileId: number,
+  draftId: number,
+) => {
+  return http.request<
+    Result<AlignmentDraftResult & { payload?: AlignmentDraftPayload }>
+  >(
+    'get',
+    `/api/projects/${projectId}/scans/${scanFileId}/alignment/drafts/${draftId}`,
+  )
+}
+
+/**
+ * 删除指定草稿。
+ */
+export const deleteAlignmentDraft = (
+  projectId: number,
+  scanFileId: number,
+  draftId: number,
+) => {
+  return http.request<Result<AlignmentDraftResult>>(
+    'delete',
+    `/api/projects/${projectId}/scans/${scanFileId}/alignment/drafts/${draftId}`,
+  )
+}
+
 /**
  * 获取轨迹点关联图片
  */

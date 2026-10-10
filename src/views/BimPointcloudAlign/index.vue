@@ -55,9 +55,10 @@
             type="button"
             class="header-icon-btn"
             :class="{ 'is-saved': draftSaved && !savingDraft }"
-            aria-label="保存草稿"
+            aria-label="保存草稿（右键查看历史草稿）"
             :aria-busy="savingDraft"
             @click="handleSaveDraft"
+            @contextmenu.prevent="openDraftMenu"
           >
             <el-icon v-if="savingDraft" class="is-loading" aria-hidden="true">
               <Loading />
@@ -1413,6 +1414,65 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <Teleport to="body">
+      <div
+        v-if="draftMenuVisible"
+        class="draft-menu-backdrop"
+        @click="closeDraftMenu"
+        @contextmenu.prevent="closeDraftMenu"
+      />
+      <div
+        v-if="draftMenuVisible"
+        ref="draftMenuEl"
+        class="draft-menu"
+        role="menu"
+        :style="{ left: `${draftMenuX}px`, top: `${draftMenuY}px` }"
+      >
+        <div class="draft-menu__header">历史草稿</div>
+        <div v-if="draftVersionsLoading" class="draft-menu__empty">加载中…</div>
+        <div v-else-if="!draftVersions.length" class="draft-menu__empty">
+          暂无草稿
+        </div>
+        <ul v-else class="draft-menu__list">
+          <li
+            v-for="item in draftVersions"
+            :key="item.id"
+            class="draft-menu__item"
+          >
+            <button
+              type="button"
+              class="draft-menu__main"
+              :disabled="restoringDraftId !== null"
+              @click="restoreDraftVersion(item)"
+            >
+              <span class="draft-menu__time">
+                {{ formatDraftVersionTime(item.updatedAt) }}
+              </span>
+              <span class="draft-menu__meta">
+                步骤 {{ item.step
+                }}{{
+                  item.registrationStage === 'fine'
+                    ? ' · 精配准'
+                    : item.registrationStage === 'coarse'
+                      ? ' · 粗配准'
+                      : ''
+                }}
+              </span>
+            </button>
+            <button
+              type="button"
+              class="draft-menu__del"
+              aria-label="删除该草稿"
+              :disabled="restoringDraftId !== null"
+              @click.stop="deleteDraftVersion(item)"
+            >
+              <el-icon><Delete /></el-icon>
+            </button>
+          </li>
+        </ul>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1441,6 +1501,7 @@ import {
   ArrowLeft,
   DArrowLeft,
   DArrowRight,
+  Delete,
   Document,
   DocumentChecked,
   Hide,
@@ -1482,11 +1543,15 @@ import { GLTFExtensionsPlugin } from '3d-tiles-renderer/three/plugins'
 import {
   computeBimAlignment,
   computeFineAlignment,
+  deleteAlignmentDraft,
   getAlignmentDraft,
+  getAlignmentDraftById,
   getBimAlignment,
+  listAlignmentDrafts,
   saveAlignmentDraft,
   saveGaussAlignment,
   type AlignmentDraftPayload,
+  type AlignmentDraftVersion,
   type FineAlignmentResult,
   type ModelAlignment,
 } from '@/api/calibration'
@@ -8126,6 +8191,21 @@ function applyDraftPayload(payload: AlignmentDraftPayload) {
     registrationStage.value = payload.registrationStage
   }
 
+  // 配准矩阵：用草稿记录的值把模型恢复到保存时的位置
+  const latestAlignment = data.latestAlignment as ModelAlignment | null
+  if (
+    latestAlignment &&
+    Array.isArray(latestAlignment.modelMatrix) &&
+    latestAlignment.modelMatrix.length === 16
+  ) {
+    latestAlignmentResult.value = latestAlignment
+    hasSavedAlignmentMatrix.value = true
+    coarseAlignmentDirty.value = false
+    pendingAlignmentRestore.value = latestAlignment
+    // 资源已加载时立即应用；否则等加载完成后的现有恢复流程处理
+    tryRestoreSavedBimAlignment(true)
+  }
+
   // 工作流步骤：偏差对比步骤需已保存配准
   const step = Number(payload.step)
   if (step === 1 || step === 3) {
@@ -8135,6 +8215,158 @@ function applyDraftPayload(payload: AlignmentDraftPayload) {
       showPanel.value = true
       void router.replace({ query: { ...route.query, step: String(step) } })
     }
+  }
+}
+
+// ── 草稿版本右键菜单（回溯 / 删除）─────────────────────────────────
+const draftMenuVisible = ref(false)
+const draftMenuX = ref(0)
+const draftMenuY = ref(0)
+const draftMenuAnchorX = ref(0)
+const draftMenuAnchorY = ref(0)
+const draftMenuEl = ref<HTMLElement | null>(null)
+const draftVersions = ref<AlignmentDraftVersion[]>([])
+const draftVersionsLoading = ref(false)
+const restoringDraftId = ref<number | null>(null)
+
+/** 作用：把草稿时间格式化为 YYYY-MM-DD HH:mm:ss。 */
+function formatDraftVersionTime(iso?: string): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  )
+}
+
+/** 作用：按菜单实际尺寸把弹窗收敛到视口内，避免右侧/底部被截断。 */
+function clampDraftMenuPosition() {
+  const el = draftMenuEl.value
+  if (!el) return
+  const margin = 8
+  const w = el.offsetWidth
+  const h = el.offsetHeight
+  let x = draftMenuAnchorX.value
+  let y = draftMenuAnchorY.value
+  if (x + w + margin > window.innerWidth) x = window.innerWidth - w - margin
+  if (y + h + margin > window.innerHeight) y = window.innerHeight - h - margin
+  draftMenuX.value = Math.max(margin, x)
+  draftMenuY.value = Math.max(margin, y)
+}
+
+/** 作用：右键保存草稿图标时打开历史草稿菜单。 */
+async function openDraftMenu(e: MouseEvent) {
+  e.preventDefault()
+  draftMenuAnchorX.value = e.clientX
+  draftMenuAnchorY.value = e.clientY
+  draftMenuX.value = e.clientX
+  draftMenuY.value = e.clientY
+  draftMenuVisible.value = true
+  await nextTick()
+  clampDraftMenuPosition()
+  void loadDraftVersions()
+}
+
+function closeDraftMenu() {
+  draftMenuVisible.value = false
+}
+
+/** 作用：视口尺寸变化时重新收敛菜单位置。 */
+function onDraftMenuViewportChange() {
+  if (draftMenuVisible.value) clampDraftMenuPosition()
+}
+
+function onDraftMenuKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && draftMenuVisible.value) {
+    closeDraftMenu()
+  }
+}
+
+async function loadDraftVersions() {
+  if (!projectId.value || !scanFileId.value) {
+    draftVersions.value = []
+    return
+  }
+  draftVersionsLoading.value = true
+  try {
+    const res = await listAlignmentDrafts(
+      projectId.value,
+      scanFileId.value,
+      bimFileId.value || undefined,
+    )
+    draftVersions.value = res?.data ?? []
+    await nextTick()
+    clampDraftMenuPosition()
+  } catch {
+    draftVersions.value = []
+  } finally {
+    draftVersionsLoading.value = false
+  }
+}
+
+/** 作用：回溯到选定的草稿版本。 */
+async function restoreDraftVersion(item: AlignmentDraftVersion) {
+  if (restoringDraftId.value !== null) return
+  if (!projectId.value || !scanFileId.value) return
+  restoringDraftId.value = item.id
+  try {
+    const res = await getAlignmentDraftById(
+      projectId.value,
+      scanFileId.value,
+      item.id,
+    )
+    if (res?.code !== 200 || !res.data?.payload) {
+      ElMessage.error('该草稿内容为空，无法回溯')
+      return
+    }
+    applyDraftPayload(res.data.payload)
+    await nextTick()
+    lastDraftSavedAt.value = res.data.updatedAt
+      ? new Date(res.data.updatedAt)
+      : null
+    draftSaved.value = true
+    closeDraftMenu()
+    ElMessage.success('已回溯到所选草稿')
+  } catch (e: any) {
+    ElMessage.error(
+      `回溯失败：${e?.response?.data?.msg || e?.message || '未知错误'}`,
+    )
+  } finally {
+    restoringDraftId.value = null
+  }
+}
+
+/** 作用：删除指定的草稿版本。 */
+async function deleteDraftVersion(item: AlignmentDraftVersion) {
+  if (!projectId.value || !scanFileId.value) return
+  try {
+    await ElMessageBox.confirm(
+      '删除后不可恢复，确定删除该草稿吗？',
+      '删除草稿',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+  try {
+    await deleteAlignmentDraft(projectId.value, scanFileId.value, item.id)
+    draftVersions.value = draftVersions.value.filter((d) => d.id !== item.id)
+    // 全部草稿删除后，图标回到「未保存」状态
+    if (!draftVersions.value.length) {
+      draftSaved.value = false
+      lastDraftSavedAt.value = null
+    }
+    ElMessage.success('草稿已删除')
+  } catch (e: any) {
+    ElMessage.error(
+      `删除失败：${e?.response?.data?.msg || e?.message || '未知错误'}`,
+    )
   }
 }
 
@@ -8157,6 +8389,8 @@ async function toggleFullscreen() {
 
 onMounted(() => {
   window.addEventListener('keydown', onMeasureKeyDown)
+  window.addEventListener('keydown', onDraftMenuKeydown)
+  window.addEventListener('resize', onDraftMenuViewportChange)
   document.addEventListener('fullscreenchange', updateFullscreenState)
   if (!webgpuSupported.value) {
     statusText.value =
@@ -8218,10 +8452,18 @@ watch(pointcloudPointSize, (value) => {
 })
 
 watch(
-  () => route.fullPath,
-  () => {
-    // 进入同一路由但 query 变化时，也要清空上一次的加载内容
+  () => [projectId.value, scanFileId.value, bimFileId.value] as const,
+  (next, prev) => {
+    // 仅当资源身份（项目/扫描/BIM）变化时清空并重载；
+    // 步骤等 query 变化不触发重载，避免打断草稿恢复后的视图 / 配准阶段。
+    if (
+      !prev ||
+      (next[0] === prev[0] && next[1] === prev[1] && next[2] === prev[2])
+    ) {
+      return
+    }
     if (!renderer || !scene || !contentGroup) return
+    draftRestoreKey.value = ''
     clearScene()
     resetSessionState()
     void nextTick(() => autoLoadSceneResources(true))
@@ -8249,6 +8491,8 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(positionFixFrameHandle)
   cancelAnimationFrame(orientationFixFrameHandle)
   window.removeEventListener('keydown', onMeasureKeyDown)
+  window.removeEventListener('keydown', onDraftMenuKeydown)
+  window.removeEventListener('resize', onDraftMenuViewportChange)
   document.removeEventListener('fullscreenchange', updateFullscreenState)
   edlPipeline?.dispose?.()
   edlPipeline = null
