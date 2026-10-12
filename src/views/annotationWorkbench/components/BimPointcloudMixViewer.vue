@@ -523,6 +523,8 @@ const markerColorCss: Record<'default' | 'editing' | 'saved', string> = {
   saved: '#22c55e',
 }
 const annotationMarkerBaseRadius = 1
+/** 高斯视图用 HTML 覆盖层绘制批注点，直径（px）与其它视图 3D 球体标记一致。 */
+const annotationOverlayMarkerSize = 12
 
 let highlightedElement: {
   mesh: THREE.Mesh
@@ -2084,11 +2086,6 @@ function buildGaussianOverlayMarker(
   )
   if (!projected) return null
   if (props.annotationMarkersVisible === false) return null
-  const distance = Math.max(
-    camera?.position.distanceTo(marker.position) ?? 1,
-    camera?.near ? camera.near * 2 : 0.1,
-    0.1,
-  )
 
   const resolvedStatus = resolveAnnotationStatus(
     marker.userData.annotationStatus as string | undefined,
@@ -2099,7 +2096,7 @@ function buildGaussianOverlayMarker(
     key,
     left: projected.left,
     top: projected.top,
-    size: Math.min(48, Math.max(6, (120 / distance) * (highlighted ? 1.3 : 1))),
+    size: annotationOverlayMarkerSize * (highlighted ? 1.3 : 1),
     color: markerColorCss[resolvedStatus],
     highlighted,
     current: Boolean(options.current),

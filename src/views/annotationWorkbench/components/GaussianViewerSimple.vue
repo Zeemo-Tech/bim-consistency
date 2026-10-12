@@ -520,6 +520,8 @@ const markerColorCss: Record<AnnotationMarkerStatus, string> = {
   editing: '#facc15',
   saved: '#22c55e',
 }
+/** 高斯视图用 HTML 覆盖层绘制批注点，直径（px）与其它视图 3D 球体标记一致。 */
+const annotationOverlayMarkerSize = 12
 const annotationMarkerBaseRadius = 1
 
 const resolveAnnotationStatus = (value?: string) =>
@@ -701,18 +703,13 @@ const buildOverlayMarker = (
   const projected = projectPointToViewport(point, viewportWidth, viewportHeight)
   if (!projected) return null
   if (props.annotationMarkersVisible === false) return null
-  const distance = Math.max(
-    gaussianCamera?.position.distanceTo(point) ?? 1,
-    gaussianCamera?.near ? gaussianCamera.near * 2 : 0.1,
-    0.1,
-  )
   if (annotationOverlayVisibility.get(key) === false) return null
   return {
     key,
     left: projected.left,
     top: projected.top,
     color: markerColorCss[status],
-    size: Math.min(48, Math.max(6, (120 / distance) * (highlighted ? 1.3 : 1))),
+    size: annotationOverlayMarkerSize * (highlighted ? 1.3 : 1),
     highlighted,
     synced,
     current,
