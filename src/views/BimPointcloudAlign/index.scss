@@ -342,6 +342,12 @@
     color: #529b2e;
     background: rgb(103 194 58 / 10%);
   }
+
+  // 激活态（如图纸轨迹弹窗已打开）
+  &.is-on {
+    color: var(--color-primary);
+    background: var(--color-primary-soft);
+  }
 }
 
 .header-icon-svg {
@@ -3405,6 +3411,21 @@
 
 .calibration-page .main-content.calibration-main.is-report-step {
   grid-template-columns: minmax(0, 1fr);
+  background: var(--bg-page-deep);
+}
+
+// 第 4 步：批注工作台（内嵌四分屏）
+.calibration-page .main-content.calibration-main.is-annotation-step {
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--bg-page-deep);
+}
+
+.calibration-page
+  .main-content.calibration-main.is-annotation-step
+  .annotation-workbench {
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
   background: var(--bg-page-deep);
 }
 

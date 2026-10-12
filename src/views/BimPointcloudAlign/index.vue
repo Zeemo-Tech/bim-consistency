@@ -47,6 +47,38 @@
 
       <div class="topbar-right header-actions">
         <el-tooltip
+          v-if="activeWorkflowStep === 4"
+          content="图纸轨迹"
+          placement="bottom"
+          :show-after="300"
+        >
+          <button
+            type="button"
+            class="header-icon-btn"
+            :class="{ 'is-on': showTrajectoryPanel }"
+            aria-label="图纸轨迹"
+            :aria-pressed="showTrajectoryPanel"
+            @click="showTrajectoryPanel = !showTrajectoryPanel"
+          >
+            <svg
+              class="header-icon-svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 17c2.6 0 3.7-9 8-9s5.2 5.4 8 5.4" />
+              <circle cx="4" cy="17" r="1.7" />
+              <circle cx="12" cy="8" r="1.7" />
+              <circle cx="20" cy="13.4" r="1.7" />
+            </svg>
+          </button>
+        </el-tooltip>
+
+        <el-tooltip
           :content="saveDraftTooltip"
           placement="bottom"
           :show-after="300"
@@ -122,20 +154,32 @@
     <div
       class="main-content calibration-main"
       :class="{
-        'is-report-step': activeWorkflowStep === 4,
+        'is-report-step': activeWorkflowStep === 5,
+        'is-annotation-step': activeWorkflowStep === 4,
         'is-cad-step': activeWorkflowStep === 2,
         'is-panel-hidden':
           !showPanel && (activeWorkflowStep === 1 || activeWorkflowStep === 3),
       }"
     >
-      <AnalysisReportView
+      <!-- 第 4 步：批注工作台（复用四分屏页，保留分屏/混合/批注模式） -->
+      <component
+        :is="FourScreenWorkbench"
         v-if="activeWorkflowStep === 4"
+        class="annotation-workbench"
+        :show-trajectory="showTrajectoryPanel"
+        @prev-step="openWorkflowStep(3)"
+        @next-step="openWorkflowStep(5)"
+        @close-trajectory="showTrajectoryPanel = false"
+      />
+
+      <AnalysisReportView
+        v-if="activeWorkflowStep === 5"
         class="report-preview-workspace"
         :project-id="projectId"
         :scan-file-id="scanFileId"
         :project-name="projectNameForDisplay"
         :scan-file-name="pointCloudNameForDisplay"
-        @prev-step="openWorkflowStep(3)"
+        @prev-step="openWorkflowStep(4)"
       />
 
       <CadCalibrationView
@@ -627,7 +671,7 @@
               上一步
             </button>
             <button
-              v-if="activeWorkflowStep < 4"
+              v-if="activeWorkflowStep < 5"
               class="panel-step-count panel-next-step"
               type="button"
               :disabled="
@@ -1338,13 +1382,6 @@
       </button>
     </div>
 
-    <div v-if="activeWorkflowStep !== 3" class="status-bar">
-      <el-tag v-if="!webgpuSupported" type="warning" size="small">
-        WebGPU 不支持
-      </el-tag>
-      <span class="status-text">{{ statusText }}</span>
-    </div>
-
     <el-dialog
       v-model="showAlignmentMatrixDialog"
       title="校准矩阵"
@@ -1592,6 +1629,13 @@ import {
 // CAD 校准页体积较大，按需懒加载，避免拖慢进入分析页面与步骤切换
 const CadCalibrationView = defineAsyncComponent({
   loader: () => import('@/views/data/drawing-calibration/index.vue'),
+  loadingComponent: CadCalibrationLoading,
+  delay: 0,
+})
+
+// 第 4 步「批注」工作台：四分屏页的副本，已按工作台重新布局（懒加载）
+const FourScreenWorkbench = defineAsyncComponent({
+  loader: () => import('@/views/annotationWorkbench/index.vue'),
   loadingComponent: CadCalibrationLoading,
   delay: 0,
 })
@@ -2722,7 +2766,7 @@ const showPanel = ref(true)
 const viewerSuspended = ref(false)
 
 // ---------- 分析工作流（配准 → 出报告）----------
-type WorkflowStepId = 1 | 2 | 3 | 4
+type WorkflowStepId = 1 | 2 | 3 | 4 | 5
 const workflowSteps = [
   {
     id: 1 as const,
@@ -2735,15 +2779,16 @@ const workflowSteps = [
     subtitle: '校准 CAD 图纸与巡检轨迹',
   },
   { id: 3 as const, title: '偏差对比', subtitle: '查看 Scan vs BIM 偏差' },
-  { id: 4 as const, title: '出报告', subtitle: '生成分析成果报告' },
+  { id: 4 as const, title: '批注', subtitle: '在四分屏/混合视图中标注问题' },
+  { id: 5 as const, title: '出报告', subtitle: '生成分析成果报告' },
 ]
 const requestedWorkflowStep = Number(getQueryString('step'))
 const activeWorkflowStep = ref<WorkflowStepId>(
-  ([1, 2, 3, 4] as const).includes(requestedWorkflowStep as WorkflowStepId)
+  ([1, 2, 3, 4, 5] as const).includes(requestedWorkflowStep as WorkflowStepId)
     ? (requestedWorkflowStep as WorkflowStepId)
     : 1,
 )
-/** 偏差对比 / CAD校准 / 出报告步骤需已完成并保存粗配准。 */
+/** 偏差对比 / 批注 / 出报告步骤需已完成并保存粗配准。 */
 const canOpenDeviationStep = computed(
   () =>
     Boolean(bimFileId.value && scanFileId.value) &&
@@ -2753,7 +2798,7 @@ const canOpenDeviationStep = computed(
 const canOpenReportStep = canOpenDeviationStep
 function workflowStepDisabled(step: WorkflowStepId): boolean {
   if (step === 1) return false
-  if (step === 4) {
+  if (step === 4 || step === 5) {
     return !canOpenDeviationStep.value || activeWorkflowStep.value < 2
   }
   return !canOpenDeviationStep.value
@@ -2770,9 +2815,14 @@ function openWorkflowStep(step: WorkflowStepId) {
   if (step === activeWorkflowStep.value) return
   activeWorkflowStep.value = step
   showPanel.value = true
-  void router.replace({
-    query: { ...route.query, step: String(step) },
-  })
+  // 附加 scanFileId/bimFileId 别名，供第 4 步内嵌的四分屏（按查询参数读取）使用
+  const query: Record<string, string | string[] | null | undefined> = {
+    ...route.query,
+    step: String(step),
+  }
+  if (scanFileId.value) query.scanFileId = String(scanFileId.value)
+  if (bimFileId.value) query.bimFileId = String(bimFileId.value)
+  void router.replace({ query })
 }
 
 const showBounds = ref(false)
@@ -7988,6 +8038,8 @@ const savingDraft = ref(false)
 /** 草稿是否已保存（用于图标：未保存灰色 / 已保存绿色）。 */
 const draftSaved = ref(false)
 const lastDraftSavedAt = ref<Date | null>(null)
+/** 第 4 步顶部「图纸轨迹」弹窗开关。 */
+const showTrajectoryPanel = ref(false)
 
 // 步骤或配准编辑变化后，草稿回到「未保存」状态。
 watch(
@@ -8206,14 +8258,20 @@ function applyDraftPayload(payload: AlignmentDraftPayload) {
     tryRestoreSavedBimAlignment(true)
   }
 
-  // 工作流步骤：偏差对比步骤需已保存配准
+  // 工作流步骤：偏差对比 / 批注 / 报告需已保存配准
   const step = Number(payload.step)
-  if (step === 1 || step === 3) {
+  if (step >= 1 && step <= 5 && step !== activeWorkflowStep.value) {
     const allowed = step === 1 || canOpenDeviationStep.value
-    if (allowed && step !== activeWorkflowStep.value) {
-      activeWorkflowStep.value = step
+    if (allowed) {
+      activeWorkflowStep.value = step as WorkflowStepId
       showPanel.value = true
-      void router.replace({ query: { ...route.query, step: String(step) } })
+      const query: Record<string, string | string[] | null | undefined> = {
+        ...route.query,
+        step: String(step),
+      }
+      if (scanFileId.value) query.scanFileId = String(scanFileId.value)
+      if (bimFileId.value) query.bimFileId = String(bimFileId.value)
+      void router.replace({ query })
     }
   }
 }
@@ -8427,8 +8485,10 @@ watch(
   activeWorkflowStep,
   (step, prevStep) => {
     // 进入 CAD 校准 / 出报告步骤时挂起 3D 渲染与 tileset 加载，返回配准/偏差步骤再恢复
-    viewerSuspended.value = step === 2 || step === 4
+    viewerSuspended.value = step === 2 || step >= 4
     if (!viewerSuspended.value) requestRender()
+    // 离开第 4 步时关闭「图纸轨迹」弹窗
+    if (step !== 4) showTrajectoryPanel.value = false
     // 预取 CAD 校准数据：仅在真正切换到「配准」步骤时进行，避免首屏加载并发抢资源
     if (step === 1 && prevStep !== undefined) void prefetchCadForStep2()
   },
