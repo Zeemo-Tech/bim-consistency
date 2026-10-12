@@ -7,23 +7,34 @@
         <span class="window-title">{{ title }}</span>
         <!-- 操作按钮组 -->
         <div class="header-actions">
-          <!-- 收起按钮 -->
+          <!-- 收起按钮（collapsible=false 时改为关闭） -->
           <el-button
+            v-if="collapsible"
             size="small"
             text
             circle
-            @click="toggleCollapse"
             title="收起"
+            @click="toggleCollapse"
           >
             <el-icon><ArrowLeft /></el-icon>
+          </el-button>
+          <el-button
+            v-else
+            size="small"
+            text
+            circle
+            title="关闭"
+            @click="emit('close')"
+          >
+            <el-icon><Close /></el-icon>
           </el-button>
           <!-- 全屏按钮 -->
           <el-button
             size="small"
             text
             circle
-            @click="toggleFullscreen"
             :title="isFullscreen ? '退出全屏' : '全屏查看'"
+            @click="toggleFullscreen"
           >
             <el-icon v-if="!isFullscreen"><FullScreen /></el-icon>
             <el-icon v-else><Close /></el-icon>
@@ -36,8 +47,8 @@
           size="small"
           text
           circle
-          @click="toggleCollapse"
           title="展开"
+          @click="toggleCollapse"
         >
           <el-icon><ArrowRight /></el-icon>
         </el-button>
@@ -45,7 +56,7 @@
     </div>
 
     <!-- 内容区：CAD查看器 -->
-    <div v-show="!isCollapsed" class="small-window-content" ref="cadRoot">
+    <div v-show="!isCollapsed" ref="cadRoot" class="small-window-content">
       <!-- 空状态提示 -->
       <div v-if="!cadViewer" class="empty-state">
         <el-icon class="empty-icon"><Picture /></el-icon>
@@ -56,15 +67,11 @@
         ref="cadContainer"
         class="cad-container"
         :class="{ 'cad-loaded': cadViewer }"
-      ></div>
+      />
     </div>
 
     <!-- 全屏遮罩层 -->
-    <div
-      v-if="isFullscreen"
-      class="fullscreen-overlay"
-      @click="onOverlayClick"
-    >
+    <div v-if="isFullscreen" class="fullscreen-overlay" @click="onOverlayClick">
       <div class="small-window is-fullscreen" @click.stop>
         <!-- 全屏模式头部 -->
         <div class="small-window-header">
@@ -73,19 +80,19 @@
             size="small"
             text
             circle
-            @click="toggleFullscreen"
             title="退出全屏"
+            @click="toggleFullscreen"
           >
             <el-icon><Close /></el-icon>
           </el-button>
         </div>
         <!-- 全屏模式内容区 -->
-        <div class="small-window-content" ref="cadRootFullscreen">
+        <div ref="cadRootFullscreen" class="small-window-content">
           <div
             ref="cadContainerFullscreen"
             class="cad-container"
             :class="{ 'cad-loaded': cadViewer }"
-          ></div>
+          />
         </div>
       </div>
     </div>
@@ -93,14 +100,7 @@
 </template>
 
 <script setup lang="ts">
-import {
-  ref,
-  onMounted,
-  onBeforeUnmount,
-  watch,
-  nextTick,
-  markRaw,
-} from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick, markRaw } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   FullScreen,
@@ -146,6 +146,11 @@ const props = defineProps({
     type: Object as () => AlignmentResult | null,
     default: null,
   },
+  /** 是否允许收起为小方块（false 时头部显示关闭按钮，点击触发 close 事件） */
+  collapsible: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 // ============================================
@@ -154,6 +159,8 @@ const props = defineProps({
 const emit = defineEmits<{
   /** 点击轨迹点事件 */
   (e: 'pointClick', point: TrajectoryPoint): void
+  /** 关闭事件（collapsible=false 时点击头部关闭按钮触发） */
+  (e: 'close'): void
 }>()
 
 // ============================================
@@ -314,8 +321,10 @@ const initCadViewer = async (isFullscreenMode = false) => {
 
   try {
     // 根据模式设置容器尺寸
-    const containerWidth = container.clientWidth || (isFullscreenMode ? 800 : 320)
-    const containerHeight = container.clientHeight || (isFullscreenMode ? 600 : 168)
+    const containerWidth =
+      container.clientWidth || (isFullscreenMode ? 800 : 320)
+    const containerHeight =
+      container.clientHeight || (isFullscreenMode ? 600 : 168)
 
     const viewer = new DxfViewer(container, {
       canvasWidth: containerWidth,
@@ -347,7 +356,11 @@ const initCadViewer = async (isFullscreenMode = false) => {
         highlightTrajectoryPoint(hit)
         emit('pointClick', hit)
       } else {
-        console.log('[SmallWindow] 未点击到轨迹点:', cadX.toFixed(2), cadY.toFixed(2))
+        console.log(
+          '[SmallWindow] 未点击到轨迹点:',
+          cadX.toFixed(2),
+          cadY.toFixed(2),
+        )
       }
     })
   } catch (error) {
@@ -771,7 +784,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   cleanup()
 })
-
 </script>
 
 <style lang="scss" scoped>
