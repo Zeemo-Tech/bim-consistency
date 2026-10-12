@@ -845,7 +845,6 @@
                   type="primary"
                   :loading="fineAlignLoading"
                   :disabled="!canRunFineAlignment"
-                  style="width: 100%"
                   @click="runFineAlignment"
                 >
                   {{ fineRunLabel }}
@@ -853,7 +852,6 @@
                 <el-button
                   :loading="savingCalibration"
                   :disabled="!canSaveFineAlignment"
-                  style="width: 100%; margin-left: 0"
                   @click="saveFineAlignmentMatrix"
                 >
                   保存结果
@@ -910,7 +908,10 @@
               </div>
             </template>
 
-            <div class="registration-handle-control">
+            <div
+              v-if="registrationStage === 'coarse'"
+              class="registration-handle-control"
+            >
               <span class="registration-handle-label">
                 操作手柄
                 <el-tooltip
@@ -935,7 +936,12 @@
                 aria-label="显示配准操作手柄"
               />
             </div>
-            <div class="transform-mode" role="tablist" aria-label="变换方式">
+            <div
+              v-if="registrationStage === 'coarse'"
+              class="transform-mode"
+              role="tablist"
+              aria-label="变换方式"
+            >
               <button
                 type="button"
                 class="transform-mode-button"
@@ -961,6 +967,7 @@
             </div>
 
             <div
+              v-if="registrationStage === 'coarse'"
               class="control-row control-row--orientation"
               :class="{ disabled: !editMode || !selectedItemId }"
             >

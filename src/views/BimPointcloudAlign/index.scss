@@ -1072,8 +1072,15 @@
 
 .fine-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 8px;
+  margin-bottom: 10px;
+}
+
+.fine-actions .el-button {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: 0;
 }
 
 .color-row {
