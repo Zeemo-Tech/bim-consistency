@@ -956,7 +956,7 @@ const props = defineProps<{
 }>()
 
 /** 右侧批注面板是否收起。 */
-const workbenchPanelCollapsed = ref(false)
+const workbenchPanelCollapsed = ref(true)
 
 const route = useRoute()
 const router = useRouter()
