@@ -854,7 +854,7 @@
                   :disabled="!canSaveFineAlignment"
                   @click="saveFineAlignmentMatrix"
                 >
-                  保存结果
+                  {{ fineSaveLabel }}
                 </el-button>
               </div>
 
@@ -1308,7 +1308,7 @@
                 :disabled="!canSaveCoarseAlignment"
                 @click="saveCoarseAlignmentMatrix"
               >
-                保存粗配准
+                {{ coarseSaveLabel }}
               </el-button>
             </div>
             <el-button
@@ -1318,7 +1318,7 @@
               title="保存当前配准结果"
               @click="handleCalibrationComplete"
             >
-              完成校准
+              {{ calibrationCompleteLabel }}
             </el-button>
           </div>
 
@@ -3315,8 +3315,18 @@ const canSaveCoarseAlignment = computed(() => {
     registrationStage.value === 'coarse' &&
     hasModel.value &&
     hasTileset.value &&
-    !savingCalibration.value
+    !savingCalibration.value &&
+    (coarseAlignmentDirty.value || !hasSavedAlignmentMatrix.value)
   )
+})
+/** 粗配准保存按钮文案：已保存→不可再存；有改动→重新保存。 */
+const coarseSaveLabel = computed(() => {
+  if (savingCalibration.value) return '保存中…'
+  if (hasSavedAlignmentMatrix.value && !coarseAlignmentDirty.value)
+    return '已保存'
+  if (hasSavedAlignmentMatrix.value && coarseAlignmentDirty.value)
+    return '重新保存'
+  return '保存粗配准'
 })
 const coarseSaveHint = computed(() => {
   if (!hasModel.value || !hasTileset.value) return '请先加载 BIM 与点云'
@@ -3344,6 +3354,7 @@ const canSaveFineAlignment = computed(() => {
     !!scanFileId.value &&
     !!bimFileId.value &&
     !!fineAlignResult.value &&
+    !fineAlignmentSaved.value &&
     !fineAlignLoading.value &&
     !savingCalibration.value
   )
@@ -3457,11 +3468,32 @@ const fineRunLabel = computed(() =>
   fineAlignResult.value ? '重新计算' : '开始计算',
 )
 
+/** 精调结果保存按钮文案：写入校准矩阵后显示“已保存”。 */
+const fineSaveLabel = computed(() =>
+  fineAlignmentSaved.value ? '已保存' : '保存结果',
+)
+
 /** 顶部"校准完成"按钮的可用性判断。 */
+const hasUnsavedCalibration = computed(
+  () =>
+    coarseAlignmentDirty.value ||
+    !hasSavedAlignmentMatrix.value ||
+    (!!fineAlignResult.value && !fineAlignmentSaved.value),
+)
+
 const canSaveCalibration = computed(() => {
   if (!hasModel.value || !hasTileset.value) return false
   if (registrationStage.value === 'fine') return canSaveFineAlignment.value
-  return true
+  return hasUnsavedCalibration.value
+})
+
+/** "完成校准"按钮文案：已保存且无未保存改动时显示“已校准”。 */
+const calibrationCompleteLabel = computed(() => {
+  if (savingCalibration.value) return '保存中…'
+  if (registrationStage.value === 'fine') {
+    return fineAlignmentSaved.value ? '已校准' : '完成校准'
+  }
+  return hasUnsavedCalibration.value ? '完成校准' : '已校准'
 })
 
 function markFineAlignmentDirty() {
