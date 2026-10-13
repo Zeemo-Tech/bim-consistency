@@ -49,8 +49,22 @@ export function createClipBoundsCollector() {
         if (!(geometry instanceof THREE.BufferGeometry)) return
         const position = geometry.getAttribute('position')
         if (!position || !position.count) return
-        if (!geometry.boundingBox) geometry.computeBoundingBox()
-        const local = geometry.boundingBox
+        // InstancedMesh / BatchedMesh 的几何体自身包围盒不含实例变换（实例矩阵在着色器里应用），
+        // 必须改用对象级包围盒，否则裁切框会比实际内容小很多，开启剖切后内容被大量裁掉。
+        const instanced = object as THREE.Mesh & {
+          isInstancedMesh?: boolean
+          isBatchedMesh?: boolean
+          boundingBox?: THREE.Box3 | null
+          computeBoundingBox?: () => void
+        }
+        let local: THREE.Box3 | null
+        if (instanced.isInstancedMesh || instanced.isBatchedMesh) {
+          if (!instanced.boundingBox) instanced.computeBoundingBox?.()
+          local = instanced.boundingBox ?? null
+        } else {
+          if (!geometry.boundingBox) geometry.computeBoundingBox()
+          local = geometry.boundingBox
+        }
         if (!local || local.isEmpty()) return
         localToClip.copy(worldToClip).multiply(object.matrixWorld)
         const box = local.clone().applyMatrix4(localToClip)
