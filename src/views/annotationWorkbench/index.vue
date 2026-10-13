@@ -40,6 +40,7 @@
           :annotation-stash-markers="annotationStashMarkers"
           :annotation-highlight-current="annotationHighlightCurrent"
           :annotation-markers-visible="annotationMarkersVisible"
+          :suggested-points="suggestedMarkerPoints"
           @gaussian-error="handleGaussianError"
           @gaussian-loaded-change="onGaussianLoadedChange"
           @bim-loaded-change="onBimLoadedChange"
@@ -126,6 +127,7 @@
             :annotation-stash-markers="annotationStashMarkersMix"
             :annotation-highlight-current="annotationHighlightCurrent"
             :annotation-markers-visible="annotationMarkersVisible"
+            :suggested-points="suggestedMarkerPoints"
             @loaded-change="onConsistencyResultLoadedChange"
             @ready-state-change="onConsistencyResultReadyStateChange"
           />
@@ -623,6 +625,149 @@
             </div>
           </li>
         </ul>
+        <div class="workbench-suggest-section">
+          <div class="workbench-suggest-section__head">
+            <button
+              type="button"
+              class="workbench-suggest-section__collapse"
+              :aria-expanded="!suggestSectionCollapsed"
+              :title="
+                suggestSectionCollapsed ? '展开建议批注点' : '收起建议批注点'
+              "
+              @click="suggestSectionCollapsed = !suggestSectionCollapsed"
+            >
+              <el-icon
+                class="workbench-suggest-section__chevron"
+                :class="{ 'is-collapsed': suggestSectionCollapsed }"
+              >
+                <ArrowDownBold />
+              </el-icon>
+              <span class="workbench-suggest-section__label">
+                建议批注点
+                <span
+                  v-if="pendingSuggestedPoints.length"
+                  class="workbench-suggest-section__count"
+                >
+                  {{ pendingSuggestedPoints.length }}
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              class="workbench-suggest-section__run"
+              :disabled="suggestedLoading"
+              @click="loadSuggestedPoints"
+            >
+              {{ suggestedPoints.length ? '重新生成' : '自动生成' }}
+            </button>
+          </div>
+          <div
+            v-show="!suggestSectionCollapsed"
+            class="workbench-suggest-section__content"
+          >
+            <div class="workbench-suggest-section__tol">
+              <span>容差 ±</span>
+              <el-input-number
+                v-model="suggestedTolerance"
+                size="small"
+                :min="0.005"
+                :max="100"
+                :step="0.005"
+                :precision="3"
+                controls-position="right"
+              />
+              <span>m</span>
+            </div>
+            <div
+              v-if="suggestedMeta"
+              class="workbench-suggest-section__summary"
+            >
+              超限顶点
+              {{ suggestedMeta.exceedanceVertexCount.toLocaleString() }} · 区域
+              {{ suggestedMeta.clusterCount }}
+              <template
+                v-if="suggestedMeta.clusterCount > suggestedPoints.length"
+              >
+                （展示幅度最大的 {{ suggestedPoints.length }} 个）
+              </template>
+            </div>
+            <div
+              v-if="suggestedError"
+              class="workbench-suggest-section__empty is-error"
+            >
+              {{ suggestedError }}
+            </div>
+            <div
+              v-else-if="suggestedLoading"
+              class="workbench-suggest-section__empty"
+            >
+              正在分析偏差超限位置…
+            </div>
+            <div
+              v-else-if="!suggestedLoaded"
+              class="workbench-suggest-section__empty"
+            >
+              点击「自动生成」，按偏差超限位置推荐批注点
+            </div>
+            <div
+              v-else-if="!pendingSuggestedPoints.length"
+              class="workbench-suggest-section__empty"
+            >
+              暂无待处理的建议点
+            </div>
+            <ul v-else class="workbench-suggest-list">
+              <li
+                v-for="item in pendingSuggestedPoints"
+                :key="item.id"
+                class="workbench-suggest-card"
+                :class="{ 'is-active': focusedSuggestionId === item.id }"
+                role="button"
+                tabindex="0"
+                @click="focusSuggestedPoint(item)"
+                @keydown.enter.prevent="focusSuggestedPoint(item)"
+              >
+                <div class="workbench-suggest-card__top">
+                  <span class="workbench-suggest-card__title">
+                    {{ describeSuggestion(item) }}
+                  </span>
+                  <span
+                    class="workbench-suggest-card__sev"
+                    :class="`is-${item.severity}`"
+                  >
+                    {{ suggestionSeverityLabel(item.severity) }}
+                  </span>
+                </div>
+                <div class="workbench-suggest-card__meta">
+                  超限 {{ (item.absDistance * 100).toFixed(1) }}cm ·
+                  {{ item.vertexCount }} 点
+                </div>
+                <div class="workbench-suggest-card__actions">
+                  <el-tooltip content="确认并生成批注" placement="top">
+                    <button
+                      type="button"
+                      class="workbench-suggest-card__icon-btn is-confirm"
+                      :disabled="annotationSubmitting"
+                      aria-label="确认并生成批注"
+                      @click.stop="confirmSuggestedPoint(item)"
+                    >
+                      <el-icon><CircleCheck /></el-icon>
+                    </button>
+                  </el-tooltip>
+                  <el-tooltip content="忽略" placement="top">
+                    <button
+                      type="button"
+                      class="workbench-suggest-card__icon-btn"
+                      aria-label="忽略建议点"
+                      @click.stop="dismissSuggestedPoint(item)"
+                    >
+                      <el-icon><Close /></el-icon>
+                    </button>
+                  </el-tooltip>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
       </div>
     </aside>
 
@@ -708,6 +853,10 @@ import {
 } from '@/api/annotation'
 import { createNotification, type ProjectMemberItem } from '@/api/notification'
 import {
+  suggestC2MAnnotations,
+  type C2MSuggestedAnnotationPoint,
+} from '@/api/c2m'
+import {
   checkReportReady,
   createReportTask,
   listReportTemplates,
@@ -721,6 +870,7 @@ import { uploadFile } from '@/utils/upload'
 import * as THREE from 'three'
 import {
   Aim,
+  ArrowDownBold,
   ArrowLeftBold,
   ArrowRightBold,
   Box,
@@ -748,6 +898,7 @@ import SmallWindow from '@/components/SmallWindow/index.vue'
 import AnnotationScreenshot from './components/AnnotationScreenshot.vue'
 import {
   buildGaussianTrajectoryYUpPose,
+  buildFusionBimWorldMatrix,
   buildTrajectoryYUpPose,
 } from './utils/fusionTransforms'
 type PanelType =
@@ -1489,6 +1640,51 @@ const annotationLoading = ref(false)
 const annotationRequestId = ref(0)
 const annotationScreenshotUrlMap = new Map<number, string>()
 const annotationStash = ref(new Map<string, AnnotationStashPayload>())
+// ── 建议批注点（依据 C2M 偏差超限位置自动生成，人工确认/补充）──────────
+/** 后端返回的建议批注点（坐标为 remesh PLY 顶点坐标系）。 */
+const suggestedPoints = ref<C2MSuggestedAnnotationPoint[]>([])
+/** 建议点是否正在生成。 */
+const suggestedLoading = ref(false)
+/** 建议点生成错误信息。 */
+const suggestedError = ref('')
+/** 已生成过建议点（用于空态文案）。 */
+const suggestedLoaded = ref(false)
+/** 最近一次生成的统计（超限顶点数 / 区域数）。 */
+const suggestedMeta = ref<{
+  exceedanceVertexCount: number
+  clusterCount: number
+} | null>(null)
+/** 判定超限的容差（米），默认与 C2M 可视化一致，可临时调整后重算。 */
+const suggestedTolerance = ref(0.05)
+/** 建议批注点区块是否收起（仅保留标题行）。 */
+const suggestSectionCollapsed = ref(false)
+/** 聚类半径（米）。 */
+const suggestedClusterRadius = ref(0.15)
+/** 已忽略的建议点 id。 */
+const dismissedSuggestionIds = ref<Set<number>>(new Set())
+/** 已确认（转为正式批注）的建议点 id。 */
+const confirmedSuggestionIds = ref<Set<number>>(new Set())
+/** 当前聚焦查看的建议点 id。 */
+const focusedSuggestionId = ref<number | null>(null)
+/** 过滤掉已忽略/已确认后的待处理建议点。 */
+const pendingSuggestedPoints = computed(() =>
+  suggestedPoints.value.filter(
+    (item) =>
+      !dismissedSuggestionIds.value.has(item.id) &&
+      !confirmedSuggestionIds.value.has(item.id),
+  ),
+)
+/** 下发给一致性视图渲染的建议点标记（含激活态）。 */
+const suggestedMarkerPoints = computed(() =>
+  pendingSuggestedPoints.value.map((item) => ({
+    id: item.id,
+    x: item.x,
+    y: item.y,
+    z: item.z,
+    severity: item.severity,
+    active: focusedSuggestionId.value === item.id,
+  })),
+)
 const annotationScreenshotUrls = computed(() =>
   annotationForm.screenshots.map((item) => item.url),
 )
@@ -6437,6 +6633,303 @@ const focusAnnotationFromRoute = async () => {
   clearRouteAnnotationFocus()
 }
 
+// ── 建议批注点：生成 / 聚焦 / 确认 / 忽略 ──────────────────────────────
+/** 将建议点的 remesh PLY 顶点坐标映射为场景坐标（与实模一致结果视图一致）。 */
+const toSuggestedScenePoint = (point: C2MSuggestedAnnotationPoint) => {
+  const vec = new THREE.Vector3(point.x, point.y, point.z)
+  const pointcloudWorld = Array.isArray(pointcloudWorldMatrix.value)
+    ? new THREE.Matrix4().fromArray(pointcloudWorldMatrix.value)
+    : null
+  const matrix = buildFusionBimWorldMatrix(
+    pointcloudWorld,
+    bimPointcloudCalibration.value?.modelMatrix,
+  )
+  if (matrix) vec.applyMatrix4(matrix)
+  return { x: vec.x, y: vec.y, z: vec.z }
+}
+
+const suggestionSeverityLabel = (
+  severity: C2MSuggestedAnnotationPoint['severity'],
+) => {
+  if (severity === 'high') return '高'
+  if (severity === 'medium') return '中'
+  return '低'
+}
+
+const describeSuggestion = (point: C2MSuggestedAnnotationPoint) => {
+  const cm = (point.absDistance * 100).toFixed(1)
+  return `${point.sign === 'positive' ? '外凸' : '内凹'}偏差超限 ${cm}cm`
+}
+
+const defaultSuggestionPeriod = () => {
+  const format = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+      date.getDate(),
+    ).padStart(2, '0')}`
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  const end = new Date(start)
+  end.setDate(end.getDate() + 7)
+  return [format(start), format(end)]
+}
+
+/** 生成建议批注点：调用后端按 C2M 偏差超限位置聚类。 */
+const loadSuggestedPoints = async () => {
+  if (suggestedLoading.value) return
+  const currentProjectId = projectId.value
+  const currentScanId = activeScanId.value
+  const currentBimId = boundBimFileId.value
+  if (!currentProjectId || !currentScanId) {
+    ElMessage.warning('缺少项目/扫描信息，无法生成建议批注点')
+    return
+  }
+  if (!currentBimId) {
+    ElMessage.warning('当前扫描未绑定 BIM，无法生成建议批注点')
+    return
+  }
+  suggestedLoading.value = true
+  suggestedError.value = ''
+  try {
+    const res = await suggestC2MAnnotations(currentProjectId, currentScanId, {
+      bimFileId: currentBimId,
+      toleranceLimit: suggestedTolerance.value,
+      clusterRadius: suggestedClusterRadius.value,
+    })
+    if (res.code !== 200) {
+      throw new Error(res.msg || '生成建议批注点失败')
+    }
+    suggestedPoints.value = res.data?.suggestedPoints ?? []
+    suggestedMeta.value = {
+      exceedanceVertexCount: res.data?.exceedanceVertexCount ?? 0,
+      clusterCount: res.data?.clusterCount ?? 0,
+    }
+    dismissedSuggestionIds.value = new Set()
+    confirmedSuggestionIds.value = new Set()
+    focusedSuggestionId.value = null
+    suggestedLoaded.value = true
+    if (!suggestedPoints.value.length) {
+      ElMessage.info('当前偏差均在容差范围内，未发现超限位置')
+    } else {
+      ElMessage.success(`已生成 ${suggestedPoints.value.length} 个建议批注点`)
+    }
+  } catch (error: any) {
+    suggestedError.value = resolveApiErrorMessage(error, '生成建议批注点失败')
+    ElMessage.error(suggestedError.value)
+  } finally {
+    suggestedLoading.value = false
+  }
+}
+
+/** 让实模一致结果视图把相机对准建议点（与手工批注落点后一致的观感）。 */
+const focusConsistencyOnPoint = (
+  scenePoint: { x: number; y: number; z: number },
+  attempt = 0,
+) => {
+  const viewer: any =
+    modeState.value === 'mix'
+      ? mixConsistencyResultRef.value
+      : (dynamicPanelRef.value?.getConsistencyResultRef?.() ?? null)
+  if (viewer?.focusPoint) {
+    viewer.focusPoint(scenePoint)
+    return
+  }
+  if (attempt < 8) {
+    window.setTimeout(
+      () => focusConsistencyOnPoint(scenePoint, attempt + 1),
+      150,
+    )
+  }
+}
+
+/**
+ * 让单个视图以自身当前视角对准指定场景点（保持视线方向与距离不变）。
+ * 返回是否成功下发（视图尚未就绪时返回 false）。
+ */
+const focusViewerOnScenePoint = (
+  viewer: any,
+  scenePoint: { x: number; y: number; z: number },
+) => {
+  if (!viewer) return false
+  if (typeof viewer.focusPoint === 'function') {
+    viewer.focusPoint(scenePoint)
+    return true
+  }
+  const pose = viewer.getCameraPose?.()
+  if (!pose?.camera || !pose?.target) return false
+  const cam = new THREE.Vector3(pose.camera.x, pose.camera.y, pose.camera.z)
+  const target = new THREE.Vector3(pose.target.x, pose.target.y, pose.target.z)
+  const offset = cam.clone().sub(target)
+  let dist = offset.length()
+  const dir = new THREE.Vector3()
+  if (dist > 1e-3) {
+    dir.copy(offset).divideScalar(dist)
+  } else {
+    dir.set(0, 0.35, 1).normalize()
+    dist = 1
+  }
+  const nextTarget = new THREE.Vector3(scenePoint.x, scenePoint.y, scenePoint.z)
+  const nextCam = nextTarget.clone().addScaledVector(dir, dist)
+  if (typeof viewer.setCameraPose === 'function') {
+    viewer.setCameraPose({ camera: nextCam, target: nextTarget })
+    return true
+  }
+  if (typeof viewer.syncFromExternalPose === 'function') {
+    viewer.syncFromExternalPose({ camera: nextCam, target: nextTarget })
+    return true
+  }
+  return false
+}
+
+/** 找到距离问题点最近的真实扫描轨迹点（第一人称视角来源）。 */
+const findNearestTrajectoryPoint = (scenePoint: {
+  x: number
+  y: number
+  z: number
+}) => {
+  const points = trajectoryData.value?.points ?? []
+  if (!points.length) return null
+  const target = new THREE.Vector3(scenePoint.x, scenePoint.y, scenePoint.z)
+  let best: TrajectoryPoint | null = null
+  let bestDistSq = Number.POSITIVE_INFINITY
+  for (const point of points) {
+    const eye = buildGaussianTrajectoryYUpPose(point).camera
+    const distSq = eye.distanceToSquared(target)
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq
+      best = point
+    }
+  }
+  return best
+}
+
+/** 依据最近轨迹点构建第一人称（真实人眼高）位姿，视线朝向问题点。 */
+const buildFirstPersonPose = (
+  trajectoryPoint: TrajectoryPoint,
+  scenePoint: { x: number; y: number; z: number },
+) => {
+  const base = buildGaussianTrajectoryYUpPose(trajectoryPoint)
+  const target = new THREE.Vector3(scenePoint.x, scenePoint.y, scenePoint.z)
+  // 问题点离人眼过近时退回轨迹自身前向视角，避免贴脸/穿模。
+  if (base.camera.distanceTo(target) < 0.6) return base
+  return { camera: base.camera.clone(), target }
+}
+
+/** 将同一相机位姿下发到四分屏（或混合视图）的全部视图，返回是否至少命中一个视图。 */
+const applyPoseToAllViews = (pose: {
+  camera: THREE.Vector3
+  target: THREE.Vector3
+}) => {
+  if (modeState.value === 'mix') {
+    if (!mixViewerRef.value) return false
+    mixViewerRef.value?.setTrajectorySpawnPose?.(pose)
+    mixViewerRef.value?.setCameraPose?.(pose)
+    mixConsistencyCameraPose.value = toPlainPose(pose)
+    return true
+  }
+  const pointcloud = getPointcloudRef()
+  const bim = getBimRef()
+  const gaussian = getGaussianRef()
+  const consistency = getConsistencyResultRef()
+  if (!pointcloud && !bim && !gaussian && !consistency) return false
+  pointcloud?.syncFromExternalPose?.(pose)
+  bim?.setCameraPose?.(pose)
+  gaussian?.setCameraPose?.(pose)
+  consistency?.setCameraPose?.({
+    camera: { x: pose.camera.x, y: pose.camera.y, z: pose.camera.z },
+    target: { x: pose.target.x, y: pose.target.y, z: pose.target.z },
+  })
+  return true
+}
+
+/** 四屏联动：优先还原「真实人视角」对准建议点，无轨迹时退回逐视图对准。 */
+const focusAllQuadViewsOnPoint = (scenePoint: {
+  x: number
+  y: number
+  z: number
+}) => {
+  const trajectoryPoint = findNearestTrajectoryPoint(scenePoint)
+  if (trajectoryPoint) {
+    const pose = buildFirstPersonPose(trajectoryPoint, scenePoint)
+    const applyAll = () => applyPoseToAllViews(pose)
+    if (applyAll()) {
+      // 各视图可能仍在懒加载，短时间内补发几次，确保四个屏都切换到位。
+      for (const delay of [200, 600, 1200]) {
+        window.setTimeout(applyAll, delay)
+      }
+      return
+    }
+    if (modeState.value === 'mix') {
+      focusConsistencyOnPoint(scenePoint)
+      return
+    }
+  } else if (modeState.value === 'mix') {
+    focusConsistencyOnPoint(scenePoint)
+    return
+  }
+  // 无轨迹数据：逐视图对准（带重试）。
+  let attempt = 0
+  const applyPerViewer = () => {
+    const results = [
+      focusViewerOnScenePoint(getConsistencyResultRef(), scenePoint),
+      focusViewerOnScenePoint(getBimRef(), scenePoint),
+      focusViewerOnScenePoint(getPointcloudRef(), scenePoint),
+      focusViewerOnScenePoint(getGaussianRef(), scenePoint),
+    ]
+    if (results.some(Boolean)) return
+    if (attempt++ < 8) window.setTimeout(applyPerViewer, 150)
+  }
+  applyPerViewer()
+}
+
+/** 聚焦建议点：进入批注模式、预填表单，并让四个屏都对准该点。 */
+const focusSuggestedPoint = (point: C2MSuggestedAnnotationPoint) => {
+  if (!isAnnotationMode.value) {
+    setAnnotationMode()
+  }
+  const scenePoint = toSuggestedScenePoint(point)
+  handleAnnotationPick({
+    point: scenePoint,
+    source: 'consistencyResult',
+  })
+  if (!annotationForm.title.trim()) {
+    annotationForm.title = describeSuggestion(point)
+  }
+  annotationForm.severity = point.severity
+  if (!annotationForm.period.length) {
+    annotationForm.period = defaultSuggestionPeriod()
+  }
+  annotationFormHidden.value = false
+  focusedSuggestionId.value = point.id
+  nextTick(() => focusAllQuadViewsOnPoint(scenePoint))
+}
+
+/** 确认建议点：聚焦后直接提交为正式批注。 */
+const confirmSuggestedPoint = async (point: C2MSuggestedAnnotationPoint) => {
+  focusSuggestedPoint(point)
+  await nextTick()
+  await handleAnnotationSubmit()
+  if (annotationSaved.value) {
+    confirmedSuggestionIds.value = new Set([
+      ...confirmedSuggestionIds.value,
+      point.id,
+    ])
+    if (focusedSuggestionId.value === point.id) {
+      focusedSuggestionId.value = null
+    }
+  }
+}
+
+/** 忽略建议点。 */
+const dismissSuggestedPoint = (point: C2MSuggestedAnnotationPoint) => {
+  dismissedSuggestionIds.value = new Set([
+    ...dismissedSuggestionIds.value,
+    point.id,
+  ])
+  if (focusedSuggestionId.value === point.id) {
+    focusedSuggestionId.value = null
+  }
+}
+
 const handleAnnotationPick = (payload: AnnotationPickPayload) => {
   if (!isAnnotationMode.value || annotationFormLocked.value) return
   if (!payload.point) {
@@ -7054,13 +7547,247 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: #f7f9fc;
 }
 
 .workbench-sidebar__invite {
   flex: 0 0 auto;
   width: 100%;
+}
+
+.workbench-suggest-section {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e3eaf4;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.workbench-suggest-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workbench-suggest-section__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #516b8f;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workbench-suggest-section__collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.workbench-suggest-section__chevron {
+  font-size: 12px;
+  color: #7a8798;
+  transition: transform 160ms ease;
+}
+
+.workbench-suggest-section__chevron.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.workbench-suggest-section__content {
+  display: grid;
+  gap: 8px;
+}
+
+.workbench-suggest-section__count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  color: #fff;
+  background: #326fe0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+.workbench-suggest-section__run {
+  padding: 3px 10px;
+  border: 1px solid #326fe0;
+  border-radius: 6px;
+  color: #326fe0;
+  background: #eef4ff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.workbench-suggest-section__run:hover:not(:disabled) {
+  background: #dbe7ff;
+}
+
+.workbench-suggest-section__run:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.workbench-suggest-section__tol {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #7a8798;
+  font-size: 11px;
+}
+
+.workbench-suggest-section__tol :deep(.el-input-number) {
+  width: 96px;
+}
+
+.workbench-suggest-section__summary {
+  color: #7a8798;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.workbench-suggest-section__empty {
+  color: #8a97a8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workbench-suggest-section__empty.is-error {
+  color: #d13438;
+}
+
+.workbench-suggest-list {
+  display: grid;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 0 2px 0 0;
+  margin: 0;
+  list-style: none;
+}
+
+.workbench-suggest-card {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #f0d9a8;
+  border-radius: 8px;
+  background: #fffdf5;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.workbench-suggest-card:hover {
+  border-color: #e0b661;
+  box-shadow: 0 2px 8px rgb(217 138 0 / 12%);
+}
+
+.workbench-suggest-card.is-active {
+  border-color: #326fe0;
+  background: #eef4ff;
+}
+
+.workbench-suggest-card__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workbench-suggest-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: #1e3759;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-suggest-card__sev {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.workbench-suggest-card__sev.is-high {
+  color: #d13438;
+  background: #fdecec;
+}
+
+.workbench-suggest-card__sev.is-medium {
+  color: #d98a00;
+  background: #fdf3e2;
+}
+
+.workbench-suggest-card__sev.is-low {
+  color: #2f9e44;
+  background: #e9f7ec;
+}
+
+.workbench-suggest-card__meta {
+  color: #7a8798;
+  font-size: 11px;
+}
+
+.workbench-suggest-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.workbench-suggest-card__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid #d5dded;
+  border-radius: 6px;
+  color: #516b8f;
+  background: #fff;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.workbench-suggest-card__icon-btn:hover:not(:disabled) {
+  border-color: #b9d0f0;
+  background: #f2f6fd;
+}
+
+.workbench-suggest-card__icon-btn.is-confirm {
+  border-color: #326fe0;
+  color: #fff;
+  background: #326fe0;
+}
+
+.workbench-suggest-card__icon-btn.is-confirm:hover:not(:disabled) {
+  background: #2a5fc4;
+}
+
+.workbench-suggest-card__icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .workbench-view-section {
@@ -7188,9 +7915,7 @@ onBeforeUnmount(() => {
 }
 
 .workbench-sidebar__list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
+  flex: 0 0 auto;
   margin: 0;
   padding: 0;
   list-style: none;

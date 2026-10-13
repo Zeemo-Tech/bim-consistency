@@ -110,6 +110,7 @@
         :annotation-stash-markers="annotationStashMarkers.consistencyResult"
         :annotation-highlight-current="annotationHighlightCurrent"
         :annotation-markers-visible="annotationMarkersVisible"
+        :suggested-points="suggestedPoints"
         @loaded-change="handleConsistencyResultLoadedChange"
         @ready-state-change="handleConsistencyResultReadyStateChange"
         @annotation-pick="handleAnnotationPick"
@@ -220,6 +221,16 @@ const props = defineProps<{
   }
   annotationHighlightCurrent?: boolean
   annotationMarkersVisible?: boolean
+  suggestedPoints?:
+    | {
+        id: number
+        x: number
+        y: number
+        z: number
+        severity: 'low' | 'medium' | 'high'
+        active?: boolean
+      }[]
+    | null
 }>()
 
 const emit = defineEmits<{

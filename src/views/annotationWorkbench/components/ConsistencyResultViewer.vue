@@ -69,6 +69,17 @@ const props = defineProps<{
   }[]
   annotationHighlightCurrent?: boolean
   annotationMarkersVisible?: boolean
+  /** 建议批注点（坐标与 remesh PLY 顶点一致，由本组件按 BIM 世界矩阵映射） */
+  suggestedPoints?:
+    | {
+        id: number
+        x: number
+        y: number
+        z: number
+        severity: 'low' | 'medium' | 'high'
+        active?: boolean
+      }[]
+    | null
 }>()
 
 const emit = defineEmits<{
@@ -121,6 +132,14 @@ let loadConsistencyPromise: Promise<void> | null = null
 let annotationMarker: THREE.Group | null = null
 let annotationStashGroup: THREE.Group | null = null
 const annotationStashMarkerMap = new Map<string, THREE.Group>()
+/** 建议批注点标记（由父组件下发，用于「无需满场景找」）。 */
+let suggestedGroup: THREE.Group | null = null
+const suggestedMarkerMap = new Map<number, THREE.Group>()
+const suggestedMarkerColors: Record<'low' | 'medium' | 'high', number> = {
+  low: 0x2f9e44,
+  medium: 0xd98a00,
+  high: 0xd13438,
+}
 const annotationRaycaster = new THREE.Raycaster()
 let annotationPointerId: number | null = null
 let annotationPointerDown: { x: number; y: number } | null = null
@@ -160,6 +179,28 @@ const applyCameraPose = (
   camera.position.set(pose.camera.x, pose.camera.y, pose.camera.z)
   controls.target.set(pose.target.x, pose.target.y, pose.target.z)
   camera.lookAt(controls.target)
+  camera.updateProjectionMatrix()
+  controls.update()
+  renderFrame()
+  return true
+}
+
+/** 将相机对准指定场景点（保持当前视线方向与距离）。 */
+const focusPoint = (point: { x: number; y: number; z: number }) => {
+  if (!camera || !controls) return false
+  const target = new THREE.Vector3(point.x, point.y, point.z)
+  const offset = camera.position.clone().sub(controls.target)
+  let dist = offset.length()
+  const dir =
+    dist > 1e-3
+      ? offset.clone().normalize()
+      : new THREE.Vector3(0, 0.35, 1).normalize()
+  if (!Number.isFinite(dist) || dist < 1e-3) {
+    dist = Math.max(currentModelMaxDim * 0.5, 1)
+  }
+  camera.position.copy(target).addScaledVector(dir, dist)
+  controls.target.copy(target)
+  camera.lookAt(target)
   camera.updateProjectionMatrix()
   controls.update()
   renderFrame()
@@ -326,19 +367,18 @@ const applyAnnotationMarkerScale = (
   const isHighlighted = highlighted ?? Boolean(marker.userData.highlighted)
   marker.userData.highlighted = isHighlighted
   marker.visible = props.annotationMarkersVisible !== false
-  if (!marker.userData.worldRadius) {
-    const distance = Math.max(
-      camera?.position.distanceTo(marker.position) ?? 1,
-      camera?.near ? camera.near * 2 : 0.1,
-      0.1,
-    )
-    const viewportHeight = Math.max(viewportEl.value?.clientHeight || 1, 1)
-    const worldUnitsPerPixel = camera
-      ? (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * distance) /
-        viewportHeight
-      : 0.01
-    marker.userData.worldRadius = Math.max(worldUnitsPerPixel * 6, 0.002)
-  }
+  // 每次按当前相机距离重算世界半径，保证屏幕尺寸恒定，避免相机贴近后标记异常放大。
+  const distance = Math.max(
+    camera?.position.distanceTo(marker.position) ?? 1,
+    camera?.near ? camera.near * 2 : 0.1,
+    0.1,
+  )
+  const viewportHeight = Math.max(viewportEl.value?.clientHeight || 1, 1)
+  const worldUnitsPerPixel = camera
+    ? (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * distance) /
+      viewportHeight
+    : 0.01
+  marker.userData.worldRadius = Math.max(worldUnitsPerPixel * 6, 0.002)
   marker.scale.setScalar(
     (marker.userData.worldRadius / annotationMarkerBaseRadius) *
       (isHighlighted ? 1.3 : 1),
@@ -383,6 +423,9 @@ const refreshAnnotationMarkerScales = () => {
   for (const marker of annotationStashMarkerMap.values()) {
     applyAnnotationMarkerScale(marker)
   }
+  for (const marker of suggestedMarkerMap.values()) {
+    applySuggestedMarkerScale(marker, Boolean(marker.userData.active))
+  }
 }
 
 const setAnnotationMarker = (point: THREE.Vector3 | null) => {
@@ -405,6 +448,78 @@ const setAnnotationMarker = (point: THREE.Vector3 | null) => {
   annotationMarker.userData.worldRadius = undefined
   applyAnnotationMarkerStyle(props.annotationStatus, annotationMarker)
   applyAnnotationMarkerScale(annotationMarker, props.annotationHighlightCurrent)
+  renderFrame()
+}
+
+const buildSuggestedMarker = (severity: 'low' | 'medium' | 'high') => {
+  const geometry = new THREE.SphereGeometry(annotationMarkerBaseRadius, 14, 14)
+  const material = new THREE.MeshBasicMaterial({
+    color: suggestedMarkerColors[severity] ?? suggestedMarkerColors.medium,
+  })
+  material.depthTest = true
+  material.depthWrite = false
+  const mesh = new THREE.Mesh(geometry, material)
+  mesh.renderOrder = 998
+  const group = new THREE.Group()
+  group.name = 'suggested-annotation-marker'
+  group.renderOrder = 998
+  group.userData.outerMaterial = material
+  group.userData.isSuggestedMarker = true
+  group.add(mesh)
+  return group
+}
+
+const applySuggestedMarkerScale = (marker: THREE.Group, active?: boolean) => {
+  marker.visible = props.annotationMarkersVisible !== false
+  // 每次按当前相机距离重算世界半径，保证屏幕尺寸恒定，避免相机贴近后标记异常放大。
+  const distance = Math.max(
+    camera?.position.distanceTo(marker.position) ?? 1,
+    camera?.near ? camera.near * 2 : 0.1,
+    0.1,
+  )
+  const viewportHeight = Math.max(viewportEl.value?.clientHeight || 1, 1)
+  const worldUnitsPerPixel = camera
+    ? (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * distance) /
+      viewportHeight
+    : 0.01
+  marker.userData.worldRadius = Math.max(worldUnitsPerPixel * 5, 0.002)
+  marker.scale.setScalar(
+    (marker.userData.worldRadius / annotationMarkerBaseRadius) *
+      (active ? 1.5 : 1),
+  )
+  marker.userData.active = Boolean(active)
+}
+
+const syncSuggestedMarkers = () => {
+  if (!scene) return
+  if (!suggestedGroup) {
+    suggestedGroup = new THREE.Group()
+    suggestedGroup.name = 'suggested-annotation-group'
+    scene.add(suggestedGroup)
+  }
+  const list = props.suggestedPoints ?? []
+  const nextIds = new Set(list.map((item) => item.id))
+  for (const [id, marker] of suggestedMarkerMap) {
+    if (nextIds.has(id)) continue
+    suggestedGroup.remove(marker)
+    disposeObject3D(marker)
+    suggestedMarkerMap.delete(id)
+  }
+  const matrix = resolveConsistencyWorldMatrix()
+  for (const item of list) {
+    let marker = suggestedMarkerMap.get(item.id)
+    if (!marker) {
+      marker = buildSuggestedMarker(item.severity)
+      marker.userData.suggestId = item.id
+      suggestedMarkerMap.set(item.id, marker)
+      suggestedGroup.add(marker)
+    }
+    const position = new THREE.Vector3(item.x, item.y, item.z)
+    if (matrix) position.applyMatrix4(matrix)
+    marker.position.copy(position)
+    marker.userData.worldRadius = undefined
+    applySuggestedMarkerScale(marker, Boolean(item.active))
+  }
   renderFrame()
 }
 
@@ -811,6 +926,7 @@ const performLoadConsistencyResult = async () => {
       fitCameraToObject(mesh)
     }
     refreshAnnotationMarkerScales()
+    syncSuggestedMarkers()
   } catch (error) {
     if (requestId !== latestRequestId) return
     emit('loaded-change', false)
@@ -1000,6 +1116,9 @@ watch(
     for (const marker of annotationStashMarkerMap.values()) {
       marker.visible = props.annotationMarkersVisible !== false
     }
+    for (const marker of suggestedMarkerMap.values()) {
+      marker.visible = props.annotationMarkersVisible !== false
+    }
     renderFrame()
   },
   { immediate: true },
@@ -1009,6 +1128,14 @@ watch(
   () => props.annotationStashMarkers,
   (markers) => {
     syncAnnotationStashMarkers(markers ?? [])
+  },
+  { immediate: true, deep: true },
+)
+
+watch(
+  () => props.suggestedPoints,
+  () => {
+    syncSuggestedMarkers()
   },
   { immediate: true, deep: true },
 )
@@ -1068,6 +1195,15 @@ onBeforeUnmount(() => {
     scene.remove(annotationStashGroup)
     annotationStashGroup = null
   }
+  if (suggestedGroup && scene) {
+    for (const marker of suggestedMarkerMap.values()) {
+      suggestedGroup.remove(marker)
+      disposeObject3D(marker)
+    }
+    suggestedMarkerMap.clear()
+    scene.remove(suggestedGroup)
+    suggestedGroup = null
+  }
   disposeMesh()
   revokeBlobUrl()
   if (renderer) {
@@ -1082,6 +1218,7 @@ onBeforeUnmount(() => {
 defineExpose({
   getCameraPose,
   setCameraPose,
+  focusPoint,
   pickPointFromScreen,
   getAnnotationMarkerPosition: () => {
     if (!annotationMarker) return null
