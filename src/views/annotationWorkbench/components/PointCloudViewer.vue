@@ -1378,24 +1378,23 @@ const applyAnnotationMarkerScale = (
   const isHighlighted = highlighted ?? Boolean(marker.userData.highlighted)
   marker.userData.highlighted = isHighlighted
   marker.visible = props.annotationMarkersVisible !== false
-  if (!marker.userData.worldRadius) {
-    const distance = Math.max(
-      pointcloudCamera?.position.distanceTo(marker.position) ?? 1,
-      pointcloudCamera?.near ? pointcloudCamera.near * 2 : 0.1,
-      0.1,
-    )
-    const viewportHeight = Math.max(
-      pointcloudViewportEl.value?.clientHeight || 1,
-      1,
-    )
-    const worldUnitsPerPixel = pointcloudCamera
-      ? (2 *
-          Math.tan(THREE.MathUtils.degToRad(pointcloudCamera.fov) / 2) *
-          distance) /
-        viewportHeight
-      : 0.01
-    marker.userData.worldRadius = Math.max(worldUnitsPerPixel * 6, 0.002)
-  }
+  // 每次按当前相机距离重算世界半径，保证屏幕尺寸恒定，避免相机贴近后标记异常放大。
+  const distance = Math.max(
+    pointcloudCamera?.position.distanceTo(marker.position) ?? 1,
+    pointcloudCamera?.near ? pointcloudCamera.near * 2 : 0.1,
+    0.1,
+  )
+  const viewportHeight = Math.max(
+    pointcloudViewportEl.value?.clientHeight || 1,
+    1,
+  )
+  const worldUnitsPerPixel = pointcloudCamera
+    ? (2 *
+        Math.tan(THREE.MathUtils.degToRad(pointcloudCamera.fov) / 2) *
+        distance) /
+      viewportHeight
+    : 0.01
+  marker.userData.worldRadius = Math.max(worldUnitsPerPixel * 6, 0.002)
   marker.scale.setScalar(
     (marker.userData.worldRadius / annotationMarkerBaseRadius) *
       (isHighlighted ? 1.3 : 1),
