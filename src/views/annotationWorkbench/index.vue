@@ -408,6 +408,7 @@
           title="图纸轨迹"
           empty-text="加载后显示"
           :collapsible="false"
+          :default-fullscreen="true"
           :dxf-blob-url="dxfBlobUrl"
           :trajectory-data="trajectoryData"
           :alignment="alignment"
@@ -432,6 +433,53 @@
             <el-icon>
               <component :is="item.icon" />
             </el-icon>
+          </button>
+        </el-tooltip>
+      </div>
+
+      <!-- 批注模式视图显示：左侧竖直图标条（透明背景，风格与配准步骤一致） -->
+      <div
+        v-if="isAnnotationMode"
+        class="annotation-view-rail"
+        role="group"
+        aria-label="视图显示"
+      >
+        <el-tooltip
+          v-for="item in annotationViewRailItems"
+          :key="item.key"
+          :content="item.label"
+          placement="right"
+          :show-after="150"
+        >
+          <button
+            type="button"
+            class="annotation-view-rail__btn"
+            :class="{ 'is-on': viewVisibility[item.key] }"
+            :aria-pressed="viewVisibility[item.key]"
+            :aria-label="item.label"
+            @click="toggleView(item.key)"
+          >
+            <ViewportToolGlyph
+              v-if="item.glyph"
+              :name="item.glyph"
+              :hidden="!viewVisibility[item.key]"
+              :size="17"
+            />
+            <el-icon v-else :size="15">
+              <component :is="item.icon" />
+            </el-icon>
+          </button>
+        </el-tooltip>
+        <el-tooltip content="批注点" placement="right" :show-after="150">
+          <button
+            type="button"
+            class="annotation-view-rail__btn"
+            :class="{ 'is-on': annotationMarkersVisible }"
+            :aria-pressed="annotationMarkersVisible"
+            aria-label="批注点"
+            @click="annotationMarkersVisible = !annotationMarkersVisible"
+          >
+            <el-icon :size="15"><Location /></el-icon>
           </button>
         </el-tooltip>
       </div>
@@ -551,47 +599,6 @@
           <el-icon><Promotion /></el-icon>
           邀请成员查看
         </el-button>
-        <div class="workbench-view-section">
-          <div class="workbench-view-section__head">
-            <span class="workbench-view-section__label">视图显示</span>
-          </div>
-          <div class="workbench-view-list">
-            <button
-              v-for="item in annotationSidebarItems"
-              :key="item.key"
-              type="button"
-              class="workbench-view-cell"
-              :class="{ 'is-off': !viewVisibility[item.key] }"
-              :aria-pressed="viewVisibility[item.key]"
-              @click="toggleView(item.key)"
-            >
-              <el-icon class="workbench-view-cell__icon">
-                <component :is="item.icon" />
-              </el-icon>
-              <span class="workbench-view-cell__label">{{ item.label }}</span>
-              <el-icon class="workbench-view-cell__state">
-                <View v-if="viewVisibility[item.key]" />
-                <Hide v-else />
-              </el-icon>
-            </button>
-            <button
-              type="button"
-              class="workbench-view-cell"
-              :class="{ 'is-off': !annotationMarkersVisible }"
-              :aria-pressed="annotationMarkersVisible"
-              @click="annotationMarkersVisible = !annotationMarkersVisible"
-            >
-              <el-icon class="workbench-view-cell__icon">
-                <Location />
-              </el-icon>
-              <span class="workbench-view-cell__label">批注点</span>
-              <el-icon class="workbench-view-cell__state">
-                <View v-if="annotationMarkersVisible" />
-                <Hide v-else />
-              </el-icon>
-            </button>
-          </div>
-        </div>
         <div
           v-if="!annotationSavedList.length"
           class="workbench-sidebar__empty"
@@ -808,6 +815,7 @@ import {
   nextTick,
   onBeforeUnmount,
   watch,
+  type Component,
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -882,7 +890,6 @@ import {
   DArrowRight,
   Delete,
   Document,
-  Hide,
   Location,
   Picture,
   PictureRounded,
@@ -896,6 +903,7 @@ import ConsistencyResultViewer from './components/ConsistencyResultViewer.vue'
 import MemberPickerDialog from './components/MemberPickerDialog.vue'
 import SmallWindow from '@/components/SmallWindow/index.vue'
 import AnnotationScreenshot from './components/AnnotationScreenshot.vue'
+import ViewportToolGlyph from '@/views/BimPointcloudAlign/components/ViewportToolGlyph.vue'
 import {
   buildGaussianTrajectoryYUpPose,
   buildFusionBimWorldMatrix,
@@ -1566,11 +1574,17 @@ const viewToggleItems = [
   { key: 'panorama' as PanelType, label: '全景图', icon: Picture },
   { key: 'gaussian' as PanelType, label: '高斯模型', icon: View },
 ]
-const annotationViewToggleItems = [
-  { key: 'pointcloud' as PanelType, label: '点云', icon: Coordinate },
-  { key: 'rvt' as PanelType, label: 'BIM', icon: PictureRounded },
-  { key: 'gaussian' as PanelType, label: '高斯', icon: Box },
-  { key: 'consistencyResult' as PanelType, label: '实模一致结果', icon: Aim },
+/** 批注模式左侧视图显示图标条：BIM / 点云沿用配准步骤的 SVG 图标，风格统一。 */
+const annotationViewRailItems: Array<{
+  key: PanelType
+  label: string
+  glyph?: 'solidModel' | 'pointCloud'
+  icon?: Component
+}> = [
+  { key: 'rvt', label: 'BIM 模型', glyph: 'solidModel' },
+  { key: 'pointcloud', label: '点云', glyph: 'pointCloud' },
+  { key: 'gaussian', label: '高斯模型', icon: Box },
+  { key: 'consistencyResult', label: '实模一致结果', icon: Aim },
 ]
 const mixViewToggleItems = [
   { key: 'pointcloud' as PanelType, label: '点云' },
@@ -1605,8 +1619,6 @@ const consistencyResultUnavailableText = '当前扫描暂无实模一致结果'
 const isConsistencyResultOptional = computed(
   () => consistencyResultReadyState.value === 'optional',
 )
-const annotationSidebarTitle = computed(() => '批注视图')
-const annotationSidebarItems = computed(() => annotationViewToggleItems)
 const previousMode = ref<ModeState>('free')
 const previousSnapshot = ref<LayoutSnapshot | null>(null)
 const annotationSnapshot = ref<LayoutSnapshot | null>(null)
@@ -7790,92 +7802,6 @@ onBeforeUnmount(() => {
   opacity: 0.6;
 }
 
-.workbench-view-section {
-  flex: 0 0 auto;
-  display: grid;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid #e3eaf4;
-  border-radius: 8px;
-  background: #fff;
-}
-
-.workbench-view-section__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.workbench-view-section__label {
-  color: #516b8f;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.workbench-view-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.workbench-view-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 6px 8px;
-  border: 1px solid #dce5f1;
-  border-radius: 6px;
-  color: #33506f;
-  background: #fff;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    color 160ms ease;
-}
-
-.workbench-view-cell:hover {
-  border-color: #82aef1;
-}
-
-.workbench-view-cell__icon {
-  flex: 0 0 auto;
-  color: #326fe0;
-  font-size: 15px;
-}
-
-.workbench-view-cell__label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: #33506f;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workbench-view-cell__state {
-  flex: 0 0 auto;
-  color: #326fe0;
-  font-size: 13px;
-}
-
-.workbench-view-cell.is-off {
-  border-color: #e7edf5;
-  background: #f4f6f9;
-}
-
-.workbench-view-cell.is-off .workbench-view-cell__icon,
-.workbench-view-cell.is-off .workbench-view-cell__state {
-  color: #b7c2d1;
-}
-
-.workbench-view-cell.is-off .workbench-view-cell__label {
-  color: #9aa7b8;
-}
-
 .workbench-panel-toggle {
   position: absolute;
   top: 50%;
@@ -8413,6 +8339,46 @@ onBeforeUnmount(() => {
   grid-template-rows: 1fr 1fr;
 }
 
+/* 批注模式：左侧透明图标条（视图显示） */
+.annotation-view-rail {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 2px;
+  z-index: 30;
+  background: transparent;
+}
+
+.annotation-view-rail__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #fff;
+  background: rgb(0 0 0 / 45%);
+  cursor: pointer;
+  transition:
+    color 0.18s ease,
+    background 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.annotation-view-rail__btn:hover,
+.annotation-view-rail__btn.is-on {
+  color: #fff;
+  background: rgb(0 0 0 / 31%);
+  border-color: rgb(255 255 255 / 28%);
+}
+
 /* 右侧视图选择 */
 .view-toggle-panel {
   position: absolute;
@@ -8896,7 +8862,7 @@ onBeforeUnmount(() => {
 .mini-map-float {
   position: absolute;
   z-index: 90;
-  width: 360px;
+  width: 300px;
   touch-action: none;
 }
 
