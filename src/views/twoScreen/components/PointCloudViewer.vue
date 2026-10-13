@@ -244,6 +244,8 @@ let pointColorMode: PointCloudColorMode = 'rgb'
 let pointColorRamp: PointCloudColorRamp = 'spectrum'
 let pointHasIntensity = false
 let pointHasClass = false
+/** 是否含真彩（RGB 非全黑）；无真彩时前端默认切到强度/分类着色。 */
+let pointHasColor = false
 // 分类是否真正有区分度（全 0 时视为无分类数据）
 let pointClassHasVariation = false
 let pointClassFirstValue: number | null = null
@@ -414,9 +416,16 @@ const processPointObject = (root: any) => {
     // 保存原始真彩色（getX 会自动把 normalized 的 Uint8 还原到 0..1）
     const base = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
-      base[i * 3] = colorAttr.getX(i)
-      base[i * 3 + 1] = colorAttr.getY(i)
-      base[i * 3 + 2] = colorAttr.getZ(i)
+      const r = colorAttr.getX(i)
+      const g = colorAttr.getY(i)
+      const b = colorAttr.getZ(i)
+      base[i * 3] = r
+      base[i * 3 + 1] = g
+      base[i * 3 + 2] = b
+      // 只要存在非黑像素即视为含真彩（无 RGB 的 LAS 会被写成全 0）
+      if (!pointHasColor && (r > 1e-4 || g > 1e-4 || b > 1e-4)) {
+        pointHasColor = true
+      }
     }
     geometry.setAttribute('aBaseColor', new THREE.BufferAttribute(base, 3))
 
@@ -3387,6 +3396,7 @@ defineExpose({
   isColorAttributeAvailable: () => pointHasIntensity || pointHasClass,
   getColorAvailability: () => ({
     sourceAvailable: pointHasIntensity || pointHasClass,
+    color: pointHasColor,
     // 全 0 / 常量强度无法着色，视为不可用，避免出现空白色轴
     intensity:
       pointHasIntensity &&

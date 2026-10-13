@@ -943,7 +943,11 @@ type PointCloudViewerExpose = InstanceType<typeof PointCloudViewer> & {
   ) => void
   getColorRange?: () => [number, number]
   isColorAttributeAvailable?: () => boolean
-  getColorAvailability?: () => { intensity: boolean; tableClass: boolean }
+  getColorAvailability?: () => {
+    color?: boolean
+    intensity: boolean
+    tableClass: boolean
+  }
   getIntensityHistogram?: (bins?: number) => number[]
   setTilesErrorTargetOverride?: (value: number | null) => void
   requestRender?: () => void
@@ -3189,6 +3193,17 @@ const refreshColorAvailability = () => {
   if (colorMode.value === 'table-class' && !colorHasClass.value) {
     colorMode.value = 'rgb'
   }
+  // 点云不含真彩（RGB 全黑）时，真彩模式无意义，默认切到强度/分类着色
+  const hasTrueColor = availability?.color ?? true
+  if (!hasTrueColor && colorMode.value === 'rgb') {
+    if (colorHasIntensity.value) {
+      colorMode.value = 'intensity'
+      applyColorMode()
+    } else if (colorHasClass.value) {
+      colorMode.value = 'table-class'
+      applyColorMode()
+    }
+  }
   const domain = viewer?.getIntensityDomain?.()
   if (domain && Number.isFinite(domain[0]) && Number.isFinite(domain[1])) {
     colorDomain.value = domain
@@ -3692,11 +3707,7 @@ onBeforeUnmount(() => {
   padding: 0 8px 0 16px;
   color: #e8eefb;
   white-space: nowrap;
-  background: linear-gradient(
-    180deg,
-    rgb(24 30 45 / 92%),
-    rgb(12 17 28 / 94%)
-  );
+  background: linear-gradient(180deg, rgb(24 30 45 / 92%), rgb(12 17 28 / 94%));
   border: 1px solid rgb(255 255 255 / 12%);
   border-radius: 999px;
   box-shadow:
