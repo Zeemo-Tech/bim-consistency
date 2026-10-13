@@ -72,19 +72,34 @@
 
     <!-- 全屏遮罩层 -->
     <div v-if="isFullscreen" class="fullscreen-overlay" @click="onOverlayClick">
-      <div class="small-window is-fullscreen" @click.stop>
+      <div
+        class="small-window is-fullscreen"
+        :style="fullscreenStyle"
+        @click.stop
+      >
         <!-- 全屏模式头部 -->
         <div class="small-window-header">
           <span class="window-title">{{ title }}</span>
-          <el-button
-            size="small"
-            text
-            circle
-            title="退出全屏"
-            @click="toggleFullscreen"
-          >
-            <el-icon><Close /></el-icon>
-          </el-button>
+          <div class="header-actions">
+            <el-button
+              size="small"
+              text
+              circle
+              title="收起为小窗"
+              @click="toggleFullscreen"
+            >
+              <el-icon><ArrowLeft /></el-icon>
+            </el-button>
+            <el-button
+              size="small"
+              text
+              circle
+              title="关闭"
+              @click="emit('close')"
+            >
+              <el-icon><Close /></el-icon>
+            </el-button>
+          </div>
         </div>
         <!-- 全屏模式内容区 -->
         <div ref="cadRootFullscreen" class="small-window-content">
@@ -100,7 +115,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick, markRaw } from 'vue'
+import {
+  ref,
+  computed,
+  onMounted,
+  onBeforeUnmount,
+  watch,
+  nextTick,
+  markRaw,
+} from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   FullScreen,
@@ -151,6 +174,11 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  /** 挂载时是否直接以全屏弹窗打开（用于「点击轨迹图标即全屏查看」）。 */
+  defaultFullscreen: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 // ============================================
@@ -168,8 +196,26 @@ const emit = defineEmits<{
 // ============================================
 /** 收起状态 */
 const isCollapsed = ref(false)
-/** 全屏状态 */
-const isFullscreen = ref(false)
+/** 全屏状态（可由 defaultFullscreen 直接以全屏打开） */
+const isFullscreen = ref(Boolean(props.defaultFullscreen))
+/** 全屏弹窗按图纸宽高比自适应，避免留白过多（加载完成后写入）。 */
+const fullscreenAspect = ref<number | null>(null)
+/** 全屏弹窗尺寸：内容区尽量贴合图纸比例，并限制在视口范围内。 */
+const fullscreenStyle = computed(() => {
+  const aspect = fullscreenAspect.value
+  if (!aspect || !Number.isFinite(aspect) || aspect <= 0) return undefined
+  const headerHeight = 40
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  // 以宽度优先：宽度较原设计收窄约 1/3，高度封顶，图纸在弹窗内居中（竖直方向尽量填满）。
+  const contentW = Math.min(vw * 0.6, 940)
+  const maxContentH = vh * 0.66
+  const contentH = Math.max(240, Math.min(maxContentH, contentW / aspect))
+  return {
+    width: `${Math.round(contentW)}px`,
+    height: `${Math.round(contentH + headerHeight)}px`,
+  }
+})
 /** 组件销毁标志 */
 let destroyed = false
 
@@ -398,6 +444,15 @@ const loadDxf = async () => {
     // 设置视图居中。这里只调整相机视图，不改变 CAD/轨迹的实际坐标。
     const bounds = await waitForCadBounds()
     if (bounds) {
+      const width = bounds.maxX - bounds.minX
+      const height = bounds.maxY - bounds.minY
+      if (isFullscreen.value && width > 0 && height > 0) {
+        // 先按图纸宽高比调整全屏弹窗尺寸，再据此适配视图，减少四周留白。
+        fullscreenAspect.value = width / height
+        await nextTick()
+        await waitForNextFrame()
+        await waitForNextFrame()
+      }
       fitCadView(bounds)
     }
 
@@ -805,9 +860,9 @@ onBeforeUnmount(() => {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+    /* 兜底尺寸；加载完成后会按图纸宽高比以内联样式覆盖 */
     width: 80vw;
-    height: 60vh;
-    max-width: 1000px;
+    height: 80vh;
     z-index: 9999;
   }
 
