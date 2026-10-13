@@ -14,7 +14,7 @@
         ref="fileInput"
         class="hidden-input"
         type="file"
-        accept=".zip"
+        accept=".zip,.pcd"
         @change="handleFileChange"
       />
       <div
@@ -29,9 +29,10 @@
             {{ selectedFile ? selectedFile.name : '选择点云文件' }}
           </strong>
           <span v-if="selectedFile">
-            {{ formatFileSize(selectedFile.size) }} · ZIP
+            {{ formatFileSize(selectedFile.size) }} ·
+            {{ selectedFileExt.toUpperCase() }}
           </span>
-          <span v-else>ZIP · 可将文件拖放到此处</span>
+          <span v-else>ZIP / PCD · 可将文件拖放到此处</span>
         </div>
         <div class="file-actions">
           <button
@@ -283,6 +284,9 @@ const visible = computed({
 
 const fileInput = ref<HTMLInputElement>()
 const selectedFile = ref<File>()
+const selectedFileExt = computed(
+  () => selectedFile.value?.name.split('.').pop()?.toLowerCase() ?? '',
+)
 const uploading = ref(false)
 const progress = ref(0)
 // 当前进行中的上传器（用于「停止上传」）
@@ -424,8 +428,8 @@ function handleDrop(event: DragEvent) {
 }
 function acceptFile(file: File) {
   const extension = file.name.split('.').pop()?.toLowerCase() || ''
-  if (extension !== 'zip') {
-    ElMessage.warning('点云仅支持 .zip 整包格式')
+  if (extension !== 'zip' && extension !== 'pcd') {
+    ElMessage.warning('点云仅支持 .zip 整包或 .pcd 文件')
     return
   }
   selectedFile.value = file
