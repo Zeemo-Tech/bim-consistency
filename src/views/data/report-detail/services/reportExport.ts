@@ -229,10 +229,11 @@ const createPrintFrame = () => {
     'style',
     [
       'position: fixed',
-      'right: 0',
-      'bottom: 0',
-      'width: 0',
-      'height: 0',
+      // 移出可视区但保留真实尺寸：0 尺寸 iframe 在 Chrome 下常不弹打印框/打印空白。
+      'left: -10000px',
+      'top: 0',
+      'width: 794px',
+      'height: 1123px',
       'border: 0',
       'opacity: 0',
       'pointer-events: none',

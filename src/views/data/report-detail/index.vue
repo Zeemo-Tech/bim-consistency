@@ -762,6 +762,13 @@ const minPreviewScale = 10
 const maxPreviewScale = 200
 const previewScale = ref(70)
 const previewScaleOptions = [200, 150, 100, 75, 50, 25, 10]
+// 报告内容按 920px 设计宽度排版（与导出用的 ReportPrintDocument 一致），
+// 展示时整体缩放到标准 A4 物理宽度（96dpi ≈ 794px），保证文字/内容恰好适配 A4 区域。
+const reportDesignWidth = 920
+const a4PhysicalWidth = 794
+const reportPrintRatio = a4PhysicalWidth / reportDesignWidth
+const previewCanvasWidth = ref(0)
+let previewCanvasObserver: ResizeObserver | null = null
 
 const reviewForm = reactive<{
   reportTitle: string
@@ -871,9 +878,16 @@ const exportFilename = computed(() => {
   }
   return `${projectName}_巡检报告_${version}_${generatedDate}.pdf`
 })
-const previewCanvasStyle = computed(() => ({
-  '--page-scale': String(previewScale.value / 100),
-}))
+const previewCanvasStyle = computed(() => {
+  const availableWidth = previewCanvasWidth.value
+    ? Math.min(a4PhysicalWidth, previewCanvasWidth.value - 48)
+    : a4PhysicalWidth
+  const displayWidth =
+    Math.max(240, availableWidth) * (previewScale.value / 100)
+  return {
+    '--page-scale': String(displayWidth / reportDesignWidth),
+  }
+})
 const formatContextLocation = (buildingName?: string, floorName?: string) => {
   const parts = [
     String(buildingName || '').trim(),
@@ -1354,7 +1368,14 @@ const recomputeNarrativePagination = () => {
   })
 }
 
+const updatePreviewCanvasWidth = () => {
+  const canvas = previewCanvasRef.value
+  if (!canvas) return
+  previewCanvasWidth.value = canvas.clientWidth
+}
+
 const handleWindowResize = () => {
+  updatePreviewCanvasWidth()
   recomputeNarrativePagination()
 }
 
@@ -1940,11 +1961,16 @@ watch(
 )
 
 onMounted(() => {
+  updatePreviewCanvasWidth()
   recomputeNarrativePagination()
   window.addEventListener('resize', handleWindowResize)
   previewCanvasRef.value?.addEventListener('wheel', handlePreviewWheel, {
     passive: false,
   })
+  if (previewCanvasRef.value) {
+    previewCanvasObserver = new ResizeObserver(updatePreviewCanvasWidth)
+    previewCanvasObserver.observe(previewCanvasRef.value)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -1953,6 +1979,8 @@ onBeforeUnmount(() => {
   revokeReportOverviewScreenshotObjectUrl()
   window.removeEventListener('resize', handleWindowResize)
   previewCanvasRef.value?.removeEventListener('wheel', handlePreviewWheel)
+  previewCanvasObserver?.disconnect()
+  previewCanvasObserver = null
 })
 </script>
 
@@ -1961,6 +1989,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
   min-height: calc(100vh - 84px);
   background: #eceff3;
 }
@@ -2119,9 +2148,11 @@ onBeforeUnmount(() => {
 
 .preview-canvas {
   --page-scale: 1;
-  /* A4 @96dpi，与 cloudBIM-viewer 出报告保持一致（因此同样 70% 视觉大小相同） */
-  --page-base-width: min(794px, calc(100vw - 72px));
+  /* 内容按 920px 设计宽度排版（与导出一致），由 --page-scale 缩放到 A4 物理尺寸 */
+  --page-base-width: 920px;
   flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 22px 0 34px;
 }
@@ -3281,7 +3312,7 @@ onBeforeUnmount(() => {
   }
 
   .preview-canvas {
-    --page-base-width: calc(100vw - 24px);
+    --page-base-width: 920px;
   }
 
   .a4-page {
