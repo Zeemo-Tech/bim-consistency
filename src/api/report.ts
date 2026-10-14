@@ -491,6 +491,23 @@ export const createReportTask = async (payload: CreateReportTaskInput) => {
   return normalizeReportRecord(result.data || {})
 }
 
+/**
+ * 登记/覆盖某个 scan 最新的「批注界面四分屏总览图」。
+ * 报告详情永远展示该 scan 最新登记的这张图（无需每次生成都带图）。
+ */
+export const saveScanOverview = async (
+  projectId: number,
+  scanFileId: number,
+  input: CreateReportOverviewScreenshotInput,
+) => {
+  const result = await http.request<Result<{ fileId: number }>>(
+    'put',
+    `/api/projects/${projectId}/scans/${scanFileId}/overview-screenshot`,
+    { data: input },
+  )
+  return result.data
+}
+
 export const updateReportReview = async (
   reportId: number,
   payload: UpdateReportReviewInput,

@@ -48,6 +48,35 @@
       <div class="topbar-right header-actions">
         <el-tooltip
           v-if="activeWorkflowStep === 4"
+          content="邀请成员查看"
+          placement="bottom"
+          :show-after="300"
+        >
+          <button
+            type="button"
+            class="header-icon-btn"
+            aria-label="邀请成员查看"
+            @click="openInviteMembers"
+          >
+            <svg
+              class="header-icon-svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="9" cy="8" r="3.2" />
+              <path d="M3.5 19c0-3 2.5-5.2 5.5-5.2s5.5 2.2 5.5 5.2" />
+              <path d="M18 7v6M15 10h6" />
+            </svg>
+          </button>
+        </el-tooltip>
+
+        <el-tooltip
+          v-if="activeWorkflowStep === 4"
           content="图纸轨迹"
           placement="bottom"
           :show-after="300"
@@ -165,10 +194,12 @@
       <component
         :is="FourScreenWorkbench"
         v-if="activeWorkflowStep === 4"
+        ref="fourScreenWorkbenchRef"
         class="annotation-workbench"
         :show-trajectory="showTrajectoryPanel"
         @prev-step="openWorkflowStep(3)"
         @next-step="openWorkflowStep(5)"
+        @overview-captured="onOverviewCaptured"
         @close-trajectory="showTrajectoryPanel = false"
       />
 
@@ -709,8 +740,8 @@
                 class="registration-stage-btn"
                 :class="{ 'is-active': registrationStage === 'fine' }"
                 :aria-pressed="registrationStage === 'fine'"
-                :disabled="!hasSavedAlignmentMatrix"
-                :title="!hasSavedAlignmentMatrix ? '请先保存粗配准' : undefined"
+                :disabled="!hasAppliedAlignment"
+                :title="!hasAppliedAlignment ? '请先保存粗配准' : undefined"
                 @click="activateFineRegistration"
               >
                 精细配准
@@ -1629,6 +1660,10 @@ import {
 } from '@/api/fileManage'
 import { getScanCalibration } from '@/api/scan'
 import {
+  type CreateReportOverviewScreenshotInput,
+  saveScanOverview,
+} from '@/api/report'
+import {
   CAD_DEFAULT_PREVIEW_PARAMS,
   prefetchCadCalibration,
 } from '@/views/data/drawing-calibration/utils/cadPrefetch'
@@ -1707,6 +1742,16 @@ const pendingAlignmentRestore = ref<ModelAlignment | null>(null)
 const restoredAlignmentKey = ref('')
 /** 是否存在已持久化到后端的配准矩阵。 */
 const hasSavedAlignmentMatrix = ref(false)
+/**
+ * 已保存的配准矩阵是否已真正套用到场景。
+ * 说明：后端存在矩阵 ≠ 视图已对齐。若加载后还原未成功，这里保持 false，
+ * 避免面板显示“已保存/已校准”造成误导（否则会把默认位姿又存回后端）。
+ */
+const savedAlignmentApplied = ref(false)
+/** 后端矩阵不仅存在、且已成功应用到场景。 */
+const hasAppliedAlignment = computed(
+  () => hasSavedAlignmentMatrix.value && savedAlignmentApplied.value,
+)
 /** 粗配准阶段是否有未保存的位姿改动。 */
 const coarseAlignmentDirty = ref(false)
 const resetSessionState = () => {
@@ -1722,6 +1767,7 @@ const resetSessionState = () => {
   pendingAlignmentRestore.value = null
   restoredAlignmentKey.value = ''
   hasSavedAlignmentMatrix.value = false
+  savedAlignmentApplied.value = false
   coarseAlignmentDirty.value = false
   tilesetUrl.value = ''
   hasModel.value = false
@@ -1822,6 +1868,8 @@ const saveCalibrationResult = async () => {
     const res = await computeBimAlignment(projectId.value, requestPayload)
     latestAlignmentResult.value = res?.data ?? null
     hasSavedAlignmentMatrix.value = !!latestAlignmentResult.value
+    // 保存动作基于当前视图位姿，等价于已应用到场景。
+    savedAlignmentApplied.value = !!latestAlignmentResult.value
     if (latestAlignmentResult.value) coarseAlignmentDirty.value = false
     if (latestAlignmentResult.value) {
       alignmentMatrixDialogText.value = formatAlignmentMatrix(
@@ -2820,6 +2868,26 @@ function openWorkflowStep(step: WorkflowStepId) {
     return
   }
   if (step === activeWorkflowStep.value) return
+  void applyWorkflowStep(step)
+}
+
+/** 执行步骤切换；离开第 4 步去出报告前先补采四分屏总览图。 */
+async function applyWorkflowStep(step: WorkflowStepId) {
+  const from = activeWorkflowStep.value
+  console.info('[overview] step', { from, to: step })
+  if (step === 5 && from === 4) {
+    await ensureReportOverviewCaptured()
+  }
+  if (step === 4) {
+    // 每次进入第 4 步重置采集状态，确保离开时重新采集。
+    reportOverviewCaptured.value = false
+    reportOverviewScreenshot.value = null
+  }
+  console.info('[overview] step applied', {
+    to: step,
+    captured: reportOverviewCaptured.value,
+    hasShot: !!reportOverviewScreenshot.value,
+  })
   activeWorkflowStep.value = step
   showPanel.value = true
   // 附加 scanFileId/bimFileId 别名，供第 4 步内嵌的四分屏（按查询参数读取）使用
@@ -3316,15 +3384,14 @@ const canSaveCoarseAlignment = computed(() => {
     hasModel.value &&
     hasTileset.value &&
     !savingCalibration.value &&
-    (coarseAlignmentDirty.value || !hasSavedAlignmentMatrix.value)
+    (coarseAlignmentDirty.value || !hasAppliedAlignment.value)
   )
 })
 /** 粗配准保存按钮文案：已保存→不可再存；有改动→重新保存。 */
 const coarseSaveLabel = computed(() => {
   if (savingCalibration.value) return '保存中…'
-  if (hasSavedAlignmentMatrix.value && !coarseAlignmentDirty.value)
-    return '已保存'
-  if (hasSavedAlignmentMatrix.value && coarseAlignmentDirty.value)
+  if (hasAppliedAlignment.value && !coarseAlignmentDirty.value) return '已保存'
+  if (hasAppliedAlignment.value && coarseAlignmentDirty.value)
     return '重新保存'
   return '保存粗配准'
 })
@@ -3333,7 +3400,7 @@ const coarseSaveHint = computed(() => {
   if (coarseAlignmentDirty.value) {
     return '当前粗配准有未保存修改，请先保存再进入精配'
   }
-  if (hasSavedAlignmentMatrix.value) return '粗配准矩阵已保存，可进入精细化配准'
+  if (hasAppliedAlignment.value) return '粗配准矩阵已保存，可进入精细化配准'
   return '请先保存粗配准矩阵，再进行精细化配准'
 })
 const canRunFineAlignment = computed(() => {
@@ -3342,7 +3409,7 @@ const canRunFineAlignment = computed(() => {
     !!projectId.value &&
     !!scanFileId.value &&
     !!bimFileId.value &&
-    hasSavedAlignmentMatrix.value &&
+    hasAppliedAlignment.value &&
     !coarseAlignmentDirty.value &&
     !fineAlignLoading.value
   )
@@ -3364,7 +3431,7 @@ const fineRunBlockedReason = computed(() => {
   if (!projectId.value || !scanFileId.value || !bimFileId.value) {
     return '缺少项目或文件 ID，无法执行精细化配准'
   }
-  if (!hasSavedAlignmentMatrix.value) {
+  if (!hasAppliedAlignment.value) {
     return '请先在粗配准阶段保存矩阵，精配将以该矩阵作为初始状态'
   }
   if (coarseAlignmentDirty.value) {
@@ -3477,7 +3544,7 @@ const fineSaveLabel = computed(() =>
 const hasUnsavedCalibration = computed(
   () =>
     coarseAlignmentDirty.value ||
-    !hasSavedAlignmentMatrix.value ||
+    !hasAppliedAlignment.value ||
     (!!fineAlignResult.value && !fineAlignmentSaved.value),
 )
 
@@ -3550,7 +3617,7 @@ function activateFineRegistration() {
   markFineAlignmentDirty()
   if (coarseAlignmentDirty.value) {
     ElMessage.warning('粗配准有未保存修改，请先保存粗配准矩阵')
-  } else if (!hasSavedAlignmentMatrix.value) {
+  } else if (!hasAppliedAlignment.value) {
     ElMessage.info('请先保存粗配准矩阵，精配将以该矩阵为初始状态')
   }
   if (editMode.value) {
@@ -3565,7 +3632,7 @@ async function runFineAlignment() {
     ElMessage.warning('缺少项目 ID 或文件 ID，无法执行精细化配准')
     return
   }
-  if (!hasSavedAlignmentMatrix.value) {
+  if (!hasAppliedAlignment.value) {
     ElMessage.warning('请先在粗配准阶段保存矩阵，再执行精细化配准')
     return
   }
@@ -5906,6 +5973,7 @@ function tryRestoreSavedBimAlignment(force = false, syncEditState = true) {
   bimPivot.updateMatrixWorld?.(true)
   const pointcloudRawMatrixWorld =
     getRawMatrixWorldForCalibration(pointcloudGroup)
+
   const desiredBimWorld = new THREE.Matrix4()
     .copy(pointcloudRawMatrixWorld)
     .multiply(alignmentMatrix.clone().invert())
@@ -5938,6 +6006,7 @@ function tryRestoreSavedBimAlignment(force = false, syncEditState = true) {
 
   restoredAlignmentKey.value = restoreKey
   pendingAlignmentRestore.value = null
+  savedAlignmentApplied.value = true
 
   if (syncEditState && bimItem?.id) {
     syncRestoredEditState(bimItem.id)
@@ -5969,19 +6038,41 @@ async function fetchAndRestoreBimAlignment() {
     if (!res?.data) return
     latestAlignmentResult.value = res.data
     hasSavedAlignmentMatrix.value = true
+    // 有矩阵但尚未应用到场景：在成功还原前不显示“已保存/已校准”。
+    savedAlignmentApplied.value = false
     coarseAlignmentDirty.value = false
     pendingAlignmentRestore.value = res.data
     tryRestoreSavedBimAlignment()
+    scheduleSavedAlignmentRestoreRetry()
   } catch (error: any) {
     const status = error?.response?.status
     if (status === 400 || status === 404) {
       pendingAlignmentRestore.value = null
       hasSavedAlignmentMatrix.value = false
+      savedAlignmentApplied.value = false
       coarseAlignmentDirty.value = false
       return
     }
     console.error('[BimPointcloudAlign] 获取后端校准参数失败:', error)
   }
+}
+
+/**
+ * 兜底重试：即使某个加载事件被错过，也保证已保存的配准矩阵最终被应用。
+ * 仅在有 pending 矩阵且尚未成功应用时重试，最多约 8 秒。
+ */
+let savedAlignmentRestoreRetryTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleSavedAlignmentRestoreRetry(attempt = 0) {
+  if (!pendingAlignmentRestore.value) return
+  if (savedAlignmentRestoreRetryTimer) clearTimeout(savedAlignmentRestoreRetryTimer)
+  savedAlignmentRestoreRetryTimer = setTimeout(() => {
+    savedAlignmentRestoreRetryTimer = null
+    if (!pendingAlignmentRestore.value) return
+    const applied = tryRestoreSavedBimAlignment()
+    if (applied) return
+    if (attempt >= 40) return
+    scheduleSavedAlignmentRestoreRetry(attempt + 1)
+  }, 200)
 }
 
 function createCenteredPivot(root: any, label: string) {
@@ -6661,6 +6752,7 @@ async function loadTileset(url: string) {
     statusText.value = `Tiles loaded.`
     updateLoadedPointCount()
     pointCloudClippingReady.value = true
+    tryRestoreSavedBimAlignment()
     invalidateClipBounds()
     if (showBounds.value && !enableClipping.value && canEnableClipping.value) {
       activeClipTargetId = resolveClipTargetId(activeClipTargetId)
@@ -8079,6 +8171,62 @@ const draftSaved = ref(false)
 const lastDraftSavedAt = ref<Date | null>(null)
 /** 第 4 步顶部「图纸轨迹」弹窗开关。 */
 const showTrajectoryPanel = ref(false)
+/** 第 4 步批注工作台引用（用于顶部工具栏触发「邀请成员查看」）。 */
+const fourScreenWorkbenchRef = ref<{
+  openInviteDialog?: () => void
+  captureAndUploadOverview?: () => Promise<CreateReportOverviewScreenshotInput | null>
+} | null>(null)
+/** 第 4 步「下一步」时采集的四分屏总览图，带到第 5 步出报告。 */
+const reportOverviewScreenshot =
+  ref<CreateReportOverviewScreenshotInput | null>(null)
+/** 本次进入第 4 步后是否已采集过总览图（避免经步骤条进入第 5 步时漏采）。 */
+const reportOverviewCaptured = ref(false)
+/** 把采集到的总览图登记为该 scan 的“最新总览”，报告详情永远展示它。 */
+const registerScanOverview = (
+  overview: CreateReportOverviewScreenshotInput | null,
+) => {
+  if (!overview || !projectId.value || !scanFileId.value) return
+  void saveScanOverview(projectId.value, scanFileId.value, overview).catch(
+    (error) => {
+      console.warn('[overview] 登记扫描总览图失败:', error)
+    },
+  )
+}
+
+const onOverviewCaptured = (value: CreateReportOverviewScreenshotInput | null) => {
+  reportOverviewScreenshot.value = value
+  reportOverviewCaptured.value = true
+  registerScanOverview(value)
+  console.info('[overview] captured', { value })
+}
+const openInviteMembers = () => {
+  fourScreenWorkbenchRef.value?.openInviteDialog?.()
+}
+
+/**
+ * 进入出报告前确保已采集第 4 步四分屏总览图。
+ * 说明：仅当从第 4 步离开、且本次尚未采集时才采集一次，
+ * 覆盖「点步骤条/面板按钮直接跳到第 5 步」等绕过工作台「下一步」的路径。
+ */
+const ensureReportOverviewCaptured = async () => {
+  if (reportOverviewCaptured.value) {
+    console.info('[overview] ensure skip (already captured)')
+    return
+  }
+  const workbench = fourScreenWorkbenchRef.value
+  if (!workbench?.captureAndUploadOverview) {
+    console.info('[overview] ensure skip (no workbench/api)', {
+      hasWorkbench: !!workbench,
+    })
+    return
+  }
+  reportOverviewCaptured.value = true
+  reportOverviewScreenshot.value = await workbench.captureAndUploadOverview()
+  registerScanOverview(reportOverviewScreenshot.value)
+  console.info('[overview] ensure captured', {
+    value: reportOverviewScreenshot.value,
+  })
+}
 
 // 步骤或配准编辑变化后，草稿回到「未保存」状态。
 watch(
@@ -8291,6 +8439,7 @@ function applyDraftPayload(payload: AlignmentDraftPayload) {
   ) {
     latestAlignmentResult.value = latestAlignment
     hasSavedAlignmentMatrix.value = true
+    savedAlignmentApplied.value = false
     coarseAlignmentDirty.value = false
     pendingAlignmentRestore.value = latestAlignment
     // 资源已加载时立即应用；否则等加载完成后的现有恢复流程处理
