@@ -218,6 +218,8 @@ const fullscreenStyle = computed(() => {
 })
 /** 组件销毁标志 */
 let destroyed = false
+/** CAD 视图变化（缩放/平移）回调，用于维持选中标记的屏幕尺寸。 */
+let highlightViewChangedHandler: (() => void) | null = null
 
 // ============================================
 // DOM 引用
@@ -239,6 +241,49 @@ const cadHighlightSphere = ref<THREE.Mesh | null>(null) // 高亮选中的点
 type CadBounds = { minX: number; maxX: number; minY: number; maxY: number }
 
 const CAD_VIEW_PADDING = 0.12
+
+/** 选中轨迹点标记的屏幕像素半径（比普通轨迹点大，缩放后仍明显）。 */
+const HIGHLIGHT_RADIUS_PX = 11
+
+/** 把像素半径换算成当前视图下的世界单位半径（正交相机）。 */
+const computeWorldRadiusForPixels = (pixels: number) => {
+  const cam = cadViewer.value?.GetCamera?.()
+  const canvas = cadViewer.value?.GetCanvas?.()
+  if (!cam || !canvas?.width) return pixels
+  const viewWidth = (cam.right - cam.left) / (cam.zoom || 1)
+  const worldPerPixel = viewWidth / canvas.width
+  return Math.max(pixels * worldPerPixel, 1e-6)
+}
+
+/** 让选中标记始终保持固定屏幕尺寸（缩放/平移后调用）。 */
+const updateHighlightScale = () => {
+  const marker = cadHighlightSphere.value
+  if (!marker) return
+  marker.scale.setScalar(computeWorldRadiusForPixels(HIGHLIGHT_RADIUS_PX))
+}
+
+/** 生成选中标记贴图：白色外圈 + 红色实心圆点。 */
+const createHighlightTexture = () => {
+  const size = 128
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  const c = size / 2
+  ctx.beginPath()
+  ctx.arc(c, c, c - 4, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(c, c, c - 24, 0, Math.PI * 2)
+  ctx.fillStyle = '#ff2d2d'
+  ctx.fill()
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.needsUpdate = true
+  return texture
+}
 
 // ============================================
 // 辅助函数：安全释放 Material
@@ -409,6 +454,14 @@ const initCadViewer = async (isFullscreenMode = false) => {
         )
       }
     })
+
+    // 订阅视图变化：缩放/平移时让选中标记保持固定屏幕尺寸
+    highlightViewChangedHandler = () => {
+      if (destroyed) return
+      updateHighlightScale()
+      cadViewer.value?.Render?.()
+    }
+    cadViewer.value.Subscribe('viewChanged', highlightViewChangedHandler)
   } catch (error) {
     console.error('[SmallWindow] DXF查看器初始化失败:', error)
     cadViewer.value = null
@@ -527,20 +580,28 @@ const highlightTrajectoryPoint = (point: TrajectoryPoint) => {
 
   // 如果已存在高亮点，移动位置；否则创建新的
   if (cadHighlightSphere.value) {
-    cadHighlightSphere.value.position.set(cadSceneX, cadSceneY, 0.01)
+    cadHighlightSphere.value.position.set(cadSceneX, cadSceneY, 0.02)
   } else {
-    const circleGeometry = new THREE.CircleGeometry(150, 150)
-    const circleMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff0000,
-      side: THREE.FrontSide,
+    const texture = createHighlightTexture()
+    const markerMaterial = new THREE.MeshBasicMaterial({
+      map: texture ?? undefined,
+      color: texture ? 0xffffff : 0xff2d2d,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
     })
-    const circle = new THREE.Mesh(circleGeometry, circleMaterial)
-    circle.position.set(cadSceneX, cadSceneY, 0.01)
-    scene.add(circle)
+    // 单位半径（2×2 平面），实际尺寸由 scale 按屏幕像素换算控制
+    const marker = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), markerMaterial)
+    marker.renderOrder = 9999
+    marker.position.set(cadSceneX, cadSceneY, 0.02)
+    scene.add(marker)
     // markRaw 防止 Vue 代理导致 scene.remove() 无法找到对象
-    cadHighlightSphere.value = markRaw(circle)
+    cadHighlightSphere.value = markRaw(marker)
   }
 
+  // 始终保持固定屏幕尺寸，缩放后同样明显
+  updateHighlightScale()
   cadViewer.value.Render()
 }
 
@@ -675,12 +736,16 @@ const cleanup = () => {
   if (cadViewer.value) {
     try {
       cadViewer.value.Unsubscribe('pointerdown')
+      if (highlightViewChangedHandler) {
+        cadViewer.value.Unsubscribe('viewChanged', highlightViewChangedHandler)
+      }
       cadViewer.value.Destroy()
     } catch (error) {
       console.error('[SmallWindow] 清理DXF查看器失败:', error)
     }
     cadViewer.value = null
   }
+  highlightViewChangedHandler = null
 
   cadOrigin.value = null
 }

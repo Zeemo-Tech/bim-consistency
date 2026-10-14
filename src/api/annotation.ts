@@ -36,6 +36,13 @@ export interface Annotation {
   startDate?: string
   endDate?: string
   severity?: AnnotationSeverity
+  /** 列表接口若下发截图（含可直接加载的 url），详情弹窗可零额外请求展示 */
+  screenshots?: Array<{
+    id?: number
+    fileId?: number
+    url: string
+    sortOrder?: number
+  }>
 }
 
 export interface AnnotationQuery {

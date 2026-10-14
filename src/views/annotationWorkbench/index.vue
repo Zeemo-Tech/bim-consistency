@@ -563,7 +563,7 @@
     >
       <div class="workbench-sidebar__header">
         <div class="workbench-sidebar__heading">
-          <strong>批注</strong>
+          <div style="font-size: 12px">批注列表</div>
           <span class="workbench-sidebar__count">
             {{ annotationSavedList.length }}
           </span>
@@ -580,25 +580,15 @@
           <button
             type="button"
             class="workbench-sidebar__step"
-            @click="emit('next-step')"
+            :disabled="overviewSubmitting"
+            @click="handleNextStep"
           >
-            下一步
+            {{ overviewSubmitting ? '生成总览…' : '下一步' }}
             <el-icon aria-hidden="true"><DArrowRight /></el-icon>
           </button>
         </div>
       </div>
       <div class="workbench-sidebar__body">
-        <el-button
-          class="workbench-sidebar__invite"
-          size="small"
-          type="primary"
-          plain
-          :disabled="annotationSavedList.length === 0"
-          @click="handleAnnotationInvite()"
-        >
-          <el-icon><Promotion /></el-icon>
-          邀请成员查看
-        </el-button>
         <div
           v-if="!annotationSavedList.length"
           class="workbench-sidebar__empty"
@@ -617,9 +607,13 @@
             @keydown.enter.prevent="handleAnnotationSelect(item.key)"
           >
             <div class="workbench-annotation-card__top">
-              <span class="workbench-annotation-card__title">
+              <button
+                type="button"
+                class="workbench-annotation-card__title"
+                @click.stop="openAnnotationDetail(item)"
+              >
                 {{ item.title }}
-              </span>
+              </button>
               <span
                 class="workbench-annotation-card__sev"
                 :class="`is-${item.severity || 'unknown'}`"
@@ -803,6 +797,22 @@
       @update:selected-annotation-keys="handleInviteAnnotationKeysChange"
       @submit="handleMemberInviteSubmit"
     />
+
+    <AnnotationDetailDialog
+      v-model="annotationDetailVisible"
+      :title="annotationDetailItem?.title"
+      :source="annotationDetailItem?.source"
+      :severity="annotationDetailItem?.severity"
+      :period="annotationDetailItem?.period"
+      :component-name="annotationDetailItem?.componentName"
+      :component-id="annotationDetailItem?.componentId"
+      :component-type="annotationDetailItem?.componentType"
+      :remark="annotationDetailItem?.remark"
+      :screenshot-urls="annotationDetailItem?.screenshotUrls"
+      :project-id="projectId ?? 0"
+      :scan-file-id="activeScanId ?? 0"
+      :annotation-id="annotationDetailId"
+    />
   </div>
 </template>
 
@@ -817,11 +827,10 @@ import {
   watch,
   type Component,
 } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useUserStoreHook } from '@/store/modules/user'
-import { useReportAccessStoreHook } from '@/store/modules/report-access'
 import {
   getScanPreview,
   getDxfFile,
@@ -864,16 +873,7 @@ import {
   suggestC2MAnnotations,
   type C2MSuggestedAnnotationPoint,
 } from '@/api/c2m'
-import {
-  checkReportReady,
-  createReportTask,
-  listReportTemplates,
-  type CreateReportOverviewScreenshotInput,
-  type ReportExportFormat,
-  type ReportLanguage,
-  type ReportTemplate,
-} from '@/api/report'
-import { getCurrentUser } from '@/api/user'
+import { type CreateReportOverviewScreenshotInput } from '@/api/report'
 import { uploadFile } from '@/utils/upload'
 import * as THREE from 'three'
 import {
@@ -893,7 +893,6 @@ import {
   Location,
   Picture,
   PictureRounded,
-  Promotion,
   View,
 } from '@element-plus/icons-vue'
 import DynamicPanel from './components/DynamicPanel.vue'
@@ -903,6 +902,7 @@ import ConsistencyResultViewer from './components/ConsistencyResultViewer.vue'
 import MemberPickerDialog from './components/MemberPickerDialog.vue'
 import SmallWindow from '@/components/SmallWindow/index.vue'
 import AnnotationScreenshot from './components/AnnotationScreenshot.vue'
+import AnnotationDetailDialog from './components/AnnotationDetailDialog.vue'
 import ViewportToolGlyph from '@/views/BimPointcloudAlign/components/ViewportToolGlyph.vue'
 import {
   buildGaussianTrajectoryYUpPose,
@@ -1107,7 +1107,33 @@ const emit = defineEmits<{
   'prev-step': []
   'next-step': []
   'close-trajectory': []
+  'overview-captured': [CreateReportOverviewScreenshotInput | null]
 }>()
+
+/** 进入下一步前采集「四分屏总览图」并上传，供出报告步骤使用。 */
+const overviewSubmitting = ref(false)
+/** 采集并上传四分屏总览图（不触发步骤跳转，供父级在出报告前调用）。 */
+const captureAndUploadOverview =
+  async (): Promise<CreateReportOverviewScreenshotInput | null> => {
+    try {
+      const capture = await captureReportOverviewScreenshot()
+      return capture ? await uploadReportOverviewScreenshot(capture) : null
+    } catch (error) {
+      console.warn('[AnnotationWorkbench] 采集报告总览图失败:', error)
+      return null
+    }
+  }
+const handleNextStep = async () => {
+  if (overviewSubmitting.value) return
+  overviewSubmitting.value = true
+  try {
+    const overview = await captureAndUploadOverview()
+    emit('overview-captured', overview)
+  } finally {
+    overviewSubmitting.value = false
+    emit('next-step')
+  }
+}
 
 const props = defineProps<{
   /** 是否显示「图纸轨迹」弹窗（由顶部工具栏图标控制）。 */
@@ -1118,9 +1144,7 @@ const props = defineProps<{
 const workbenchPanelCollapsed = ref(true)
 
 const route = useRoute()
-const router = useRouter()
 const userStore = useUserStoreHook()
-const reportAccessStore = useReportAccessStoreHook()
 const annotationReplayStorageKeyPrefix = 'two-screen:annotation-replay:'
 const scanGaussSelectionStorageKey = 'history-model:scan-gauss-selection'
 const projectName = computed(() => {
@@ -1502,21 +1526,6 @@ const consumeStoredAnnotationReplayPayload = (
 const memberPickerVisible = ref(false)
 const inviteSubmitting = ref(false)
 const inviteAnnotationKeys = ref<string[]>([])
-const reportSubmitting = ref(false)
-const reportTemplates = ref<ReportTemplate[]>([])
-const reportSelectedAnnotationKeys = ref<string[]>([])
-const reportForm = reactive<{
-  templateId: string
-  includeScreenshots: boolean
-  language: ReportLanguage
-  exportFormat: ReportExportFormat
-}>({
-  templateId: 'standard_v1',
-  includeScreenshots: true,
-  language: 'zh-CN',
-  exportFormat: 'pdf',
-})
-
 const projectId = ref<number | null>(null)
 const activeScanId = ref<number | null>(null)
 const routeFocusScanId = ref<number | null>(null)
@@ -2068,6 +2077,18 @@ const annotationSavedList = computed(() => {
   })
   return list
 })
+type AnnotationSavedItem = (typeof annotationSavedList.value)[number]
+const annotationDetailVisible = ref(false)
+const annotationDetailItem = ref<AnnotationSavedItem | null>(null)
+const annotationDetailId = computed(() =>
+  annotationDetailItem.value
+    ? (parseAnnotationIdFromKey(annotationDetailItem.value.key) ?? 0)
+    : 0,
+)
+const openAnnotationDetail = (item: AnnotationSavedItem) => {
+  annotationDetailItem.value = item
+  annotationDetailVisible.value = true
+}
 const inviteAnnotationTitle = computed(() => {
   const target = annotationSavedList.value.find(
     (item) => item.key === inviteAnnotationKeys.value[0],
@@ -5368,6 +5389,14 @@ const resolveApiErrorMessage = (error: any, fallback: string) => {
   return fallback
 }
 
+const resolveActiveScanDate = () => {
+  if (!activeScanId.value) return ''
+  const target = scanList.value.find(
+    (item) => item.scanFileId === activeScanId.value,
+  )
+  return target?.producedAt || ''
+}
+
 const waitRenderFrame = () =>
   new Promise<void>((resolve) => {
     requestAnimationFrame(() => resolve())
@@ -6391,187 +6420,6 @@ const handleMemberInviteSubmit = async (payload: {
   }
 }
 
-const ensureReportTemplates = async () => {
-  const templates = await listReportTemplates()
-  reportTemplates.value = templates
-  if (!reportTemplates.value.length) return
-  const exists = reportTemplates.value.some(
-    (item) => item.id === reportForm.templateId,
-  )
-  if (!exists) {
-    reportForm.templateId = reportTemplates.value[0].id
-  }
-}
-
-const resolveActiveScanDate = () => {
-  if (!activeScanId.value) return ''
-  const target = scanList.value.find(
-    (item) => item.scanFileId === activeScanId.value,
-  )
-  return target?.producedAt || ''
-}
-
-const normalizeReportSelectionKeys = (keys?: string[]) => {
-  const availableKeys = annotationSavedList.value.map((item) => item.key)
-  if (!availableKeys.length) return []
-  if (!keys || keys.length === 0) return [...availableKeys]
-  const availableSet = new Set(availableKeys)
-  const valid = keys.filter((key) => availableSet.has(key))
-  return valid.length > 0 ? valid : [...availableKeys]
-}
-
-const collectSavedAnnotationIds = (keys: string[]) => {
-  const keySet = new Set(keys)
-  const ids: number[] = []
-  annotationSavedList.value.forEach((item) => {
-    if (!keySet.has(item.key)) return
-    const id = parseAnnotationIdFromKey(item.key)
-    if (id) ids.push(id)
-  })
-  return ids
-}
-
-const resolveScanFileName = (
-  groups: FileTypeGroup[] | undefined,
-  scanFileId: number,
-) => {
-  if (!Array.isArray(groups) || !scanFileId) return ''
-  const scanGroup = groups.find((item) => item.type === 'scan')
-  return String(
-    scanGroup?.files.find((item) => item.id === scanFileId)?.originalName || '',
-  ).trim()
-}
-
-const loadReportCreationContext = async (
-  projectId: number,
-  scanFileId: number,
-) => {
-  const [userResult, filesResult] = await Promise.allSettled([
-    getCurrentUser(),
-    getProjectFilesByProjectId(projectId),
-  ])
-
-  const reportCreator =
-    userResult.status === 'fulfilled' && userResult.value.code === 200
-      ? String(userResult.value.data?.username || '').trim()
-      : ''
-
-  const scanFileName =
-    filesResult.status === 'fulfilled' && filesResult.value.code === 200
-      ? resolveScanFileName(filesResult.value.data, scanFileId)
-      : ''
-
-  return {
-    reportCreator,
-    scanFileName,
-  }
-}
-
-const handleAnnotationGenerate = (selectedKeys: string[]) => {
-  void handleGenerateReport(selectedKeys)
-}
-
-const handleGenerateReport = async (selectedKeys?: string[]) => {
-  if (reportSubmitting.value) return
-  if (!projectId.value || !activeScanId.value) {
-    ElMessage.warning('缺少项目或扫描信息，无法生成报告')
-    return
-  }
-  reportSubmitting.value = true
-  try {
-    const ready = await checkReportReady(projectId.value, activeScanId.value)
-    if (!ready.ready) {
-      ElMessage.warning(ready.reason || '当前扫描不满足报告生成条件')
-      return
-    }
-    if (annotationSavedList.value.length === 0) {
-      ElMessage.warning('请先提交至少一条批注后再生成报告')
-      return
-    }
-    const normalizedKeys = normalizeReportSelectionKeys(
-      selectedKeys ?? reportSelectedAnnotationKeys.value,
-    )
-    if (normalizedKeys.length === 0) {
-      ElMessage.warning('请先选择至少一条批注再生成报告')
-      return
-    }
-    reportSelectedAnnotationKeys.value = normalizedKeys
-    await ensureReportTemplates()
-    if (!reportTemplates.value.length) {
-      ElMessage.warning('暂无可用报告模板，请稍后重试')
-      return
-    }
-
-    const annotationIds = collectSavedAnnotationIds(normalizedKeys)
-    try {
-      const selectedCount = normalizedKeys.length
-      await ElMessageBox.confirm(
-        `<div class="report-generate-confirm-content">
-          <div class="report-generate-confirm-hero">
-            <div class="report-generate-confirm-hero-text">
-              <p class="report-generate-confirm-desc">将根据当前选中的批注生成检测报告</p>
-            </div>
-          </div>
-          <div class="report-generate-confirm-count">
-            <span class="report-generate-confirm-count-mark">✓</span>
-            <span>已选择 <strong>${selectedCount}</strong> 条批注</span>
-          </div>
-          <p class="report-generate-confirm-tip">生成完成后将自动进入报告预览页</p>
-        </div>`,
-        '📄 生成报告',
-        {
-          confirmButtonText: '开始生成',
-          cancelButtonText: '取消',
-          dangerouslyUseHTMLString: true,
-          customClass: 'report-generate-confirm-dialog',
-          closeOnClickModal: false,
-        },
-      )
-    } catch {
-      return
-    }
-    const { reportCreator, scanFileName } = await loadReportCreationContext(
-      projectId.value,
-      activeScanId.value,
-    )
-    const overviewCapture = await captureReportOverviewScreenshot()
-    if (!overviewCapture) {
-      throw new Error('报告总览图生成失败，请稍后重试')
-    }
-    const overviewScreenshot =
-      await uploadReportOverviewScreenshot(overviewCapture)
-    const created = await createReportTask({
-      projectId: projectId.value,
-      scanFileId: activeScanId.value,
-      projectName: projectName.value || `项目-${projectId.value}`,
-      scanDate: resolveActiveScanDate(),
-      reportCreator,
-      scanFileName,
-      overviewScreenshot,
-      config: {
-        templateId: reportForm.templateId,
-        includeScreenshots: reportForm.includeScreenshots,
-        language: reportForm.language,
-        exportFormat: reportForm.exportFormat,
-      },
-      annotationSnapshot: {
-        annotationIds,
-        annotationCount: normalizedKeys.length,
-      },
-    })
-    reportAccessStore.activateForProject(projectId.value, activeScanId.value)
-    ElMessage.success('报告任务已创建，正在进入预览页')
-    router.push({
-      name: 'ReportDetail',
-      params: { reportId: created.id },
-    })
-  } catch (error: any) {
-    ElMessage.error(resolveApiErrorMessage(error, '报告生成失败'))
-  } finally {
-    reportSubmitting.value = false
-  }
-}
-
 const handleAnnotationSelect = (key: string) => {
   const stashed = annotationStash.value.get(key)
   if (!stashed) return
@@ -7247,7 +7095,6 @@ watch([pointcloudLoaded], () => {
 watch(
   () => activeScanId.value,
   (next) => {
-    reportSelectedAnnotationKeys.value = []
     resetAnnotationData()
     if (next && projectId.value) {
       void loadActiveScanData()
@@ -7451,6 +7298,13 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener('resize', handleMiniMapResize)
 })
+
+defineExpose({
+  /** 打开「邀请成员查看」弹窗（由顶部工具栏图标触发）。 */
+  openInviteDialog: () => handleAnnotationInvite(),
+  /** 采集并上传四分屏总览图（由父级在进入出报告前调用）。 */
+  captureAndUploadOverview,
+})
 </script>
 
 <style scoped>
@@ -7562,11 +7416,6 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   overscroll-behavior: contain;
   background: #f7f9fc;
-}
-
-.workbench-sidebar__invite {
-  flex: 0 0 auto;
-  width: 100%;
 }
 
 .workbench-suggest-section {
@@ -7882,11 +7731,22 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
+  padding: 0;
+  border: none;
   color: #1e3759;
+  background: transparent;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 600;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.workbench-annotation-card__title:hover {
+  color: #326fe0;
+  text-decoration: underline;
 }
 
 .workbench-annotation-card__sev {
@@ -9083,121 +8943,5 @@ onBeforeUnmount(() => {
   bottom: 16px;
   transform: translateX(-50%);
   z-index: 20;
-}
-
-:deep(.report-generate-confirm-dialog) {
-  width: 460px;
-  border-radius: 14px;
-  overflow: hidden;
-}
-
-:deep(.report-generate-confirm-dialog .el-message-box__header) {
-  padding: 16px 20px 12px;
-  border-bottom: 1px solid #eef2f6;
-}
-
-:deep(.report-generate-confirm-dialog .el-message-box__title) {
-  font-size: 20px;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-:deep(.report-generate-confirm-dialog .el-message-box__message) {
-  padding: 0;
-}
-
-:deep(.report-generate-confirm-content) {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px 20px 4px;
-  line-height: 1.6;
-  color: #1f2937;
-}
-
-:deep(.report-generate-confirm-hero) {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-:deep(.report-generate-confirm-hero-icon) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #e8f2ff 0%, #f5f9ff 100%);
-  font-size: 20px;
-}
-
-:deep(.report-generate-confirm-hero-text) {
-  min-width: 0;
-}
-
-:deep(.report-generate-confirm-hero-title) {
-  margin: 0;
-  font-size: 16px;
-  line-height: 1.25;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-:deep(.report-generate-confirm-desc) {
-  margin: 0;
-  margin-top: 4px;
-  color: #4b5563;
-  font-size: 14px;
-}
-
-:deep(.report-generate-confirm-count) {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid #dcfce7;
-  background: #f0fdf4;
-  color: #15803d;
-  font-weight: 600;
-  font-size: 14px;
-}
-
-:deep(.report-generate-confirm-count strong) {
-  color: #166534;
-  font-size: 16px;
-}
-
-:deep(.report-generate-confirm-count-mark) {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: #22c55e;
-  color: #fff;
-  font-size: 12px;
-}
-
-:deep(.report-generate-confirm-tip) {
-  margin: 0;
-  color: #6b7280;
-  font-size: 13px;
-  padding-left: 50px;
-}
-
-:deep(.report-generate-confirm-dialog .el-message-box__btns) {
-  padding: 14px 20px 18px;
-  border-top: 1px solid #eef2f6;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-:deep(.report-generate-confirm-dialog .el-message-box__btns .el-button) {
-  min-width: 92px;
-  border-radius: 8px;
-  font-weight: 600;
 }
 </style>
